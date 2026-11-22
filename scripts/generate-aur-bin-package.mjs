@@ -136,7 +136,6 @@ const ARCH_DEPENDS = [
   "gtk3",
   "webkit2gtk-4.1",
   "libappindicator-gtk3",
-  "opencode",
   "texlive-bin",
   "texlive-binextra",
   "texlive-latex",

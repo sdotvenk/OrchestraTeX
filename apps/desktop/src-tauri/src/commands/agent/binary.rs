@@ -28,7 +28,17 @@ async fn compute_enriched_path() -> String {
 
     #[cfg(not(target_os = "windows"))]
     {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let default_shell = if cfg!(target_os = "macos") {
+            "/bin/zsh"
+        } else if tokio::fs::try_exists("/bin/bash").await.unwrap_or(false) {
+            "/bin/bash"
+        } else {
+            "/bin/sh"
+        };
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| default_shell.to_string());
         if let Ok(Ok(output)) = timeout(
             Duration::from_secs(2),
             command(&shell)
@@ -49,6 +59,7 @@ async fn compute_enriched_path() -> String {
 
         if let Ok(home) = std::env::var("HOME") {
             candidates.push(format!("{}/.local/bin", home));
+            candidates.push(format!("{}/.cargo/bin", home));
             candidates.push(format!("{}/.npm-global/bin", home));
             candidates.push(format!("{}/.bun/bin", home));
             candidates.push(format!("{}/.nvm/current/bin", home));

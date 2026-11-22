@@ -163,7 +163,7 @@ jobs:
             libappindicator-gtk3 \
             librsvg \
             patchelf
-          npm install -g pnpm@10.29.3
+          npm install -g pnpm@11.5.0
 
       - uses: actions/checkout@v4
 
@@ -314,7 +314,7 @@ jobs:
 
   publish-aur:
     name: Publish AUR Package
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') && vars.ENABLE_AUR_PUBLISH == 'true'
     needs:
       - build-aur-package
       - release-arch-package
