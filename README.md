@@ -8,47 +8,106 @@
 </picture>
 </a>
 
-**The AI-native LaTeX editor for researchers who prioritize ideas over syntax.**
+**T3Code-Style Multi-Provider Agent Runtime & Overleaf-Grade Live LaTeX Workspace (Overhaul of [LMMs-Lab Writer](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer))**
 
-[![Website](https://img.shields.io/badge/-Website-8957e5?style=flat-square&logo=safari&logoColor=white)](https://writer.lmms-lab.com)
-[![Docs](https://img.shields.io/badge/-Docs-0969da?style=flat-square&logo=gitbook&logoColor=white)](https://writer.lmms-lab.com/docs)
-[![Download](https://img.shields.io/badge/-Download-2ea44f?style=flat-square&logo=github&logoColor=white)](https://writer.lmms-lab.com/download)
+> The original upstream README is preserved verbatim in **[README_ORIGINAL.md](README_ORIGINAL.md)** (and below under [Original Project Overview](#original-project-overview)).
 
-[![Release](https://img.shields.io/github/v/release/EvolvingLMMs-Lab/lmms-lab-writer?style=flat-square&label=Release&color=6c47ff)](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f0c000?style=flat-square)](LICENSE)
-[![GitHub Stars](https://img.shields.io/github/stars/EvolvingLMMs-Lab/lmms-lab-writer?style=flat-square&color=e8a317)](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer)
-
-[![macOS](https://img.shields.io/badge/-macOS-111111?style=flat-square&logo=apple&logoColor=white)](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer/releases)
-[![Windows](https://img.shields.io/badge/-Windows-0078D4?style=flat-square&logo=windows11&logoColor=white)](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer/releases)
+[![macOS](https://img.shields.io/badge/-macOS-111111?style=flat-square&logo=apple&logoColor=white)](#cross-platform-packaging)
+[![Windows](https://img.shields.io/badge/-Windows-0078D4?style=flat-square&logo=windows11&logoColor=white)](#cross-platform-packaging)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-2021-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
-English | [中文](README_zh.md) | [日本語](README_ja.md)
+English | [Original README](README_ORIGINAL.md) | [Developer Guide](docs/dev.md) | [中文](README_zh.md) | [日本語](README_ja.md)
 
 </div>
 
 ---
 
+## What Changed in This Overhaul (vs. Original LMMs-Lab Writer)
+
+This fork significantly overhauls the desktop application's **agentic runtime**, **LaTeX live-preview & authoring pipeline**, **performance architecture**, and **cross-platform packaging**, while keeping the retro-terminal monochrome + orange UI aesthetic and all existing Git, terminal, and local-first capabilities intact.
+
+| Area | Original LMMs-Lab Writer | This Overhaul |
+| --- | --- | --- |
+| **Agent Backend** | Embedded `opencode serve` daemon on `localhost:4096` (HTTP + SSE) | **Direct TOS-compliant native CLI/protocol bridges** in Rust: **Claude Code** (`stream-json` stdio), **OpenAI Codex** (`codex app-server --stdio` JSON-RPC 2.0), **Antigravity** (`agy acp --stdio` ACP), and **Custom ACP** binaries |
+| **Chat & Thread UX** | Single OpenCode session pane | **Full T3Code-style workspace**: persistent per-project threads (pin, rename, search, filter, fork, delete), model & reasoning effort selectors, **Default / Plan** interaction modes, **Ask / Auto-Edit / Full Access** permission policies, `/` slash commands, `@` file mentions, image paste/drop/lightbox, message queueing with **Steer / Edit / Remove**, and one-click terminal login |
+| **Interactive Agent Cards** | OpenCode question wizard only | **Question Cards** (single/multi-select, custom "Other", secret masking, keyboard `1-9`/`Enter`/`Esc`), **Tool/Command Approval Cards** (Allow Once / Allow Session / Deny), and **Plan Approval Cards** (`ExitPlanMode` approve or request revisions) |
+| **Usage & Quotas** | Basic session info | **Usage & Rate Limits Popover**: live context window meter, input/output/cache/reasoning token breakdown, per-model cost USD, provider rate-limit quota windows with reset countdowns, **Compact**, and **Refresh** |
+| **LaTeX Live Preview** | Manual compile + `convertFileSrc` PDF reload (flashes blank, loses scroll) | **Overleaf-grade live preview**: debounced auto-compile on editor/split-pane/AI edits, zero-cache binary IPC PDF reload (`read_file_bytes`) without remounting `<Document>`, preserved scroll/zoom, Fit Width/Page, page jump, PDF export, and **Tectonic** support alongside `latexmk`/`pdflatex`/`xelatex`/`lualatex` |
+| **Diagnostics & Authoring** | Raw terminal/log inspection | Collapsible **Issues / Raw Log** drawer with jump-to-line and **"Fix with AI"**, inline Monaco error/warning markers, bidirectional **SyncTeX** (forward highlight + inverse click), dynamic `\cite{}` (BibTeX) & `\ref{}` completion, `Cmd/Ctrl+B` / `Cmd/Ctrl+I` / `Cmd/Ctrl+Enter` shortcuts, **"Ask Agent about Selection"**, sidebar **Outline** tab, external **File Upload**, and bottom status bar with live **body word count** |
+| **Performance** | Monolithic `useTauriDaemon` IPC + per-event React updates | Domain-split hooks (`useAgent`, `useLatexCompiler`, `useTauriDaemon`), `requestAnimationFrame` delta/log batching, `React.memo` isolation with stabilized callbacks, in-memory cached `ThreadStore` with zero-disk streaming deltas, non-blocking ACP terminal wait/kill, and generation-scoped compile cancellation |
+| **macOS / Windows Packaging** | Hardcoded macOS `10.15` (Catalina) checks in `tauri.conf.json` & `build-pkg.sh` | Removed hardcoded OS version gates (`minimumSystemVersion` & `<volume-check>`); Windows `.cmd`/`.exe` resolution and `CREATE_NO_WINDOW` process handling |
+
+---
+
+## Agent Runtime Architecture
+
+Instead of bundling or proxying through an OpenCode daemon, the Rust backend (`apps/desktop/src-tauri/src/commands/agent/`) communicates directly over stdin/stdout with locally installed, user-authenticated CLIs so your own subscriptions, logins, and usage limits apply natively:
+
+1. **Claude Code (`claude.rs`)** — `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio --forward-subagent-text`
+   - Supports live model & permission mode switching, multi-step streaming with isolated block IDs, slash commands, `AskUserQuestion` cards, `ExitPlanMode` plan approvals, tool approvals, per-model cost/context tracking, `rate_limit_event` windows, thread forking, and `/compact`.
+2. **OpenAI Codex (`codex.rs`)** — persistent `codex app-server --stdio` JSON-RPC 2.0 daemon
+   - Supports `model/list`, reasoning effort selection, `thread/{start,resume,fork,compact/start}`, `turn/{start,steer,interrupt}`, `item/tool/requestUserInput` cards, command/file approval cards, token/context usage, and live `account/rateLimits/read` quota windows.
+3. **Antigravity & Custom ACP (`acp.rs`)** — `agy acp --stdio` (or any custom ACP stdio server configured in **Settings → Agents**)
+   - Supports ACP `initialize`, `session/{new,load,prompt,cancel,set_mode,set_model,set_config_option}`, `session/update` streaming, `session/request_permission` approval cards, `usage_update` context tracking, and project-scoped `fs/*` and `terminal/*` client handlers.
+
+## Overleaf-Style Live LaTeX Workspace
+
+- **Live Auto-Compile**: Debounced recompilation after edits in primary or split editors and after external/AI file modifications, with generation-tracked cancellation of superseded builds.
+- **Flicker-Free PDF Preview**: Reads compiled PDFs directly over binary Tauri IPC (`read_file_bytes`), preserving zoom level and scroll position across rapid rebuilds.
+- **Bidirectional SyncTeX**: Jump from source line to highlighted PDF location (`Sync -> PDF` or Monaco context menu) and double-click or `Cmd/Ctrl+Click` in the PDF to jump back to source.
+- **Authoring Tools**: Collapsible **Issues / Raw Log** drawer with one-click **Fix with AI**, inline Monaco diagnostics, dynamic `\cite{}` and `\ref{}` completion, document **Outline** sidebar, external file import/upload, PDF export, aux-file cleanup, and live body word count.
+
+## Cross-Platform Packaging
+
+- **macOS (Apple Silicon & Intel)**: Removed hardcoded Catalina (`10.15`) checks from `apps/desktop/src-tauri/tauri.conf.json` and `scripts/build-pkg.sh`.
+- **Windows (64-bit)**: Resolves `.exe`/`.cmd`/`.bat` CLI wrappers automatically and hides console windows via `CREATE_NO_WINDOW`.
+
+## Quick Start (Overhauled Build)
+
+```bash
+git clone <this-repo>
+cd lmms-lab-writer-t3
+pnpm install
+pnpm tauri:dev
+```
+
+1. **Authenticate your preferred local CLI(s)** (or click **Sign in in Terminal** directly from the Agent panel):
+   - Claude Code: `claude auth login`
+   - OpenAI Codex: `codex login`
+   - Antigravity (ACP): `agy acp --login`
+2. **Install a TeX compiler** (if not already present): use the in-app installer for **TinyTeX**, **Tectonic**, **BasicTeX/MacTeX**, **MiKTeX**, or **TeX Live**.
+3. **Open a LaTeX folder** and press `Cmd/Ctrl+P` for Live PDF Preview, `Cmd/Ctrl+L` for the Agent panel, and `Cmd/Ctrl+Enter` (or `Cmd/Ctrl+Shift+B`) to compile.
+
+See **[docs/dev.md](docs/dev.md)** for full architecture, Rust IPC command reference, performance notes, and verification commands.
+
+---
+
+## Original Project Overview
+
+> The sections below preserve the original upstream LMMs-Lab Writer README for full context and attribution. The complete verbatim original file is also archived at **[README_ORIGINAL.md](README_ORIGINAL.md)**.
+
 [![](imgs/demo.webp)](https://youtu.be/rX0FdCEqw0s?si=dXxYfSUVPemeBAOs)
 
-## Why LMMs-Lab Writer?
+### Why LMMs-Lab Writer?
 
 As a researcher, your time belongs to breakthroughs—not wrestling with LaTeX boilerplate, resolving package conflicts, or the endless copy-paste loop between Overleaf and ChatGPT.
 
 LMMs-Lab Writer is a **local-first, AI-native** LaTeX editor. Your files remain secure on your machine. AI agents assist with editing directly. Compile, review, and publish—all within a single, unified environment.
 
-## One-Click LaTeX Setup
+### One-Click LaTeX Setup
 
-Say goodbye to hour-long TeX Live installations. LMMs-Lab Writer **automatically detects and installs a lightweight LaTeX distribution**. If a package is missing, it’s installed on the fly during compilation. Zero manual configuration required—just open the app and start writing.
+Say goodbye to hour-long TeX Live installations. LMMs-Lab Writer **automatically detects and installs a lightweight LaTeX distribution**. If a package is missing, it's installed on the fly during compilation. Zero manual configuration required—just open the app and start writing.
 
-Supports **TinyTeX**, **MiKTeX**, **MacTeX**, and **TeX Live**—with streamlined, one-click management.
+Supports **TinyTeX**, **Tectonic**, **MiKTeX**, **MacTeX**, and **TeX Live**—with streamlined, one-click management.
 
 <div align="center">
 <img src="imgs/latex.png" alt="One-click LaTeX setup with auto package installation" width="720">
 </div>
 
-## Built for Every Language
+### Built for Every Language
 
 Write effortlessly in **English, Chinese, Japanese, Korean, Arabic, or any other language**. XeLaTeX and LuaLaTeX are supported out of the box with full Unicode and system font compatibility. CJK documents work instantly with `ctex`, `xeCJK`, and other multilingual packages—no extra setup needed.
 
@@ -56,55 +115,27 @@ Write effortlessly in **English, Chinese, Japanese, Korean, Arabic, or any other
 <img src="imgs/compile-cn.png" alt="Full CJK and Unicode support with XeLaTeX">
 </div>
 
-## AI-Powered Workflows with OpenCode
-
-The built-in **OpenCode** panel brings AI directly into your editing experience:
-
-```
-You: "Add a related work section comparing our method to LoRA and QLoRA"
-Agent: *writes directly to main.tex in real-time*
-You: *hit compile* Done.
-```
-
-- Chat with AI, attach files, and manage context seamlessly
-- AI analyzes your entire project for deep context awareness
-- Edits are reflected in the editor in real-time
-- Compatible with **any model**—Claude, GPT, Gemini, DeepSeek, or local LLMs
-
-It also pairs perfectly with **Claude Code**, **Cursor**, **Codex CLI**, **Aider**, and other tools. The editor monitors your project directory, syncing external changes instantly.
-
-<div align="center">
-<img src="imgs/interaction.png" alt="OpenCode AI integration — chat with AI to write LaTeX" width="512">
-</div>
-
-## Git Integration for Modern Collaboration
+### Git Integration for Modern Collaboration
 
 Git isn't just an add-on; it's **deeply integrated into the sidebar**:
 
 - **Stage, commit, diff, push, pull**—entirely via the UI
-- **AI-generated commit messages** based on your staged changes
+- **AI-generated commit messages** based on your staged changes (now powered by `agent_one_shot_prompt` via your configured local agent CLI)
 - **Side-by-side diff viewer** for reviewing AI suggestions before committing
 - **One-click GitHub publishing**—create and push repositories without touching the terminal
 - **Seamless GitHub CLI integration** for effortless authentication
-
-Stop paying premium prices for basic Git sync. Here, version control is free, powerful, and built-in.
 
 <div align="center">
 <img src="imgs/git-support.png" alt="Git integration — stage, commit, diff, push from the sidebar" width="720">
 </div>
 
-## Fully Open Source
+### Fully Open Source & Local-First
 
-MIT licensed. Every line of code is open on GitHub. No vendor lock-in, no telemetry, no hidden costs.
+MIT licensed. No vendor lock-in, no telemetry, no hidden costs.
 
 - Your files **never leave your local machine**
-- AI tools utilize **your own API keys**
+- AI agents run via your own local CLI logins / API keys
 - Fully functional **offline** (editing, compilation, Git)
-- Fork it, modify it, self-host it—it's yours to control
-
-## Cross-Platform
-
-Native performance on **macOS** (Apple Silicon & Intel) and **Windows** (64-bit). Built with [Tauri](https://tauri.app/) for a lightweight, responsive experience—not just another heavy Electron wrapper.
 
 <div align="center">
 <table>
@@ -119,89 +150,6 @@ Native performance on **macOS** (Apple Silicon & Intel) and **Windows** (64-bit)
 </table>
 </div>
 
-```bash
-# macOS (Homebrew)
-brew tap EvolvingLMMs-Lab/tap && brew install --cask lmms-lab-writer
-```
+### License
 
-Or [download for macOS / Windows](https://writer.lmms-lab.com/download) from the website.
-
----
-
-## Overleaf vs. LMMs-Lab Writer
-
-| | Overleaf | LMMs-Lab Writer |
-|---|---|---|
-| **File storage** | Cloud only | Local (your machine) |
-| **AI editing** | Basic grammar | OpenCode + any AI agent |
-| **Non-English** | Limited CJK support | Full Unicode, XeLaTeX, system fonts |
-| **LaTeX setup** | Pre-configured | One-click install, agent-managed |
-| **Git** | Paid plans only | Free, built into sidebar |
-| **Offline** | No | Full support |
-| **Compilation** | Cloud queue | Local, instant |
-| **Open source** | No | MIT license |
-| **Price** | $21-42/month | Free |
-
-## Quick Start
-
-**1. Download & Install**
-
-Get the latest version from [writer.lmms-lab.com/download](https://writer.lmms-lab.com/download), or install via Homebrew on macOS.
-
-**2. Open Your Project**
-
-Launch the app, click **Open Folder**, and select your LaTeX project. The main file is detected automatically.
-
-**3. Write with AI**
-
-Leverage the integrated OpenCode panel, or execute any AI tool via the terminal:
-
-```bash
-claude "Write the abstract summarizing our three key contributions"
-```
-
-**4. Compile & Publish**
-
-One click to compile and preview your PDF. Stage changes, commit, and push to GitHub—all from the sidebar.
-
-## FAQ
-
-**Do I need to install LaTeX separately?**
-Not necessarily. The app automates the installation of a minimal LaTeX distribution. Missing packages are handled automatically during compilation.
-
-**Does it work with non-English documents?**
-Absolutely. Full Unicode support is provided via XeLaTeX and LuaLaTeX. CJK, Arabic, Cyrillic—all work out of the box.
-
-**Is my data sent anywhere?**
-No. All files remain locally on your device. AI tools operate locally or via your personal API keys.
-
-**Can I use this with Overleaf projects?**
-Yes. Simply clone your Overleaf Git repository locally and open it in Writer.
-
-**Does it work offline?**
-Yes. Editing, compilation, and Git operations are fully functional without an internet connection.
-
-## Development
-
-```bash
-git clone https://github.com/EvolvingLMMs-Lab/lmms-lab-writer.git
-cd lmms-lab-writer
-pnpm install
-pnpm tauri:dev
-```
-
-See the **[Developer Guide](docs/dev.md)** for full architecture, tech stack, Rust commands, debugging, and contribution conventions.
-
-## License
-
-MIT
-
----
-
-<div align="center">
-
-**Built by [LMMs-Lab](https://lmms-lab.com)**
-
-Every legendary paper started somewhere. Yours starts here.
-
-</div>
+MIT — Original project built by **[LMMs-Lab](https://lmms-lab.com)**.

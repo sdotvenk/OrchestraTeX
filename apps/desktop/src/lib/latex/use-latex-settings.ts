@@ -1,8 +1,63 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_LATEX_SETTINGS, type LaTeXSettings, type MainFileDetectionResult } from "./types";
+import {
+  DEFAULT_LATEX_SETTINGS,
+  type LaTeXCompiler,
+  type LaTeXSettings,
+  type LatexmkEngine,
+  type MainFileDetectionResult,
+} from "./types";
 
 const STORAGE_KEY = "latex-settings";
+
+function isValidCompiler(val: unknown): val is LaTeXCompiler {
+  return (
+    val === "auto" ||
+    val === "latexmk" ||
+    val === "pdflatex" ||
+    val === "xelatex" ||
+    val === "lualatex" ||
+    val === "tectonic"
+  );
+}
+
+function isValidEngine(val: unknown): val is LatexmkEngine {
+  return val === "pdflatex" || val === "xelatex" || val === "lualatex";
+}
+
+function parseSavedLatexSettings(raw: string): LaTeXSettings {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  return {
+    mainFile: typeof parsed.mainFile === "string" ? parsed.mainFile : null,
+    compiler: isValidCompiler(parsed.compiler) ? parsed.compiler : DEFAULT_LATEX_SETTINGS.compiler,
+    latexmkEngine: isValidEngine(parsed.latexmkEngine)
+      ? parsed.latexmkEngine
+      : DEFAULT_LATEX_SETTINGS.latexmkEngine,
+    autoCompile:
+      typeof parsed.autoCompile === "boolean"
+        ? parsed.autoCompile
+        : DEFAULT_LATEX_SETTINGS.autoCompile,
+    autoCompileDelayMs:
+      typeof parsed.autoCompileDelayMs === "number" &&
+      Number.isFinite(parsed.autoCompileDelayMs) &&
+      parsed.autoCompileDelayMs >= 200
+        ? parsed.autoCompileDelayMs
+        : DEFAULT_LATEX_SETTINGS.autoCompileDelayMs,
+    shellEscape:
+      typeof parsed.shellEscape === "boolean"
+        ? parsed.shellEscape
+        : DEFAULT_LATEX_SETTINGS.shellEscape,
+    customArgs: Array.isArray(parsed.customArgs)
+      ? parsed.customArgs.filter((a): a is string => typeof a === "string")
+      : DEFAULT_LATEX_SETTINGS.customArgs,
+    customCompilerPath:
+      typeof parsed.customCompilerPath === "string" ? parsed.customCompilerPath : null,
+    cleanAuxOnClose:
+      typeof parsed.cleanAuxOnClose === "boolean"
+        ? parsed.cleanAuxOnClose
+        : DEFAULT_LATEX_SETTINGS.cleanAuxOnClose,
+  };
+}
 
 export function useLatexSettings() {
   const [settings, setSettings] = useState<LaTeXSettings>(() => {
@@ -12,8 +67,7 @@ export function useLatexSettings() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        return { ...DEFAULT_LATEX_SETTINGS, ...parsed };
+        return parseSavedLatexSettings(saved);
       }
     } catch {
       // Ignore parse errors
@@ -63,7 +117,6 @@ export function useLatexSettings() {
 
         setDetectionResult(result);
 
-        // Auto-set main file if detection succeeded without user input
         if (result.main_file && !result.needs_user_input) {
           setMainFile(result.main_file);
         }
@@ -79,10 +132,8 @@ export function useLatexSettings() {
     [settings.mainFile, setMainFile],
   );
 
-  // Get the effective main file for compilation
   const getEffectiveMainFile = useCallback(
     async (projectPath: string): Promise<string | null> => {
-      // If we already have a valid main file configured, check if it exists
       if (settings.mainFile) {
         const result = await detectMainFile(projectPath);
         if (result?.main_file) {
@@ -90,7 +141,6 @@ export function useLatexSettings() {
         }
       }
 
-      // Otherwise, try to detect
       const result = await detectMainFile(projectPath);
       return result?.main_file || null;
     },
@@ -102,10 +152,9 @@ export function useLatexSettings() {
     updateSettings,
     setMainFile,
     resetSettings,
-    // Main file detection
-    detectMainFile,
-    getEffectiveMainFile,
     detectionResult,
     isDetecting,
+    detectMainFile,
+    getEffectiveMainFile,
   };
 }

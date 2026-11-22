@@ -3,10 +3,12 @@
 import "@/lib/monaco/config";
 
 import Editor, { type Monaco, type OnChange, type OnMount } from "@monaco-editor/react";
-import type { editor } from "monaco-editor";
+import type { editor, IDisposable, Position } from "monaco-editor";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { resolveMonoFontFamily } from "@/lib/editor/font-stacks";
 import type { EditorSettings, EditorTheme } from "@/lib/editor/types";
+import type { BibEntry, LabelEntry } from "@/lib/latex/bib-parser";
+import type { LatexDiagnostic } from "@/lib/latex/types";
 import { registerLaTeXLanguage } from "@/lib/monaco/latex";
 import { defineEditorThemes } from "@/lib/monaco/themes";
 
@@ -15,15 +17,78 @@ type Props = {
   readOnly?: boolean;
   className?: string;
   language?: string;
+  filePath?: string | null;
   editorSettings?: Partial<EditorSettings>;
   editorTheme?: EditorTheme;
+  diagnostics?: LatexDiagnostic[];
+  bibEntries?: BibEntry[];
+  texLabels?: LabelEntry[];
   onContentChange?: (content: string) => void;
+  onCompileShortcut?: () => void;
+  onForwardSync?: (line: number, column: number) => void;
+  onAskAgent?: (
+    selectionText: string,
+    filePath: string,
+    startLine: number,
+    endLine: number,
+  ) => void;
+  onCursorChange?: (pos: { line: number; column: number }) => void;
   goToLine?: number;
 };
 
 type VimModeController = {
   dispose: () => void;
 };
+
+// Shared module-level completion store + singleton provider so split panes never duplicate \cite / \ref suggestions
+let sharedBibEntries: BibEntry[] = [];
+let sharedTexLabels: LabelEntry[] = [];
+let sharedRefCiteProviderRegistered = false;
+
+function ensureLatexRefCiteProvider(monaco: Monaco) {
+  if (sharedRefCiteProviderRegistered) return;
+  sharedRefCiteProviderRegistered = true;
+  monaco.languages.registerCompletionItemProvider("latex", {
+    triggerCharacters: ["{", ","],
+    provideCompletionItems: (model: editor.ITextModel, position: Position) => {
+      const linePrefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+      const word = model.getWordUntilPosition(position);
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endColumn: word.endColumn,
+      };
+
+      if (/\\cite[a-zA-Z*]*\{[^}]*$/.test(linePrefix)) {
+        return {
+          suggestions: sharedBibEntries.map((entry) => ({
+            label: entry.key,
+            kind: monaco.languages.CompletionItemKind.Reference,
+            insertText: entry.key,
+            detail: [entry.author, entry.year].filter(Boolean).join(" · ") || entry.entryType,
+            documentation: entry.title,
+            range,
+          })),
+        };
+      }
+
+      if (/\\(?:ref|eqref|pageref|autoref|cref|Cref)\*?\{[^}]*$/.test(linePrefix)) {
+        return {
+          suggestions: sharedTexLabels.map((lbl) => ({
+            label: lbl.key,
+            kind: monaco.languages.CompletionItemKind.Bookmark,
+            insertText: lbl.key,
+            detail: `${lbl.file}:${lbl.line}`,
+            range,
+          })),
+        };
+      }
+
+      return { suggestions: [] };
+    },
+  });
+}
 
 function detectLanguage(lang: string): string {
   const languageMap: Record<string, string> = {
@@ -51,9 +116,17 @@ export const MonacoEditor = memo(function MonacoEditor({
   readOnly = false,
   className = "",
   language = "latex",
+  filePath = null,
   editorSettings,
   editorTheme = "one-light",
+  diagnostics = [],
+  bibEntries = [],
+  texLabels = [],
   onContentChange,
+  onCompileShortcut,
+  onForwardSync,
+  onAskAgent,
+  onCursorChange,
   goToLine,
 }: Props) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -63,6 +136,21 @@ export const MonacoEditor = memo(function MonacoEditor({
   const vimModeRef = useRef<VimModeController | null>(null);
   const vimStatusRef = useRef<HTMLDivElement | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+
+  const filePathRef = useRef(filePath);
+  const onCompileShortcutRef = useRef(onCompileShortcut);
+  const onForwardSyncRef = useRef(onForwardSync);
+  const onAskAgentRef = useRef(onAskAgent);
+  const onCursorChangeRef = useRef(onCursorChange);
+  const cursorListenerRef = useRef<IDisposable | null>(null);
+
+  sharedBibEntries = bibEntries;
+  sharedTexLabels = texLabels;
+  filePathRef.current = filePath;
+  onCompileShortcutRef.current = onCompileShortcut;
+  onForwardSyncRef.current = onForwardSync;
+  onAskAgentRef.current = onAskAgent;
+  onCursorChangeRef.current = onCursorChange;
   const loadingRows = [70, 45, 60, 80, 35, 55, 40, 65].map((width) => ({
     id: `monaco-loading-${width}`,
     width,
@@ -154,6 +242,90 @@ export const MonacoEditor = memo(function MonacoEditor({
         ed.executeEdits("toggle-comment", edits);
       },
     });
+
+    const wrapWithCommand = (ed: editor.ICodeEditor, commandName: string) => {
+      const model = ed.getModel();
+      const selection = ed.getSelection();
+      if (!model || !selection) return;
+      const selected = model.getValueInRange(selection);
+      const wrapped = selected ? `\\${commandName}{${selected}}` : `\\${commandName}{}`;
+      ed.executeEdits(`latex-${commandName}`, [
+        {
+          range: selection,
+          text: wrapped,
+          forceMoveMarkers: true,
+        },
+      ]);
+      if (!selected) {
+        const nextCol = selection.startColumn + commandName.length + 2;
+        ed.setPosition({ lineNumber: selection.startLineNumber, column: nextCol });
+      }
+    };
+
+    editor.addAction({
+      id: "latex-wrap-bold",
+      label: "LaTeX: Bold (\\textbf)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB],
+      run: (ed) => wrapWithCommand(ed, "textbf"),
+    });
+
+    editor.addAction({
+      id: "latex-wrap-italic",
+      label: "LaTeX: Italic (\\textit)",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI],
+      run: (ed) => wrapWithCommand(ed, "textit"),
+    });
+
+    editor.addAction({
+      id: "latex-compile-shortcut",
+      label: "LaTeX: Compile Document",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => {
+        onCompileShortcutRef.current?.();
+      },
+    });
+
+    editor.addAction({
+      id: "latex-sync-to-pdf",
+      label: "Sync to PDF (SyncTeX)",
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 1.5,
+      run: (ed) => {
+        const pos = ed.getPosition();
+        if (!pos) return;
+        onForwardSyncRef.current?.(pos.lineNumber, pos.column);
+      },
+    });
+
+    editor.addAction({
+      id: "latex-ask-agent-selection",
+      label: "Ask Agent about Selection",
+      contextMenuGroupId: "9_cutcopypaste",
+      contextMenuOrder: 9.5,
+      run: (ed) => {
+        const model = ed.getModel();
+        const sel = ed.getSelection();
+        if (!model || !sel) return;
+        const selected = model.getValueInRange(sel).trim();
+        const lineText = selected || model.getLineContent(sel.startLineNumber);
+        onAskAgentRef.current?.(
+          lineText,
+          filePathRef.current ?? "",
+          sel.startLineNumber,
+          sel.endLineNumber,
+        );
+      },
+    });
+
+    cursorListenerRef.current?.dispose();
+    cursorListenerRef.current = editor.onDidChangeCursorPosition((ev) => {
+      onCursorChangeRef.current?.({
+        line: ev.position.lineNumber,
+        column: ev.position.column,
+      });
+    });
+
+    ensureLatexRefCiteProvider(monaco);
   }, []);
 
   const handleChange: OnChange = useCallback(
@@ -257,9 +429,39 @@ export const MonacoEditor = memo(function MonacoEditor({
   }, [editorReady, editorSettings?.vimMode, readOnly]);
 
   useEffect(() => {
+    const monaco = monacoRef.current;
+    const ed = editorRef.current;
+    const model = ed?.getModel();
+    if (!monaco || !model || !editorReady) return;
+    void filePath;
+
+    const markers: editor.IMarkerData[] = diagnostics
+      .filter((d) => d.line > 0)
+      .map((d) => {
+        const maxLine = model.getLineCount();
+        const line = Math.min(Math.max(1, d.line), maxLine);
+        const endCol = Math.max(2, model.getLineMaxColumn(line));
+        return {
+          startLineNumber: line,
+          startColumn: 1,
+          endLineNumber: line,
+          endColumn: endCol,
+          message: d.message,
+          severity:
+            d.severity === "error" ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+          source: "LaTeX",
+        };
+      });
+
+    monaco.editor.setModelMarkers(model, "latex", markers);
+  }, [diagnostics, editorReady, filePath]);
+
+  useEffect(() => {
     return () => {
       vimModeRef.current?.dispose();
       vimModeRef.current = null;
+      cursorListenerRef.current?.dispose();
+      cursorListenerRef.current = null;
     };
   }, []);
 

@@ -1,13 +1,13 @@
 mod commands;
 
+use commands::agent::AgentManagerState;
 use commands::auth::AuthCallbackStateWrapper;
 use commands::fs::{ProjectState, WatcherState};
 use commands::latex::LaTeXCompilationState;
-use commands::opencode::OpenCodeState;
 use commands::terminal::PtyState;
 use std::sync::{Arc, Mutex};
 use tauri::webview::WebviewWindowBuilder;
-use tauri::WebviewUrl;
+use tauri::{Manager, WebviewUrl};
 use tauri_plugin_opener::OpenerExt;
 use tokio::sync::Mutex as TokioMutex;
 
@@ -36,7 +36,7 @@ fn is_external_url(url: &url::Url, dev_port: u16) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
@@ -46,7 +46,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_deep_link::init())
         .manage(PtyState::default())
-        .manage(OpenCodeState::default())
+        .manage(AgentManagerState::default())
         .manage(LaTeXCompilationState::default())
         .manage(Mutex::new(WatcherState::default()))
         .manage(Mutex::new(ProjectState::default()))
@@ -60,6 +60,9 @@ pub fn run() {
             commands::auth::get_auth_callback_port,
             commands::fs::set_project_path,
             commands::fs::read_file,
+            commands::fs::read_file_bytes,
+            commands::fs::copy_file_to_path,
+            commands::fs::import_external_file,
             commands::fs::write_file,
             commands::fs::get_file_tree,
             commands::fs::watch_directory,
@@ -90,17 +93,28 @@ pub fn run() {
             commands::terminal::write_pty,
             commands::terminal::resize_pty,
             commands::terminal::kill_pty,
-            commands::opencode::opencode_status,
-            commands::opencode::opencode_start,
-            commands::opencode::opencode_stop,
-            commands::opencode::opencode_restart,
-            commands::opencode::kill_port_process,
+            commands::agent::agent_list_providers,
+            commands::agent::agent_refresh_rate_limits,
+            commands::agent::agent_list_threads,
+            commands::agent::agent_load_thread,
+            commands::agent::agent_create_thread,
+            commands::agent::agent_update_thread,
+            commands::agent::agent_delete_thread,
+            commands::agent::agent_fork_thread,
+            commands::agent::agent_send_message,
+            commands::agent::agent_steer_turn,
+            commands::agent::agent_interrupt_turn,
+            commands::agent::agent_compact_thread,
+            commands::agent::agent_respond_interaction,
+            commands::agent::agent_one_shot_prompt,
+            commands::agent::agent_shutdown_all,
             commands::latex::latex_detect_compilers,
             commands::latex::latex_detect_main_file,
             commands::latex::latex_compile,
             commands::latex::latex_stop_compilation,
             commands::latex::latex_clean_aux_files,
             commands::latex::latex_synctex_edit,
+            commands::latex::latex_synctex_view,
             commands::latex::latex_install_synctex,
             commands::latex::latex_get_distributions,
             commands::latex::latex_install,
@@ -142,8 +156,15 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            let state = app_handle.state::<AgentManagerState>();
+            tauri::async_runtime::block_on(state.shutdown_all());
+        }
+    });
 }
 
 #[cfg(test)]

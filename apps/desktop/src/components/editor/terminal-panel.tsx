@@ -51,6 +51,8 @@ type TerminalPanelProps = {
   lineHeight: number;
   prefersReducedMotion: boolean;
   onClose: () => void;
+  pendingCommand?: { id: number; command: string } | null;
+  onPendingCommandSent?: () => void;
 };
 
 function getMaxTerminalHeight(): number {
@@ -100,6 +102,8 @@ export function TerminalPanel({
   lineHeight,
   prefersReducedMotion,
   onClose,
+  pendingCommand,
+  onPendingCommandSent,
 }: TerminalPanelProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const heightRef = useRef(DEFAULT_TERMINAL_HEIGHT);
@@ -321,6 +325,8 @@ export function TerminalPanel({
             fontSize={fontSize}
             lineHeight={lineHeight}
             className="flex-1 min-h-0"
+            pendingCommand={pendingCommand}
+            onPendingCommandSent={onPendingCommandSent}
           />
         </motion.div>
       )}

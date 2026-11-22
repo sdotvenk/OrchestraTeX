@@ -23,8 +23,50 @@
           "sidecar": false
         },
         {
-          "name": "opencode",
-          "cmd": "opencode",
+          "name": "claude",
+          "cmd": "claude",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "codex",
+          "cmd": "codex",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "agy",
+          "cmd": "agy",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "tectonic",
+          "cmd": "tectonic",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "pdflatex",
+          "cmd": "pdflatex",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "xelatex",
+          "cmd": "xelatex",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "lualatex",
+          "cmd": "lualatex",
+          "args": true,
+          "sidecar": false
+        },
+        {
+          "name": "synctex",
+          "cmd": "synctex",
           "args": true,
           "sidecar": false
         },

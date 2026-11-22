@@ -66,6 +66,8 @@ type Props = {
   fontSize?: number;
   lineHeight?: number;
   className?: string;
+  pendingCommand?: { id: number; command: string } | null;
+  onPendingCommandSent?: () => void;
 };
 
 type XTermDisposable = {
@@ -80,9 +82,17 @@ export const Terminal = memo(function Terminal({
   fontSize = 13,
   lineHeight = 1.4,
   className = "",
+  pendingCommand = null,
+  onPendingCommandSent,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
+  const ptyIdRef = useRef<string | null>(null);
+  const pendingCommandRef = useRef<{ id: number; command: string } | null>(pendingCommand);
+  const sentCommandIdRef = useRef<number | null>(null);
+  const onPendingCommandSentRef = useRef(onPendingCommandSent);
+  pendingCommandRef.current = pendingCommand;
+  onPendingCommandSentRef.current = onPendingCommandSent;
   const fitAddonRef = useRef<FitAddon | null>(null);
   const themeRef = useRef(LIGHT_TERMINAL_THEME);
   const fontRef = useRef({
@@ -243,6 +253,25 @@ export const Terminal = memo(function Terminal({
         }
 
         ptyId = spawnedPtyId;
+        ptyIdRef.current = spawnedPtyId;
+
+        if (
+          pendingCommandRef.current &&
+          sentCommandIdRef.current !== pendingCommandRef.current.id
+        ) {
+          const cmd = pendingCommandRef.current;
+          sentCommandIdRef.current = cmd.id;
+          setTimeout(() => {
+            if (ptyIdRef.current === spawnedPtyId && !isCleanedUp) {
+              void invoke("write_pty", {
+                id: spawnedPtyId,
+                data: `${cmd.command}\r`,
+              }).then(() => {
+                onPendingCommandSentRef.current?.();
+              });
+            }
+          }, 250);
+        }
 
         const bufferedOutput = pendingOutput.get(spawnedPtyId);
         if (bufferedOutput) {
@@ -305,6 +334,7 @@ export const Terminal = memo(function Terminal({
       resizeDisposable?.dispose();
 
       // Kill PTY process if it exists
+      ptyIdRef.current = null;
       if (ptyId) {
         invoke("kill_pty", { id: ptyId }).catch(console.error);
       }
@@ -314,6 +344,22 @@ export const Terminal = memo(function Terminal({
       fitAddonRef.current = null;
     };
   }, [mounted, projectPath, shellMode, customShell]);
+
+  // Write pending command immediately when PTY is already running
+  useEffect(() => {
+    if (!pendingCommand || sentCommandIdRef.current === pendingCommand.id) return;
+    const activePty = ptyIdRef.current;
+    if (!activePty) return;
+    sentCommandIdRef.current = pendingCommand.id;
+    void invoke("write_pty", {
+      id: activePty,
+      data: `${pendingCommand.command}\r`,
+    })
+      .then(() => {
+        onPendingCommandSentRef.current?.();
+      })
+      .catch(console.error);
+  }, [pendingCommand]);
 
   if (!mounted) {
     return (

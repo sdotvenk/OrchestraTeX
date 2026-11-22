@@ -153,6 +153,134 @@ pub async fn read_file(
 }
 
 #[tauri::command]
+pub async fn read_file_bytes(
+    state: tauri::State<'_, Mutex<ProjectState>>,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let project_path = {
+        let state_guard = state.lock().map_err(|e| e.to_string())?;
+        state_guard
+            .project_path
+            .clone()
+            .ok_or_else(|| "No project open".to_string())?
+    };
+
+    validate_path_within_project(&path, &project_path)?;
+
+    let metadata = fs::metadata(&path).await.map_err(|e| e.to_string())?;
+    if metadata.is_dir() {
+        return Err("Cannot read directory as binary file".to_string());
+    }
+
+    let bytes = fs::read(&path).await.map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+pub async fn copy_file_to_path(
+    state: tauri::State<'_, Mutex<ProjectState>>,
+    source_path: String,
+    dest_path: String,
+) -> Result<(), String> {
+    let project_path = {
+        let state_guard = state.lock().map_err(|e| e.to_string())?;
+        state_guard
+            .project_path
+            .clone()
+            .ok_or_else(|| "No project open".to_string())?
+    };
+
+    validate_path_within_project(&source_path, &project_path)?;
+
+    if let Some(parent) = Path::new(&dest_path).parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    fs::copy(&source_path, &dest_path)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn import_external_file(
+    state: tauri::State<'_, Mutex<ProjectState>>,
+    source_path: String,
+    dest_relative_path: String,
+) -> Result<String, String> {
+    let project_path = {
+        let state_guard = state.lock().map_err(|e| e.to_string())?;
+        state_guard
+            .project_path
+            .clone()
+            .ok_or_else(|| "No project open".to_string())?
+    };
+
+    let src = Path::new(&source_path);
+    if !src.exists() || !src.is_file() {
+        return Err(format!("Source file does not exist: {}", source_path));
+    }
+
+    let normalized_rel = dest_relative_path
+        .trim()
+        .replace('\\', "/")
+        .trim_start_matches('/')
+        .to_string();
+    if normalized_rel.is_empty() {
+        return Err("Destination path cannot be empty".to_string());
+    }
+
+    let rel_path = Path::new(&normalized_rel);
+    for component in rel_path.components() {
+        match component {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err("Access denied: invalid relative destination path".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    let dest_full = Path::new(&project_path).join(rel_path);
+    if let Some(parent) = dest_full.parent() {
+        // Ensure any existing ancestor doesn't escape project_path via symlink before creating dirs
+        let mut ancestor = parent.to_path_buf();
+        while !ancestor.exists() {
+            match ancestor.parent() {
+                Some(p) => ancestor = p.to_path_buf(),
+                None => break,
+            }
+        }
+        let canonical_project = std::fs::canonicalize(&project_path)
+            .map_err(|e| format!("Invalid project path: {}", e))?;
+        let canonical_ancestor =
+            std::fs::canonicalize(&ancestor).map_err(|e| format!("Invalid parent path: {}", e))?;
+        if !canonical_ancestor.starts_with(&canonical_project) {
+            return Err("Access denied: destination is outside project directory".to_string());
+        }
+
+        if !parent.exists() {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    let dest_str = dest_full.to_string_lossy().to_string();
+    validate_path_within_project(&dest_str, &project_path)?;
+
+    fs::copy(src, &dest_full)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(normalized_rel)
+}
+
+#[tauri::command]
 pub async fn write_file(
     state: tauri::State<'_, Mutex<ProjectState>>,
     path: String,

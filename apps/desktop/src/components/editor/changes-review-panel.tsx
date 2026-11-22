@@ -9,7 +9,7 @@ import {
 } from "@phosphor-icons/react";
 import dynamic from "next/dynamic";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import type { PendingEdit } from "@/lib/opencode/types";
+import type { PendingEdit } from "@/lib/agent/types";
 
 const MonacoDiffEditor = dynamic(
   () => import("@/components/editor/monaco-diff-editor").then((m) => m.MonacoDiffEditor),

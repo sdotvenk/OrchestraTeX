@@ -1,6 +1,9 @@
 use super::util::command;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -44,14 +47,27 @@ pub struct LaTeXCompilersStatus {
     pub xelatex: CompilerInfo,
     pub lualatex: CompilerInfo,
     pub latexmk: CompilerInfo,
+    pub tectonic: CompilerInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LatexDiagnostic {
+    pub file: String,
+    pub line: u32,
+    pub message: String,
+    pub severity: String, // "error" | "warning"
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompilationResult {
     pub success: bool,
+    pub cancelled: bool,
     pub exit_code: Option<i32>,
     pub pdf_path: Option<String>,
     pub error: Option<String>,
+    pub duration_ms: u64,
+    pub errors: Vec<LatexDiagnostic>,
+    pub warnings: Vec<LatexDiagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,26 +78,111 @@ pub struct CompileOutputEvent {
 }
 
 pub struct LaTeXCompilationState {
-    pub current_process: Arc<Mutex<Option<Child>>>,
+    pub current_process: Arc<Mutex<Option<(u64, Child)>>>,
+    pub generation: Arc<AtomicU64>,
 }
 
 impl Default for LaTeXCompilationState {
     fn default() -> Self {
         Self {
             current_process: Arc::new(Mutex::new(None)),
+            generation: Arc::new(AtomicU64::new(0)),
         }
     }
 }
 
+pub fn build_tex_env_path() -> String {
+    let existing = std::env::var("PATH").unwrap_or_default();
+    let mut extras: Vec<String> = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            extras.push(format!("{}/Library/TinyTeX/bin/universal-darwin", home));
+            extras.push(format!("{}/Library/TinyTeX/bin/arm64-darwin", home));
+            extras.push(format!("{}/Library/TinyTeX/bin/x86_64-darwin", home));
+            extras.push(format!("{}/.cargo/bin", home));
+            extras.push(format!("{}/.local/bin", home));
+        }
+        extras.push("/Library/TeX/texbin".to_string());
+        extras.push("/opt/homebrew/bin".to_string());
+        extras.push("/usr/local/bin".to_string());
+        for year in (2020..=2030).rev() {
+            extras.push(format!("/usr/local/texlive/{}/bin/universal-darwin", year));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            extras.push(format!("{}\\TinyTeX\\bin\\windows", appdata));
+            extras.push(format!("{}\\TinyTeX\\bin\\win32", appdata));
+        }
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            extras.push(format!("{}\\Programs\\MiKTeX\\miktex\\bin\\x64", local));
+            extras.push(format!("{}\\Programs\\tectonic", local));
+        }
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            extras.push(format!("{}\\.cargo\\bin", profile));
+        }
+        extras.push(r"C:\Program Files\MiKTeX\miktex\bin\x64".to_string());
+        extras.push(r"C:\Program Files (x86)\MiKTeX\miktex\bin".to_string());
+        for year in (2020..=2030).rev() {
+            extras.push(format!(r"C:\texlive\{}\bin\windows", year));
+            extras.push(format!(r"C:\texlive\{}\bin\win32", year));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            extras.push(format!("{}/.TinyTeX/bin/x86_64-linux", home));
+            extras.push(format!("{}/.TinyTeX/bin/aarch64-linux", home));
+            extras.push(format!("{}/.cargo/bin", home));
+            extras.push(format!("{}/.local/bin", home));
+            extras.push(format!("{}/bin", home));
+        }
+        extras.push("/usr/local/bin".to_string());
+        extras.push("/usr/bin".to_string());
+        for year in (2020..=2030).rev() {
+            extras.push(format!("/usr/local/texlive/{}/bin/x86_64-linux", year));
+        }
+    }
+
+    let sep = if cfg!(target_os = "windows") {
+        ";"
+    } else {
+        ":"
+    };
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut parts: Vec<String> = Vec::new();
+    for entry in extras
+        .into_iter()
+        .chain(existing.split(sep).map(|s| s.to_string()))
+    {
+        let trimmed = entry.trim().to_string();
+        if !trimmed.is_empty() && seen.insert(trimmed.clone()) {
+            parts.push(trimmed);
+        }
+    }
+    parts.join(sep)
+}
+
 async fn find_compiler(name: &str) -> CompilerInfo {
+    let env_path = build_tex_env_path();
     let which_cmd = if cfg!(target_os = "windows") {
         "where"
     } else {
         "which"
     };
 
-    // Try system PATH first
-    let output = command(which_cmd).arg(name).output().await;
+    // Try enriched PATH first
+    let output = command(which_cmd)
+        .arg(name)
+        .env("PATH", &env_path)
+        .output()
+        .await;
 
     if let Ok(output) = output {
         if output.status.success() {
@@ -104,10 +205,10 @@ async fn find_compiler(name: &str) -> CompilerInfo {
         }
     }
 
-    // Check common installation paths
+    // Check common installation paths directly
     let common_paths = get_common_paths(name);
     for path in common_paths {
-        if std::path::Path::new(&path).exists() {
+        if Path::new(&path).exists() {
             let version = get_compiler_version(name, &path).await;
             return CompilerInfo {
                 name: name.to_string(),
@@ -131,17 +232,14 @@ fn get_common_paths(name: &str) -> Vec<String> {
 
     #[cfg(target_os = "windows")]
     {
-        // TinyTeX paths (most common for lightweight installs)
         if let Ok(appdata) = std::env::var("APPDATA") {
             paths.push(format!("{}\\TinyTeX\\bin\\windows\\{}.exe", appdata, name));
             paths.push(format!("{}\\TinyTeX\\bin\\win32\\{}.exe", appdata, name));
         }
-        // TeX Live paths
         for year in (2020..=2030).rev() {
             paths.push(format!("C:\\texlive\\{}\\bin\\win32\\{}.exe", year, name));
             paths.push(format!("C:\\texlive\\{}\\bin\\windows\\{}.exe", year, name));
         }
-        // MiKTeX paths
         paths.push(format!(
             "C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\{}.exe",
             name
@@ -150,18 +248,20 @@ fn get_common_paths(name: &str) -> Vec<String> {
             "C:\\Program Files (x86)\\MiKTeX\\miktex\\bin\\{}.exe",
             name
         ));
-        // User MiKTeX
         if let Ok(home) = std::env::var("LOCALAPPDATA") {
             paths.push(format!(
                 "{}\\Programs\\MiKTeX\\miktex\\bin\\x64\\{}.exe",
                 home, name
             ));
+            paths.push(format!("{}\\Programs\\tectonic\\{}.exe", home, name));
+        }
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            paths.push(format!("{}\\.cargo\\bin\\{}.exe", profile, name));
         }
     }
 
     #[cfg(target_os = "macos")]
     {
-        // TinyTeX paths (check user home directory first)
         if let Ok(home) = std::env::var("HOME") {
             paths.push(format!(
                 "{}/Library/TinyTeX/bin/universal-darwin/{}",
@@ -175,25 +275,25 @@ fn get_common_paths(name: &str) -> Vec<String> {
                 "{}/Library/TinyTeX/bin/arm64-darwin/{}",
                 home, name
             ));
+            paths.push(format!("{}/.cargo/bin/{}", home, name));
         }
         paths.push(format!("/Library/TeX/texbin/{}", name));
         paths.push(format!("/opt/homebrew/bin/{}", name));
         paths.push(format!("/usr/local/bin/{}", name));
-        paths.push(format!(
-            "/usr/local/texlive/2024/bin/universal-darwin/{}",
-            name
-        ));
-        paths.push(format!(
-            "/usr/local/texlive/2023/bin/universal-darwin/{}",
-            name
-        ));
+        for year in (2020..=2030).rev() {
+            paths.push(format!(
+                "/usr/local/texlive/{}/bin/universal-darwin/{}",
+                year, name
+            ));
+        }
     }
 
     #[cfg(target_os = "linux")]
     {
-        // TinyTeX paths
         if let Ok(home) = std::env::var("HOME") {
             paths.push(format!("{}/.TinyTeX/bin/x86_64-linux/{}", home, name));
+            paths.push(format!("{}/.TinyTeX/bin/aarch64-linux/{}", home, name));
+            paths.push(format!("{}/.cargo/bin/{}", home, name));
             paths.push(format!("{}/bin/{}", home, name));
         }
         paths.push(format!("/usr/bin/{}", name));
@@ -209,19 +309,21 @@ fn get_common_paths(name: &str) -> Vec<String> {
     paths
 }
 
-async fn get_compiler_version(name: &str, path: &str) -> Option<String> {
-    let output = command(path).arg("--version").output().await.ok()?;
+async fn get_compiler_version(_name: &str, path: &str) -> Option<String> {
+    let env_path = build_tex_env_path();
+    let output = command(path)
+        .arg("--version")
+        .env("PATH", env_path)
+        .output()
+        .await
+        .ok()?;
 
     if output.status.success() {
         let version_output = String::from_utf8_lossy(&output.stdout);
-        // Extract first line which usually contains version info
-        let first_line = version_output.lines().next()?;
-        // Try to extract just the version number
-        if name == "latexmk" {
-            // latexmk outputs "Latexmk, John Collins, ..."
-            Some(first_line.to_string())
+        let first_line = version_output.lines().next()?.trim();
+        if first_line.is_empty() {
+            None
         } else {
-            // pdflatex, xelatex, lualatex output "pdfTeX 3.14159265-2.6-1.40.25 (TeX Live 2024)"
             Some(first_line.to_string())
         }
     } else {
@@ -231,11 +333,12 @@ async fn get_compiler_version(name: &str, path: &str) -> Option<String> {
 
 #[tauri::command]
 pub async fn latex_detect_compilers() -> Result<LaTeXCompilersStatus, String> {
-    let (pdflatex, xelatex, lualatex, latexmk) = tokio::join!(
+    let (pdflatex, xelatex, lualatex, latexmk, tectonic) = tokio::join!(
         find_compiler("pdflatex"),
         find_compiler("xelatex"),
         find_compiler("lualatex"),
         find_compiler("latexmk"),
+        find_compiler("tectonic"),
     );
 
     Ok(LaTeXCompilersStatus {
@@ -243,6 +346,7 @@ pub async fn latex_detect_compilers() -> Result<LaTeXCompilersStatus, String> {
         xelatex,
         lualatex,
         latexmk,
+        tectonic,
     })
 }
 
@@ -251,6 +355,7 @@ fn has_any_compiler(status: &LaTeXCompilersStatus) -> bool {
         || status.xelatex.available
         || status.lualatex.available
         || status.latexmk.available
+        || status.tectonic.available
 }
 
 async fn is_compiler_detectable_after_install() -> bool {
@@ -258,6 +363,253 @@ async fn is_compiler_detectable_after_install() -> bool {
         Ok(status) => has_any_compiler(&status),
         Err(_) => false,
     }
+}
+
+pub fn build_compile_args(
+    compiler: &str,
+    latexmk_engine: Option<&str>,
+    user_args: &[String],
+    file_name: &str,
+) -> Vec<String> {
+    let mut cmd_args = Vec::new();
+
+    if compiler == "tectonic" {
+        cmd_args.push("-X".to_string());
+        cmd_args.push("compile".to_string());
+        cmd_args.push("--synctex".to_string());
+        cmd_args.push("--keep-logs".to_string());
+    } else {
+        if compiler == "latexmk" {
+            let engine_flag = match latexmk_engine.unwrap_or("pdflatex") {
+                "xelatex" => "-xelatex",
+                "lualatex" => "-lualatex",
+                _ => "-pdf",
+            };
+            cmd_args.push(engine_flag.to_string());
+        }
+        cmd_args.push("-interaction=nonstopmode".to_string());
+        cmd_args.push("-file-line-error".to_string());
+        cmd_args.push("-synctex=1".to_string());
+    }
+
+    for arg in user_args {
+        if !arg.trim().is_empty() {
+            cmd_args.push(arg.clone());
+        }
+    }
+
+    cmd_args.push(file_name.to_string());
+    cmd_args
+}
+
+fn extract_input_line_number(line: &str) -> u32 {
+    if let Some(idx) = line.find("on input line ") {
+        let rest = &line[idx + "on input line ".len()..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u32>() {
+            return n;
+        }
+    }
+    if let Some(idx) = line.find("at lines ") {
+        let rest = &line[idx + "at lines ".len()..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u32>() {
+            return n;
+        }
+    }
+    if let Some(idx) = line.find("at line ") {
+        let rest = &line[idx + "at line ".len()..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(n) = digits.parse::<u32>() {
+            return n;
+        }
+    }
+    0
+}
+
+fn try_parse_file_line_error(line: &str) -> Option<LatexDiagnostic> {
+    let trimmed = line.trim();
+    // Format: `<file>:<line>: <message>`
+    // Ignore warning prefixes or compiler banners that happen to contain colons
+    if trimmed.starts_with("LaTeX ")
+        || trimmed.starts_with("Package ")
+        || trimmed.starts_with("Class ")
+        || trimmed.starts_with("Overfull ")
+        || trimmed.starts_with("Underfull ")
+    {
+        return None;
+    }
+
+    let bytes = trimmed.as_bytes();
+    for (idx, b) in bytes.iter().enumerate() {
+        if *b != b':' {
+            continue;
+        }
+        let after = &trimmed[idx + 1..];
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            continue;
+        }
+        let after_digits = &after[digits.len()..];
+        if !after_digits.starts_with(": ") {
+            continue;
+        }
+        let file_part = trimmed[..idx].trim();
+        let lower = file_part.to_ascii_lowercase();
+        let looks_like_file = lower.ends_with(".tex")
+            || lower.ends_with(".ltx")
+            || lower.ends_with(".sty")
+            || lower.ends_with(".cls")
+            || lower.ends_with(".bib")
+            || file_part.contains('/')
+            || file_part.contains('\\');
+        if !looks_like_file {
+            continue;
+        }
+        let line_num = digits.parse::<u32>().ok()?;
+        let msg = after_digits[2..].trim().to_string();
+        if msg.is_empty() {
+            continue;
+        }
+        let clean_file = file_part.strip_prefix("./").unwrap_or(file_part).to_string();
+        return Some(LatexDiagnostic {
+            file: clean_file,
+            line: line_num,
+            message: msg,
+            severity: "error".to_string(),
+        });
+    }
+
+    None
+}
+
+pub fn parse_latex_diagnostics(
+    log_and_output: &str,
+    default_file: &str,
+) -> (Vec<LatexDiagnostic>, Vec<LatexDiagnostic>) {
+    let mut errors: Vec<LatexDiagnostic> = Vec::new();
+    let mut warnings: Vec<LatexDiagnostic> = Vec::new();
+    let mut seen: HashSet<(String, String, u32, String)> = HashSet::new();
+
+    let lines: Vec<&str> = log_and_output.lines().collect();
+    let mut current_file = default_file.to_string();
+
+    let mut push_diag = |diag: LatexDiagnostic| {
+        let key = (
+            diag.severity.clone(),
+            diag.file.clone(),
+            diag.line,
+            diag.message.clone(),
+        );
+        if seen.insert(key) {
+            if diag.severity == "error" {
+                errors.push(diag);
+            } else {
+                warnings.push(diag);
+            }
+        }
+    };
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Track active file(s) when TeX opens (./foo.tex
+        let mut search_from = 0;
+        while let Some(rel_pos) = trimmed[search_from..].find('(') {
+            let abs_pos = search_from + rel_pos;
+            let after_paren = &trimmed[abs_pos + 1..];
+            let token: String = after_paren
+                .chars()
+                .take_while(|c| !c.is_whitespace() && *c != ')' && *c != '(')
+                .collect();
+            if token.ends_with(".tex") || token.ends_with(".sty") || token.ends_with(".cls") {
+                current_file = token.strip_prefix("./").unwrap_or(&token).to_string();
+            }
+            search_from = abs_pos + 1;
+        }
+
+        // 1. -file-line-error format (`./main.tex:42: Undefined control sequence.`)
+        if let Some(diag) = try_parse_file_line_error(trimmed) {
+            current_file = diag.file.clone();
+            push_diag(diag);
+            continue;
+        }
+
+        // 2. Classic `! <error>` format with following `l.<line>`
+        if let Some(err_msg) = trimmed.strip_prefix("! ") {
+            let mut err_line: u32 = 0;
+            for lookahead in lines.iter().skip(i + 1).take(6) {
+                let lt = lookahead.trim();
+                if let Some(rest) = lt.strip_prefix("l.") {
+                    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                    if let Ok(n) = digits.parse::<u32>() {
+                        err_line = n;
+                        break;
+                    }
+                }
+            }
+            push_diag(LatexDiagnostic {
+                file: current_file.clone(),
+                line: err_line,
+                message: err_msg.trim().to_string(),
+                severity: "error".to_string(),
+            });
+            continue;
+        }
+
+        // 3. Tectonic / generic fatal error lines
+        if let Some(rest) = trimmed.strip_prefix("error: ") {
+            push_diag(LatexDiagnostic {
+                file: current_file.clone(),
+                line: 0,
+                message: rest.trim().to_string(),
+                severity: "error".to_string(),
+            });
+            continue;
+        }
+
+        // 4. Warnings
+        let is_warning_line = trimmed.starts_with("LaTeX Warning:")
+            || trimmed.starts_with("LaTeX Font Warning:")
+            || (trimmed.starts_with("Package ") && trimmed.contains(" Warning:"))
+            || (trimmed.starts_with("Class ") && trimmed.contains(" Warning:"))
+            || trimmed.starts_with("Overfull \\")
+            || trimmed.starts_with("Underfull \\")
+            || trimmed.starts_with("warning:");
+
+        if is_warning_line {
+            let warn_line = extract_input_line_number(trimmed);
+            push_diag(LatexDiagnostic {
+                file: current_file.clone(),
+                line: warn_line,
+                message: trimmed.to_string(),
+                severity: "warning".to_string(),
+            });
+        }
+    }
+
+    (errors, warnings)
+}
+
+fn validate_relative_main_file(main_file: &str) -> Result<(), String> {
+    let rel = Path::new(main_file);
+    for comp in rel.components() {
+        match comp {
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => {
+                return Err(format!(
+                    "Invalid main file path '{}': must be relative to project directory",
+                    main_file
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -269,97 +621,126 @@ pub async fn latex_compile(
     main_file: String,
     args: Vec<String>,
     custom_path: Option<String>,
+    latexmk_engine: Option<String>,
 ) -> Result<CompilationResult, String> {
+    validate_relative_main_file(&main_file)?;
+    let started_at = std::time::Instant::now();
+    let my_gen = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+
     // Stop any existing compilation
     {
         let mut process_guard = state.current_process.lock().await;
-        if let Some(mut child) = process_guard.take() {
+        if let Some((_, mut child)) = process_guard.take() {
             let _ = child.kill().await;
         }
     }
 
-    // Determine the compiler executable
-    let compiler_path = if let Some(ref path) = custom_path {
-        path.clone()
-    } else {
-        compiler.clone()
+    let main_rel_path = Path::new(&main_file);
+    let work_dir: PathBuf = match main_rel_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => Path::new(&directory).join(parent),
+        _ => Path::new(&directory).to_path_buf(),
     };
 
-    // Build command arguments
-    let mut cmd_args = vec![
-        "-interaction=nonstopmode".to_string(),
-        "-file-line-error".to_string(),
-        "-synctex=1".to_string(),
-    ];
+    if !tokio::fs::try_exists(&work_dir).await.unwrap_or(false)
+        || !tokio::fs::metadata(&work_dir)
+            .await
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+    {
+        return Err(format!(
+            "Working directory does not exist: {}",
+            work_dir.display()
+        ));
+    }
 
-    // Add user-provided arguments
-    cmd_args.extend(args);
+    let file_name = main_rel_path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| main_file.clone());
 
-    // Add the main file
-    cmd_args.push(main_file.clone());
+    let compiler_bin = if let Some(ref path) = custom_path {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            find_compiler(&compiler)
+                .await
+                .path
+                .unwrap_or_else(|| compiler.clone())
+        } else {
+            trimmed.to_string()
+        }
+    } else {
+        find_compiler(&compiler)
+            .await
+            .path
+            .unwrap_or_else(|| compiler.clone())
+    };
 
-    // Create the command
-    let mut cmd = command(&compiler_path);
-    cmd.current_dir(&directory)
+    let cmd_args = build_compile_args(
+        &compiler,
+        latexmk_engine.as_deref(),
+        &args,
+        &file_name,
+    );
+
+    let env_path = build_tex_env_path();
+    let mut cmd = command(&compiler_bin);
+    cmd.current_dir(&work_dir)
         .args(&cmd_args)
+        .env("PATH", env_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    // Ensure PATH includes common TeX directories
-    let env_path = std::env::var("PATH").unwrap_or_default();
-    #[cfg(target_os = "macos")]
-    let env_path = {
-        if !env_path.contains("/Library/TeX/texbin") {
-            format!(
-                "/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin:{}",
-                env_path
-            )
-        } else {
-            env_path
-        }
-    };
-    cmd.env("PATH", env_path);
-
-    // Spawn the process
-    let child = cmd
+    let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to start compiler: {}", e))?;
+        .map_err(|e| format!("Failed to start compiler '{}': {}", compiler_bin, e))?;
 
-    // Store the child process
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
     {
         let mut process_guard = state.current_process.lock().await;
-        *process_guard = Some(child);
-    }
-
-    // Get stdout and stderr
-    let stdout;
-    let stderr;
-    {
-        let mut process_guard = state.current_process.lock().await;
-        if let Some(ref mut child) = *process_guard {
-            stdout = child.stdout.take();
-            stderr = child.stderr.take();
-        } else {
-            return Err("Process not found".to_string());
+        if state.generation.load(Ordering::SeqCst) != my_gen {
+            let _ = child.kill().await;
+            let duration_ms = started_at.elapsed().as_millis() as u64;
+            return Ok(CompilationResult {
+                success: false,
+                cancelled: true,
+                exit_code: None,
+                pdf_path: None,
+                error: None,
+                duration_ms,
+                errors: Vec::new(),
+                warnings: Vec::new(),
+            });
         }
+        *process_guard = Some((my_gen, child));
     }
 
-    // Stream output
+    let collected_lines = Arc::new(Mutex::new(Vec::<String>::new()));
+
     let app_clone = app.clone();
-    let stdout_handle = if let Some(stdout) = stdout {
+    let lines_out = collected_lines.clone();
+    let stdout_handle = stdout.map(|stdout| {
         let app = app_clone.clone();
-        Some(tokio::spawn(async move {
+        tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let is_error = line.contains("!")
+                let is_error = line.starts_with("! ")
                     || line.contains("Error")
-                    || line.contains("error")
-                    || line.starts_with("l.");
-                let is_warning = line.contains("Warning")
-                    || line.contains("warning")
-                    || line.contains("Overfull")
-                    || line.contains("Underfull");
+                    || line.contains("error:")
+                    || try_parse_file_line_error(&line).is_some();
+                let is_warning = line.contains("Warning:")
+                    || line.contains("warning:")
+                    || line.starts_with("Overfull \\")
+                    || line.starts_with("Underfull \\");
+
+                {
+                    let mut guard = lines_out.lock().await;
+                    if guard.len() < 4000 {
+                        guard.push(line.clone());
+                    }
+                }
 
                 let event = CompileOutputEvent {
                     line,
@@ -368,17 +749,22 @@ pub async fn latex_compile(
                 };
                 let _ = app.emit("latex-compile-output", &event);
             }
-        }))
-    } else {
-        None
-    };
+        })
+    });
 
-    let stderr_handle = if let Some(stderr) = stderr {
+    let lines_err = collected_lines.clone();
+    let stderr_handle = stderr.map(|stderr| {
         let app = app_clone;
-        Some(tokio::spawn(async move {
+        tokio::spawn(async move {
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                {
+                    let mut guard = lines_err.lock().await;
+                    if guard.len() < 4000 {
+                        guard.push(line.clone());
+                    }
+                }
                 let event = CompileOutputEvent {
                     line,
                     is_error: true,
@@ -386,12 +772,9 @@ pub async fn latex_compile(
                 };
                 let _ = app.emit("latex-compile-output", &event);
             }
-        }))
-    } else {
-        None
-    };
+        })
+    });
 
-    // Wait for output streams to finish
     if let Some(handle) = stdout_handle {
         let _ = handle.await;
     }
@@ -399,36 +782,86 @@ pub async fn latex_compile(
         let _ = handle.await;
     }
 
-    // Wait for the process to complete
     let exit_code;
     {
         let mut process_guard = state.current_process.lock().await;
-        if let Some(mut child) = process_guard.take() {
-            match child.wait().await {
-                Ok(status) => {
-                    exit_code = status.code();
+        let is_ours = process_guard
+            .as_ref()
+            .map(|(g, _)| *g == my_gen)
+            .unwrap_or(false);
+        if is_ours {
+            if let Some((_, mut child)) = process_guard.take() {
+                match child.wait().await {
+                    Ok(status) => {
+                        exit_code = status.code();
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to wait for compiler: {}", e));
+                    }
                 }
-                Err(e) => {
-                    return Err(format!("Failed to wait for compiler: {}", e));
-                }
+            } else {
+                exit_code = None;
             }
         } else {
-            return Err("Process was terminated".to_string());
+            // Process was killed or replaced by a newer generation before wait()
+            let duration_ms = started_at.elapsed().as_millis() as u64;
+            return Ok(CompilationResult {
+                success: false,
+                cancelled: true,
+                exit_code: None,
+                pdf_path: None,
+                error: None,
+                duration_ms,
+                errors: Vec::new(),
+                warnings: Vec::new(),
+            });
         }
     }
 
-    // Determine the PDF path
-    let pdf_name = main_file.strip_suffix(".tex").unwrap_or(&main_file);
-    let pdf_path = format!("{}/{}.pdf", directory, pdf_name);
+    let duration_ms = started_at.elapsed().as_millis() as u64;
+    if state.generation.load(Ordering::SeqCst) != my_gen {
+        return Ok(CompilationResult {
+            success: false,
+            cancelled: true,
+            exit_code,
+            pdf_path: None,
+            error: None,
+            duration_ms,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+        });
+    }
 
-    let pdf_exists = std::path::Path::new(&pdf_path).exists();
+    let base_name = file_name.strip_suffix(".tex").unwrap_or(&file_name);
+    let pdf_path_buf = work_dir.join(format!("{}.pdf", base_name));
+    let log_path_buf = work_dir.join(format!("{}.log", base_name));
+    let pdf_path_str = pdf_path_buf.to_string_lossy().to_string();
 
+    let mut combined_log = if let Ok(log_text) = tokio::fs::read_to_string(&log_path_buf).await {
+        log_text
+    } else {
+        String::new()
+    };
+
+    {
+        let output_lines = collected_lines.lock().await;
+        if !output_lines.is_empty() {
+            if !combined_log.is_empty() {
+                combined_log.push('\n');
+            }
+            combined_log.push_str(&output_lines.join("\n"));
+        }
+    }
+
+    let (errors, warnings) = parse_latex_diagnostics(&combined_log, &file_name);
+    let pdf_exists = tokio::fs::try_exists(&pdf_path_buf).await.unwrap_or(false);
     let success = exit_code == Some(0) && pdf_exists;
 
     Ok(CompilationResult {
         success,
+        cancelled: false,
         exit_code,
-        pdf_path: if pdf_exists { Some(pdf_path) } else { None },
+        pdf_path: if pdf_exists { Some(pdf_path_str) } else { None },
         error: if !success && !pdf_exists {
             Some("PDF was not generated".to_string())
         } else if !success {
@@ -436,25 +869,33 @@ pub async fn latex_compile(
         } else {
             None
         },
+        duration_ms,
+        errors,
+        warnings,
     })
 }
 
 #[tauri::command]
-pub async fn latex_stop_compilation(state: State<'_, LaTeXCompilationState>) -> Result<(), String> {
+pub async fn latex_stop_compilation(
+    state: State<'_, LaTeXCompilationState>,
+) -> Result<bool, String> {
+    state.generation.fetch_add(1, Ordering::SeqCst);
     let mut process_guard = state.current_process.lock().await;
-    if let Some(mut child) = process_guard.take() {
+    if let Some((_, mut child)) = process_guard.take() {
         child
             .kill()
             .await
             .map_err(|e| format!("Failed to stop compilation: {}", e))?;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 #[tauri::command]
-pub async fn latex_clean_aux_files(directory: String, main_file: String) -> Result<(), String> {
-    let base_name = main_file.strip_suffix(".tex").unwrap_or(&main_file);
-
+pub async fn latex_clean_aux_files(
+    directory: String,
+    main_file: Option<String>,
+) -> Result<Vec<String>, String> {
     let aux_extensions = [
         ".aux",
         ".log",
@@ -469,16 +910,57 @@ pub async fn latex_clean_aux_files(directory: String, main_file: String) -> Resu
         ".nav",
         ".snm",
         ".vrb",
+        ".xdv",
+        ".bcf",
+        ".run.xml",
     ];
 
-    for ext in &aux_extensions {
-        let file_path = format!("{}/{}{}", directory, base_name, ext);
-        if std::path::Path::new(&file_path).exists() {
-            let _ = std::fs::remove_file(&file_path);
+    let mut removed: Vec<String> = Vec::new();
+
+    if let Some(ref mf) = main_file {
+        if !mf.trim().is_empty() {
+            validate_relative_main_file(mf)?;
+            let main_rel_path = Path::new(mf);
+            let work_dir: PathBuf = match main_rel_path.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => Path::new(&directory).join(parent),
+                _ => Path::new(&directory).to_path_buf(),
+            };
+            let file_name = main_rel_path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| mf.clone());
+            let base_name = file_name.strip_suffix(".tex").unwrap_or(&file_name);
+
+            for ext in &aux_extensions {
+                let candidate_name = format!("{}{}", base_name, ext);
+                let file_path = work_dir.join(&candidate_name);
+                if tokio::fs::try_exists(&file_path).await.unwrap_or(false)
+                    && tokio::fs::remove_file(&file_path).await.is_ok()
+                {
+                    removed.push(candidate_name);
+                }
+            }
+            return Ok(removed);
         }
     }
 
-    Ok(())
+    // Fallback when no main_file is configured: remove auxiliary files in directory root
+    let mut entries = tokio::fs::read_dir(&directory)
+        .await
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if aux_extensions.iter().any(|ext| name.ends_with(ext))
+            && tokio::fs::remove_file(&path).await.is_ok()
+        {
+            removed.push(name.to_string());
+        }
+    }
+
+    Ok(removed)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -488,6 +970,98 @@ pub struct SynctexResult {
     pub column: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SynctexViewResult {
+    pub page: u32,
+    pub x: f64,
+    pub y: f64,
+    pub h: f64,
+    pub v: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+fn decode_process_bytes(bytes: &[u8]) -> String {
+    if let Ok(s) = String::from_utf8(bytes.to_vec()) {
+        s
+    } else {
+        #[cfg(target_os = "windows")]
+        {
+            let (decoded, _, _) = encoding_rs::GBK.decode(bytes);
+            decoded.into_owned()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+    }
+}
+
+pub fn parse_synctex_view_output(stdout: &str) -> Result<SynctexViewResult, String> {
+    let mut page: Option<u32> = None;
+    let mut x: Option<f64> = None;
+    let mut y: Option<f64> = None;
+    let mut h: Option<f64> = None;
+    let mut v: Option<f64> = None;
+    let mut width: Option<f64> = None;
+    let mut height: Option<f64> = None;
+    let mut in_result = false;
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed == "SyncTeX result begin" {
+            in_result = true;
+            continue;
+        }
+        if trimmed == "SyncTeX result end" && page.is_some() {
+            break;
+        }
+        if !in_result && !trimmed.starts_with("Page:") {
+            continue;
+        }
+        if let Some(val) = trimmed.strip_prefix("Page:") {
+            if page.is_none() {
+                page = val.trim().parse().ok();
+            }
+        } else if let Some(val) = trimmed.strip_prefix("x:") {
+            if x.is_none() {
+                x = val.trim().parse().ok();
+            }
+        } else if let Some(val) = trimmed.strip_prefix("y:") {
+            if y.is_none() {
+                y = val.trim().parse().ok();
+            }
+        } else if let Some(val) = trimmed.strip_prefix("h:") {
+            if h.is_none() {
+                h = val.trim().parse().ok();
+            }
+        } else if let Some(val) = trimmed.strip_prefix("v:") {
+            if v.is_none() {
+                v = val.trim().parse().ok();
+            }
+        } else if let Some(val) = trimmed.strip_prefix("W:") {
+            if width.is_none() {
+                width = val.trim().parse().ok();
+            }
+        } else if let Some(val) = trimmed.strip_prefix("H:") {
+            if height.is_none() {
+                height = val.trim().parse().ok();
+            }
+        }
+    }
+
+    let page_num = page.ok_or_else(|| "Could not find PDF position for this line".to_string())?;
+    Ok(SynctexViewResult {
+        page: page_num,
+        x: x.unwrap_or(0.0),
+        y: y.unwrap_or(0.0),
+        h: h.unwrap_or(x.unwrap_or(0.0)),
+        v: v.unwrap_or(y.unwrap_or(0.0)),
+        width: width.unwrap_or(100.0),
+        height: height.unwrap_or(14.0),
+    })
+}
+
 #[tauri::command]
 pub async fn latex_synctex_edit(
     pdf_path: String,
@@ -495,7 +1069,6 @@ pub async fn latex_synctex_edit(
     x: f64,
     y: f64,
 ) -> Result<SynctexResult, String> {
-    // Find the synctex binary using the same logic as compiler detection
     let synctex_info = find_compiler("synctex").await;
     let synctex_bin = if synctex_info.available {
         synctex_info.path.unwrap_or_else(|| "synctex".to_string())
@@ -505,54 +1078,23 @@ pub async fn latex_synctex_edit(
 
     let input_spec = format!("{}:{}:{}:{}", page, x, y, pdf_path);
     let mut cmd = command(&synctex_bin);
-    cmd.arg("edit").arg("-o").arg(&input_spec);
-
-    // Ensure PATH includes common TeX directories
-    let env_path = std::env::var("PATH").unwrap_or_default();
-    #[cfg(target_os = "macos")]
-    let env_path = {
-        if !env_path.contains("/Library/TeX/texbin") {
-            format!(
-                "/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin:{}",
-                env_path
-            )
-        } else {
-            env_path
-        }
-    };
-    cmd.env("PATH", env_path);
+    cmd.arg("edit")
+        .arg("-o")
+        .arg(&input_spec)
+        .env("PATH", build_tex_env_path());
 
     let output = cmd
         .output()
         .await
         .map_err(|e| format!("Failed to run synctex: {} (bin={})", e, synctex_bin))?;
 
-    let decode_bytes = |bytes: &[u8]| -> String {
-        // Try UTF-8 first
-        if let Ok(s) = String::from_utf8(bytes.to_vec()) {
-            s
-        } else {
-            // On Windows with CJK locale, command output is often GBK-encoded
-            #[cfg(target_os = "windows")]
-            {
-                let (decoded, _, _) = encoding_rs::GBK.decode(bytes);
-                decoded.into_owned()
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                String::from_utf8_lossy(bytes).into_owned()
-            }
-        }
-    };
-
     if !output.status.success() {
-        let stderr = decode_bytes(&output.stderr);
+        let stderr = decode_process_bytes(&output.stderr);
         return Err(format!("synctex edit failed: {}", stderr));
     }
 
-    let stdout = decode_bytes(&output.stdout);
+    let stdout = decode_process_bytes(&output.stdout);
 
-    // Parse the output to extract Input, Line, Column
     let mut file = String::new();
     let mut line: u32 = 0;
     let mut column: u32 = 0;
@@ -574,36 +1116,56 @@ pub async fn latex_synctex_edit(
     Ok(SynctexResult { file, line, column })
 }
 
+#[tauri::command]
+pub async fn latex_synctex_view(
+    pdf_path: String,
+    tex_path: String,
+    line: u32,
+    column: u32,
+) -> Result<SynctexViewResult, String> {
+    let synctex_info = find_compiler("synctex").await;
+    let synctex_bin = if synctex_info.available {
+        synctex_info.path.unwrap_or_else(|| "synctex".to_string())
+    } else {
+        return Err("SYNCTEX_NOT_INSTALLED: SyncTeX binary was not found. Install a TeX distribution (TeX Live, MiKTeX, or TinyTeX) to enable source-to-PDF navigation.".to_string());
+    };
+
+    let input_spec = format!("{}:{}:{}", line, column.max(1), tex_path);
+    let mut cmd = command(&synctex_bin);
+    cmd.arg("view")
+        .arg("-i")
+        .arg(&input_spec)
+        .arg("-o")
+        .arg(&pdf_path)
+        .env("PATH", build_tex_env_path());
+
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run synctex: {} (bin={})", e, synctex_bin))?;
+
+    if !output.status.success() {
+        let stderr = decode_process_bytes(&output.stderr);
+        return Err(format!("synctex view failed: {}", stderr));
+    }
+
+    let stdout = decode_process_bytes(&output.stdout);
+    parse_synctex_view_output(&stdout)
+}
+
 /// Quick-install synctex via tlmgr (when a TeX distribution already exists).
-/// Returns Ok(true) if tlmgr was found and install succeeded,
-/// Ok(false) if tlmgr is not available (no TeX distribution).
 #[tauri::command]
 pub async fn latex_install_synctex() -> Result<bool, String> {
     let tlmgr_info = find_compiler("tlmgr").await;
     if !tlmgr_info.available {
-        // No tlmgr → no TeX distribution, caller should fall back to full install
         return Ok(false);
     }
 
     let tlmgr_bin = tlmgr_info.path.unwrap_or_else(|| "tlmgr".to_string());
 
     let mut cmd = command(&tlmgr_bin);
-    cmd.args(["install", "--reinstall", "synctex"]);
-
-    // Ensure PATH includes common TeX directories
-    let env_path = std::env::var("PATH").unwrap_or_default();
-    #[cfg(target_os = "macos")]
-    let env_path = {
-        if !env_path.contains("/Library/TeX/texbin") {
-            format!(
-                "/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin:{}",
-                env_path
-            )
-        } else {
-            env_path
-        }
-    };
-    cmd.env("PATH", env_path);
+    cmd.args(["install", "--reinstall", "synctex"])
+        .env("PATH", build_tex_env_path());
 
     let output = cmd
         .output()
@@ -629,8 +1191,16 @@ pub async fn latex_get_distributions() -> Result<Vec<LaTeXDistribution>, String>
             name: "TinyTeX".to_string(),
             id: "tinytex".to_string(),
             description: "Recommended. Lightweight (~150MB), cross-platform, with on-demand package installation.".to_string(),
-            install_command: Some("tinytex-install".to_string()), // Special marker for our installer
+            install_command: Some("tinytex-install".to_string()),
             download_url: Some("https://yihui.org/tinytex/".to_string()),
+        });
+        distributions.push(LaTeXDistribution {
+            name: "Tectonic".to_string(),
+            id: "tectonic".to_string(),
+            description: "Modern standalone Rust TeX engine with automatic package fetching."
+                .to_string(),
+            install_command: Some("winget install tectonic-typesetting.tectonic".to_string()),
+            download_url: Some("https://tectonic-typesetting.github.io/".to_string()),
         });
         distributions.push(LaTeXDistribution {
             name: "MiKTeX".to_string(),
@@ -655,8 +1225,16 @@ pub async fn latex_get_distributions() -> Result<Vec<LaTeXDistribution>, String>
             name: "TinyTeX".to_string(),
             id: "tinytex".to_string(),
             description: "Recommended. Lightweight (~150MB), cross-platform, with on-demand package installation.".to_string(),
-            install_command: Some("tinytex-install".to_string()), // Special marker for our installer
+            install_command: Some("tinytex-install".to_string()),
             download_url: Some("https://yihui.org/tinytex/".to_string()),
+        });
+        distributions.push(LaTeXDistribution {
+            name: "Tectonic".to_string(),
+            id: "tectonic".to_string(),
+            description: "Fast standalone Rust TeX engine via Homebrew with automatic package fetching."
+                .to_string(),
+            install_command: Some("brew install tectonic".to_string()),
+            download_url: Some("https://tectonic-typesetting.github.io/".to_string()),
         });
         distributions.push(LaTeXDistribution {
             name: "BasicTeX".to_string(),
@@ -682,8 +1260,16 @@ pub async fn latex_get_distributions() -> Result<Vec<LaTeXDistribution>, String>
             name: "TinyTeX".to_string(),
             id: "tinytex".to_string(),
             description: "Recommended. Lightweight (~150MB), cross-platform, with on-demand package installation.".to_string(),
-            install_command: Some("tinytex-install".to_string()), // Special marker for our installer
+            install_command: Some("tinytex-install".to_string()),
             download_url: Some("https://yihui.org/tinytex/".to_string()),
+        });
+        distributions.push(LaTeXDistribution {
+            name: "Tectonic".to_string(),
+            id: "tectonic".to_string(),
+            description: "Modern standalone Rust TeX engine with automatic package fetching."
+                .to_string(),
+            install_command: None,
+            download_url: Some("https://tectonic-typesetting.github.io/".to_string()),
         });
         distributions.push(LaTeXDistribution {
             name: "TeX Live (Full)".to_string(),
@@ -707,16 +1293,13 @@ pub async fn latex_get_distributions() -> Result<Vec<LaTeXDistribution>, String>
 
 #[cfg(target_os = "linux")]
 fn get_linux_install_command(package: &str) -> String {
-    // Try to detect the package manager
-    if std::path::Path::new("/usr/bin/apt").exists() {
-        // Debian/Ubuntu
+    if Path::new("/usr/bin/apt").exists() {
         match package {
             "texlive-full" => "sudo apt install -y texlive-full".to_string(),
             "texlive-cjk" => "sudo apt install -y texlive-base texlive-xetex texlive-lang-chinese texlive-lang-japanese texlive-lang-korean".to_string(),
             _ => format!("sudo apt install -y {}", package),
         }
-    } else if std::path::Path::new("/usr/bin/dnf").exists() {
-        // Fedora/RHEL
+    } else if Path::new("/usr/bin/dnf").exists() {
         match package {
             "texlive-full" => "sudo dnf install -y texlive-scheme-full".to_string(),
             "texlive-cjk" => {
@@ -724,8 +1307,7 @@ fn get_linux_install_command(package: &str) -> String {
             }
             _ => format!("sudo dnf install -y {}", package),
         }
-    } else if std::path::Path::new("/usr/bin/pacman").exists() {
-        // Arch Linux
+    } else if Path::new("/usr/bin/pacman").exists() {
         match package {
             "texlive-full" => "sudo pacman -S --noconfirm texlive".to_string(),
             "texlive-cjk" => "sudo pacman -S --noconfirm texlive-basic texlive-xetex texlive-langchinese texlive-langjapanese texlive-langkorean".to_string(),
@@ -742,7 +1324,6 @@ pub async fn latex_install(
     app: AppHandle,
     distribution_id: String,
 ) -> Result<InstallResult, String> {
-    // Emit initial progress
     let _ = app.emit(
         "latex-install-progress",
         InstallProgress {
@@ -775,7 +1356,8 @@ pub async fn latex_install(
 async fn install_windows(app: &AppHandle, distribution_id: &str) -> Result<InstallResult, String> {
     match distribution_id {
         "tinytex" => install_tinytex_windows(app).await,
-        "miktex" => install_miktex_windows(app).await,
+        "miktex" => install_winget_windows(app, "MiKTeX.MiKTeX", "MiKTeX", "https://miktex.org/download").await,
+        "tectonic" => install_winget_windows(app, "tectonic-typesetting.tectonic", "Tectonic", "https://tectonic-typesetting.github.io/").await,
         _ => Ok(InstallResult {
             success: false,
             message:
@@ -797,7 +1379,6 @@ async fn install_tinytex_windows(app: &AppHandle) -> Result<InstallResult, Strin
         },
     );
 
-    // Download the install script
     let temp_dir = std::env::temp_dir();
     let script_path = temp_dir.join("install-tinytex.bat");
 
@@ -837,7 +1418,6 @@ async fn install_tinytex_windows(app: &AppHandle) -> Result<InstallResult, Strin
         },
     );
 
-    // Run the install script
     let mut child = command("cmd")
         .args(["/c", &script_path.to_string_lossy()])
         .stdout(Stdio::piped())
@@ -845,7 +1425,6 @@ async fn install_tinytex_windows(app: &AppHandle) -> Result<InstallResult, Strin
         .spawn()
         .map_err(|e| format!("Failed to run installer: {}", e))?;
 
-    // Stream output
     if let Some(stdout) = child.stdout.take() {
         let app_clone = app.clone();
         tokio::spawn(async move {
@@ -869,8 +1448,7 @@ async fn install_tinytex_windows(app: &AppHandle) -> Result<InstallResult, Strin
         .await
         .map_err(|e| format!("Installation failed: {}", e))?;
 
-    // Clean up
-    let _ = std::fs::remove_file(&script_path);
+    let _ = tokio::fs::remove_file(&script_path).await;
 
     if status.success() {
         let detected = is_compiler_detectable_after_install().await;
@@ -903,8 +1481,12 @@ async fn install_tinytex_windows(app: &AppHandle) -> Result<InstallResult, Strin
 }
 
 #[cfg(target_os = "windows")]
-async fn install_miktex_windows(app: &AppHandle) -> Result<InstallResult, String> {
-    // Check if winget is available
+async fn install_winget_windows(
+    app: &AppHandle,
+    package_id: &str,
+    display_name: &str,
+    fallback_url: &str,
+) -> Result<InstallResult, String> {
     let _ = app.emit(
         "latex-install-progress",
         InstallProgress {
@@ -919,17 +1501,19 @@ async fn install_miktex_windows(app: &AppHandle) -> Result<InstallResult, String
     if winget_check.is_err() || !winget_check.unwrap().status.success() {
         return Ok(InstallResult {
             success: false,
-            message: "winget is not available. Please install MiKTeX manually from https://miktex.org/download".to_string(),
+            message: format!(
+                "winget is not available. Please install {} manually from {}",
+                display_name, fallback_url
+            ),
             needs_restart: false,
         });
     }
 
-    // Install MiKTeX via winget
     let _ = app.emit(
         "latex-install-progress",
         InstallProgress {
             stage: "installing".to_string(),
-            message: "Installing MiKTeX via winget... This may take several minutes.".to_string(),
+            message: format!("Installing {} via winget... This may take several minutes.", display_name),
             progress: Some(0.2),
         },
     );
@@ -937,7 +1521,7 @@ async fn install_miktex_windows(app: &AppHandle) -> Result<InstallResult, String
     let mut child = command("winget")
         .args([
             "install",
-            "MiKTeX.MiKTeX",
+            package_id,
             "--accept-package-agreements",
             "--accept-source-agreements",
         ])
@@ -946,7 +1530,6 @@ async fn install_miktex_windows(app: &AppHandle) -> Result<InstallResult, String
         .spawn()
         .map_err(|e| format!("Failed to start winget: {}", e))?;
 
-    // Stream output
     if let Some(stdout) = child.stdout.take() {
         let app_clone = app.clone();
         tokio::spawn(async move {
@@ -976,7 +1559,7 @@ async fn install_miktex_windows(app: &AppHandle) -> Result<InstallResult, String
             "latex-install-progress",
             InstallProgress {
                 stage: "complete".to_string(),
-                message: "MiKTeX installed successfully!".to_string(),
+                message: format!("{} installed successfully!", display_name),
                 progress: Some(1.0),
             },
         );
@@ -984,17 +1567,25 @@ async fn install_miktex_windows(app: &AppHandle) -> Result<InstallResult, String
         Ok(InstallResult {
             success: true,
             message: if detected {
-                "MiKTeX installed successfully and compiler detection is ready.".to_string()
+                format!(
+                    "{} installed successfully and compiler detection is ready.",
+                    display_name
+                )
             } else {
-                "MiKTeX installed successfully. Please restart the application to detect the new installation."
-                    .to_string()
+                format!(
+                    "{} installed successfully. Please restart the application to detect the new installation.",
+                    display_name
+                )
             },
             needs_restart: !detected,
         })
     } else {
         Ok(InstallResult {
             success: false,
-            message: "Installation failed. Please try installing MiKTeX manually from https://miktex.org/download".to_string(),
+            message: format!(
+                "Installation failed. Please try installing {} manually from {}",
+                display_name, fallback_url
+            ),
             needs_restart: false,
         })
     }
@@ -1004,7 +1595,8 @@ async fn install_miktex_windows(app: &AppHandle) -> Result<InstallResult, String
 async fn install_macos(app: &AppHandle, distribution_id: &str) -> Result<InstallResult, String> {
     match distribution_id {
         "tinytex" => install_tinytex_unix(app).await,
-        "mactex" | "basictex" => install_brew_cask(app, distribution_id).await,
+        "tectonic" => install_brew(app, "tectonic", false).await,
+        "mactex" | "basictex" => install_brew(app, distribution_id, true).await,
         _ => Ok(InstallResult {
             success: false,
             message: "Unknown distribution".to_string(),
@@ -1024,18 +1616,17 @@ async fn install_tinytex_unix(app: &AppHandle) -> Result<InstallResult, String> 
         },
     );
 
-    // Use curl to download and execute the install script
     let mut child = command("sh")
         .args([
             "-c",
             "curl -sL 'https://yihui.org/tinytex/install-bin-unix.sh' | sh",
         ])
+        .env("PATH", build_tex_env_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start installer: {}", e))?;
 
-    // Stream stdout
     if let Some(stdout) = child.stdout.take() {
         let app_clone = app.clone();
         tokio::spawn(async move {
@@ -1054,7 +1645,6 @@ async fn install_tinytex_unix(app: &AppHandle) -> Result<InstallResult, String> 
         });
     }
 
-    // Stream stderr (TinyTeX installer outputs progress to stderr)
     if let Some(stderr) = child.stderr.take() {
         let app_clone = app.clone();
         tokio::spawn(async move {
@@ -1109,11 +1699,11 @@ async fn install_tinytex_unix(app: &AppHandle) -> Result<InstallResult, String> 
 }
 
 #[cfg(target_os = "macos")]
-async fn install_brew_cask(
+async fn install_brew(
     app: &AppHandle,
-    distribution_id: &str,
+    package: &str,
+    is_cask: bool,
 ) -> Result<InstallResult, String> {
-    // Check if Homebrew is available
     let _ = app.emit(
         "latex-install-progress",
         InstallProgress {
@@ -1123,7 +1713,17 @@ async fn install_brew_cask(
         },
     );
 
-    let brew_check = command("brew").arg("--version").output().await;
+    let env_path = build_tex_env_path();
+    let brew_bin = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
+        .into_iter()
+        .find(|p| Path::new(p).exists())
+        .unwrap_or("brew");
+
+    let brew_check = command(brew_bin)
+        .arg("--version")
+        .env("PATH", &env_path)
+        .output()
+        .await;
 
     if brew_check.is_err() || !brew_check.unwrap().status.success() {
         return Ok(InstallResult {
@@ -1133,35 +1733,29 @@ async fn install_brew_cask(
         });
     }
 
-    let cask = match distribution_id {
-        "mactex" => "mactex",
-        "basictex" => "basictex",
-        _ => {
-            return Ok(InstallResult {
-                success: false,
-                message: "Unknown distribution".to_string(),
-                needs_restart: false,
-            });
-        }
-    };
-
     let _ = app.emit(
         "latex-install-progress",
         InstallProgress {
             stage: "installing".to_string(),
-            message: format!("Installing {} via Homebrew... This may take a while.", cask),
+            message: format!("Installing {} via Homebrew... This may take a while.", package),
             progress: Some(0.2),
         },
     );
 
-    let mut child = command("brew")
-        .args(["install", "--cask", cask])
+    let mut args = vec!["install"];
+    if is_cask {
+        args.push("--cask");
+    }
+    args.push(package);
+
+    let mut child = command(brew_bin)
+        .args(&args)
+        .env("PATH", &env_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Failed to start brew: {}", e))?;
 
-    // Stream output
     if let Some(stdout) = child.stdout.take() {
         let app_clone = app.clone();
         tokio::spawn(async move {
@@ -1191,7 +1785,7 @@ async fn install_brew_cask(
             "latex-install-progress",
             InstallProgress {
                 stage: "complete".to_string(),
-                message: format!("{} installed successfully!", cask),
+                message: format!("{} installed successfully!", package),
                 progress: Some(1.0),
             },
         );
@@ -1201,12 +1795,12 @@ async fn install_brew_cask(
             message: if detected {
                 format!(
                     "{} installed successfully and compiler detection is ready.",
-                    cask
+                    package
                 )
             } else {
                 format!(
                     "{} installed successfully. Please restart the application to detect the new installation.",
-                    cask
+                    package
                 )
             },
             needs_restart: !detected,
@@ -1216,7 +1810,7 @@ async fn install_brew_cask(
             success: false,
             message: format!(
                 "Installation failed. Please try installing {} manually.",
-                cask
+                package
             ),
             needs_restart: false,
         })
@@ -1225,7 +1819,6 @@ async fn install_brew_cask(
 
 #[cfg(target_os = "linux")]
 async fn install_linux(app: &AppHandle, distribution_id: &str) -> Result<InstallResult, String> {
-    // TinyTeX can be installed without sudo
     if distribution_id == "tinytex" {
         return install_tinytex_unix(app).await;
     }
@@ -1250,8 +1843,6 @@ async fn install_linux(app: &AppHandle, distribution_id: &str) -> Result<Install
         },
     );
 
-    // For Linux, we need to show the user the command since it requires sudo
-    // We can't run sudo directly from the app without a proper privilege escalation mechanism
     Ok(InstallResult {
         success: false,
         message: format!(
@@ -1273,15 +1864,10 @@ pub async fn latex_open_download_page(app: AppHandle, url: String) -> Result<(),
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MainFileDetectionResult {
-    /// The detected main file, if any
     pub main_file: Option<String>,
-    /// All .tex files found in the directory
     pub tex_files: Vec<String>,
-    /// Detection method used
     pub detection_method: String,
-    /// Whether user input is needed (multiple candidates, none found)
     pub needs_user_input: bool,
-    /// Message explaining the detection result
     pub message: String,
 }
 
@@ -1291,7 +1877,6 @@ pub async fn latex_detect_main_file(
     directory: String,
     configured_main_file: Option<String>,
 ) -> Result<MainFileDetectionResult, String> {
-    use std::path::Path;
     use walkdir::WalkDir;
 
     let dir_path = Path::new(&directory);
@@ -1299,7 +1884,6 @@ pub async fn latex_detect_main_file(
         return Err("Directory does not exist".to_string());
     }
 
-    // Step 1: Check if configured main file exists
     if let Some(ref main_file) = configured_main_file {
         let main_path = dir_path.join(main_file);
         if main_path.exists() {
@@ -1313,7 +1897,6 @@ pub async fn latex_detect_main_file(
         }
     }
 
-    // Step 2: Find all .tex files (non-recursive for now, just top level)
     let mut tex_files: Vec<String> = Vec::new();
     for entry in WalkDir::new(&directory)
         .max_depth(1)
@@ -1332,7 +1915,6 @@ pub async fn latex_detect_main_file(
         }
     }
 
-    // Step 3: If only one .tex file, use it
     if tex_files.len() == 1 {
         let main_file = tex_files[0].clone();
         return Ok(MainFileDetectionResult {
@@ -1344,7 +1926,6 @@ pub async fn latex_detect_main_file(
         });
     }
 
-    // Step 4: If no .tex files found
     if tex_files.is_empty() {
         return Ok(MainFileDetectionResult {
             main_file: None,
@@ -1355,25 +1936,21 @@ pub async fn latex_detect_main_file(
         });
     }
 
-    // Step 5: Multiple .tex files - try to detect main file by content
     let mut candidates: Vec<(String, i32)> = Vec::new();
 
     for tex_file in &tex_files {
         let file_path = dir_path.join(tex_file);
-        if let Ok(content) = std::fs::read_to_string(&file_path) {
+        if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
             let mut score = 0;
 
-            // Check for \documentclass - strong indicator of main file
             if content.contains("\\documentclass") {
                 score += 10;
             }
 
-            // Check for \begin{document}
             if content.contains("\\begin{document}") {
                 score += 5;
             }
 
-            // Common main file names get bonus points
             let lower_name = tex_file.to_lowercase();
             if lower_name == "main.tex" {
                 score += 8;
@@ -1387,7 +1964,6 @@ pub async fn latex_detect_main_file(
                 score += 3;
             }
 
-            // Files that are typically included (not main files) get negative score
             if lower_name.starts_with("chapter") || lower_name.starts_with("section") {
                 score -= 3;
             }
@@ -1410,15 +1986,12 @@ pub async fn latex_detect_main_file(
         }
     }
 
-    // Sort by score descending
     candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.1));
 
-    // If we have a clear winner (significantly higher score)
     if !candidates.is_empty() {
         let best = &candidates[0];
         let second_best_score = candidates.get(1).map(|c| c.1).unwrap_or(0);
 
-        // If the best candidate has a significantly higher score
         if best.1 >= 10 && best.1 > second_best_score + 3 {
             return Ok(MainFileDetectionResult {
                 main_file: Some(best.0.clone()),
@@ -1433,8 +2006,6 @@ pub async fn latex_detect_main_file(
         }
     }
 
-    // Step 6: Can't determine automatically - need user input
-    // Sort tex_files to put likely candidates first
     let mut sorted_files = tex_files.clone();
     sorted_files.sort_by(|a, b| {
         let score_a = candidates
@@ -1484,9 +2055,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn has_any_compiler_all_unavailable() {
-        let status = LaTeXCompilersStatus {
+    fn empty_status() -> LaTeXCompilersStatus {
+        LaTeXCompilersStatus {
             pdflatex: CompilerInfo {
                 name: "pdflatex".into(),
                 path: None,
@@ -1511,39 +2081,102 @@ mod tests {
                 available: false,
                 version: None,
             },
-        };
-        assert!(!has_any_compiler(&status));
+            tectonic: CompilerInfo {
+                name: "tectonic".into(),
+                path: None,
+                available: false,
+                version: None,
+            },
+        }
+    }
+
+    #[test]
+    fn has_any_compiler_all_unavailable() {
+        assert!(!has_any_compiler(&empty_status()));
     }
 
     #[test]
     fn has_any_compiler_one_available() {
-        let status = LaTeXCompilersStatus {
-            pdflatex: CompilerInfo {
-                name: "pdflatex".into(),
-                path: Some("/usr/bin/pdflatex".into()),
-                available: true,
-                version: Some("3.14".into()),
-            },
-            xelatex: CompilerInfo {
-                name: "xelatex".into(),
-                path: None,
-                available: false,
-                version: None,
-            },
-            lualatex: CompilerInfo {
-                name: "lualatex".into(),
-                path: None,
-                available: false,
-                version: None,
-            },
-            latexmk: CompilerInfo {
-                name: "latexmk".into(),
-                path: None,
-                available: false,
-                version: None,
-            },
-        };
+        let mut status = empty_status();
+        status.pdflatex.available = true;
+        status.pdflatex.path = Some("/usr/bin/pdflatex".into());
         assert!(has_any_compiler(&status));
+
+        let mut status_tec = empty_status();
+        status_tec.tectonic.available = true;
+        status_tec.tectonic.path = Some("/opt/homebrew/bin/tectonic".into());
+        assert!(has_any_compiler(&status_tec));
+    }
+
+    #[test]
+    fn build_compile_args_matches_engines() {
+        assert_eq!(
+            build_compile_args("latexmk", Some("xelatex"), &["-shell-escape".into()], "main.tex"),
+            vec![
+                "-xelatex",
+                "-interaction=nonstopmode",
+                "-file-line-error",
+                "-synctex=1",
+                "-shell-escape",
+                "main.tex"
+            ]
+        );
+        assert_eq!(
+            build_compile_args("tectonic", None, &[], "paper.tex"),
+            vec!["-X", "compile", "--synctex", "--keep-logs", "paper.tex"]
+        );
+        assert_eq!(
+            build_compile_args("pdflatex", None, &[], "main.tex"),
+            vec!["-interaction=nonstopmode", "-file-line-error", "-synctex=1", "main.tex"]
+        );
+    }
+
+    #[test]
+    fn parse_latex_diagnostics_extracts_file_line_classic_and_warnings() {
+        let log = "\
+(./main.tex (./sections/intro.tex
+./sections/intro.tex:42: Undefined control sequence.
+! Missing $ inserted.
+<inserted text>
+                $
+l.18 x_1 = 2
+LaTeX Warning: Reference `fig:missing' on page 2 undefined on input line 55.
+Overfull \\hbox (12.0pt too wide) in paragraph at lines 70--75
+";
+        let (errors, warnings) = parse_latex_diagnostics(log, "main.tex");
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0].file, "sections/intro.tex");
+        assert_eq!(errors[0].line, 42);
+        assert_eq!(errors[0].message, "Undefined control sequence.");
+        assert_eq!(errors[1].file, "sections/intro.tex");
+        assert_eq!(errors[1].line, 18);
+        assert_eq!(errors[1].message, "Missing $ inserted.");
+
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[0].line, 55);
+        assert_eq!(warnings[1].line, 70);
+    }
+
+    #[test]
+    fn parse_synctex_view_output_extracts_coordinates() {
+        let sample = "\
+SyncTeX result begin
+Output:main.pdf
+Page:3
+x:120.5
+y:340.25
+h:108.0
+v:332.0
+W:240.0
+H:12.5
+before:
+SyncTeX result end
+";
+        let parsed = parse_synctex_view_output(sample).unwrap();
+        assert_eq!(parsed.page, 3);
+        assert!((parsed.x - 120.5).abs() < 0.01);
+        assert!((parsed.y - 340.25).abs() < 0.01);
+        assert!((parsed.width - 240.0).abs() < 0.01);
     }
 
     #[test]
@@ -1558,23 +2191,64 @@ mod tests {
         let deserialized: CompilerInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, info.name);
         assert_eq!(deserialized.path, info.path);
-        assert_eq!(deserialized.available, info.available);
-        assert_eq!(deserialized.version, info.version);
     }
 
     #[test]
     fn compilation_result_serialization_roundtrip() {
         let result = CompilationResult {
             success: true,
+            cancelled: false,
             exit_code: Some(0),
             pdf_path: Some("/tmp/main.pdf".into()),
             error: None,
+            duration_ms: 412,
+            errors: vec![],
+            warnings: vec![],
         };
         let json = serde_json::to_string(&result).unwrap();
         let deserialized: CompilationResult = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.success, result.success);
         assert_eq!(deserialized.exit_code, result.exit_code);
         assert_eq!(deserialized.pdf_path, result.pdf_path);
-        assert_eq!(deserialized.error, result.error);
+        assert_eq!(deserialized.duration_ms, 412);
+    }
+
+    #[test]
+    fn validate_relative_main_file_rejects_traversal() {
+        assert!(validate_relative_main_file("main.tex").is_ok());
+        assert!(validate_relative_main_file("chapters/main.tex").is_ok());
+        assert!(validate_relative_main_file("../escape.tex").is_err());
+        assert!(validate_relative_main_file("/etc/passwd").is_err());
+    }
+
+    #[tokio::test]
+    async fn latex_clean_aux_files_removes_matching_files_and_returns_names() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        tokio::fs::write(root.join("paper.tex"), "\\documentclass{article}")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("paper.aux"), "aux").await.unwrap();
+        tokio::fs::write(root.join("paper.log"), "log").await.unwrap();
+        tokio::fs::write(root.join("other.aux"), "keep").await.unwrap();
+
+        let removed = latex_clean_aux_files(
+            root.to_string_lossy().to_string(),
+            Some("paper.tex".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert!(removed.contains(&"paper.aux".to_string()));
+        assert!(removed.contains(&"paper.log".to_string()));
+        assert!(!removed.contains(&"other.aux".to_string()));
+        assert!(root.join("paper.tex").exists());
+        assert!(root.join("other.aux").exists());
+
+        // Fallback when main_file is None cleans directory aux files
+        let removed_all = latex_clean_aux_files(root.to_string_lossy().to_string(), None)
+            .await
+            .unwrap();
+        assert_eq!(removed_all, vec!["other.aux".to_string()]);
     }
 }

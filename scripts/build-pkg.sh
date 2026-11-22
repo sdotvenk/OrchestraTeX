@@ -108,11 +108,6 @@ cat > "$DIST_XML" << EOF
     <organization>com.lmms-lab</organization>
     <domains enable_localSystem="true"/>
     <options customize="never" require-scripts="true" rootVolumeOnly="true"/>
-    <volume-check>
-        <allowed-os-versions>
-            <os-version min="10.15"/>
-        </allowed-os-versions>
-    </volume-check>
     <choices-outline>
         <line choice="default">
             <line choice="$BUNDLE_ID"/>

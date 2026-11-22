@@ -3,8 +3,16 @@
 import type { Monaco } from "@monaco-editor/react";
 import type { editor, languages } from "monaco-editor";
 
+// Track Monaco instances that already registered LaTeX language & base providers
+const registeredMonacoInstances = new WeakSet<object>();
+
 // Register LaTeX language support
 export const registerLaTeXLanguage = (monaco: Monaco) => {
+  if (registeredMonacoInstances.has(monaco)) {
+    return;
+  }
+  registeredMonacoInstances.add(monaco);
+
   // Register the LaTeX language
   monaco.languages.register({
     id: "latex",

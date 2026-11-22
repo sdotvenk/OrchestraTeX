@@ -6,7 +6,9 @@ import {
   FilePlusIcon,
   FolderIcon,
   FolderPlusIcon,
+  UploadSimpleIcon,
 } from "@phosphor-icons/react";
+import { invoke } from "@tauri-apps/api/core";
 import { EditorErrorBoundary } from "@/components/editor/editor-error-boundary";
 import { type FileOperations, FileTree } from "@/components/editor/file-tree";
 import { pathSync } from "@/lib/path";
@@ -43,6 +45,35 @@ export function FileSidebarPanel({
     );
   }
 
+  const handleImportFiles = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        multiple: true,
+        title: "Import files into project",
+      });
+      const paths = Array.isArray(selected)
+        ? selected
+        : typeof selected === "string"
+          ? [selected]
+          : [];
+      if (paths.length === 0) return;
+
+      for (const srcPath of paths) {
+        const base = srcPath.split(/[\\/]/).pop();
+        if (!base) continue;
+        const imported = await invoke<string>("import_external_file", {
+          sourcePath: srcPath,
+          destRelativePath: base,
+        });
+        onFileSelect(imported);
+      }
+      await onRefreshFiles();
+    } catch (error) {
+      console.error("Failed to import files:", error);
+    }
+  };
+
   return (
     <>
       <div
@@ -51,6 +82,15 @@ export function FileSidebarPanel({
       >
         <span className="text-xs text-muted truncate">{pathSync.basename(projectPath)}</span>
         <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => void handleImportFiles()}
+            className="p-1 text-muted hover:text-foreground hover:bg-foreground/5 transition-colors"
+            title="Import / Upload Files"
+            aria-label="Import Files"
+          >
+            <UploadSimpleIcon className="w-4 h-4" />
+          </button>
           <button
             type="button"
             onClick={onCreateFile}

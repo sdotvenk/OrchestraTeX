@@ -2,8 +2,8 @@
 
 import { FolderIcon, TrashIcon } from "@phosphor-icons/react";
 import { useState } from "react";
+import { formatRelativeTime } from "@/components/agent/utils";
 import type { RecentProject } from "@/lib/recent-projects";
-import { formatRelativeTime } from "./opencode/utils";
 
 export function RecentProjects({
   projects,
@@ -37,7 +37,7 @@ export function RecentProjects({
       </div>
       <div className="border border-border bg-background">
         {projects.map((project) => {
-          const timeStr = formatRelativeTime(new Date(project.lastOpened));
+          const timeStr = formatRelativeTime(new Date(project.lastOpened).getTime());
           return (
             <div
               key={project.path}

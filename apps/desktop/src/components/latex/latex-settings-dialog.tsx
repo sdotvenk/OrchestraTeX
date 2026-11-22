@@ -1,10 +1,16 @@
 "use client";
 
-import { ArrowCounterClockwiseIcon, MinusIcon, PlusIcon, XIcon } from "@phosphor-icons/react";
+import {
+  ArrowCounterClockwiseIcon,
+  ArrowsClockwiseIcon,
+  MinusIcon,
+  PlusIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useTheme } from "next-themes";
-import { useCallback, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -14,22 +20,49 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import type {
+  AgentProviderId,
+  AgentSettings,
+  InteractionMode,
+  ProviderCustomSettings,
+  ProviderStatus,
+  RuntimeMode,
+} from "@/lib/agent/types";
+import { splitArgsString } from "@/lib/agent/use-agent-settings";
 import type { UserProfile } from "@/lib/auth";
 import {
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
   type MinimapSettings,
 } from "@/lib/editor/types";
-import { DEFAULT_LATEX_SETTINGS, type LaTeXSettings } from "@/lib/latex/types";
+import {
+  COMPILER_DISPLAY_NAMES,
+  DEFAULT_LATEX_SETTINGS,
+  type LaTeXCompiler,
+  type LaTeXCompilersStatus,
+  type LaTeXSettings,
+  type LatexmkEngine,
+} from "@/lib/latex/types";
 
 interface LaTeXSettingsDialogProps {
   open: boolean;
   onClose: () => void;
   settings: LaTeXSettings;
   onUpdateSettings: (updates: Partial<LaTeXSettings>) => void;
+  compilersStatus?: LaTeXCompilersStatus | null;
+  onCleanAuxFiles?: () => Promise<unknown> | undefined;
   editorSettings: EditorSettings;
   onUpdateEditorSettings: (updates: Partial<EditorSettings>) => void;
   texFiles: string[];
+  agentSettings?: AgentSettings;
+  onUpdateAgentSettings?: (patch: Partial<AgentSettings>) => void;
+  onUpdateCustomProvider?: (
+    providerId: AgentProviderId,
+    patch: Partial<ProviderCustomSettings>,
+  ) => void;
+  agentProviders?: ProviderStatus[];
+  onRefreshAgentProviders?: () => Promise<unknown> | undefined;
+  initialTab?: "build" | "editor" | "agents" | "account";
   authLoading: boolean;
   authConfigured: boolean;
   authProfile: UserProfile | null;
@@ -152,9 +185,17 @@ export function LaTeXSettingsDialog({
   onClose,
   settings,
   onUpdateSettings,
+  compilersStatus,
+  onCleanAuxFiles,
   editorSettings,
   onUpdateEditorSettings,
   texFiles,
+  agentSettings,
+  onUpdateAgentSettings,
+  onUpdateCustomProvider,
+  agentProviders = [],
+  onRefreshAgentProviders,
+  initialTab = "build",
   authLoading,
   authConfigured,
   authProfile,
@@ -162,9 +203,16 @@ export function LaTeXSettingsDialog({
   onOpenLogin,
   onSignOut,
 }: LaTeXSettingsDialogProps) {
-  const [activeTab, setActiveTab] = useState<string>("build");
+  const [activeTab, setActiveTab] = useState<string>(initialTab);
   const canResetActiveTab = activeTab === "build" || activeTab === "editor";
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [cleaningAux, setCleaningAux] = useState(false);
+
+  useEffect(() => {
+    if (open && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, open]);
 
   const handleResetLatexSettings = useCallback(() => {
     onUpdateSettings(DEFAULT_LATEX_SETTINGS);
@@ -226,6 +274,13 @@ export function LaTeXSettingsDialog({
                 className="flex-1 px-4 py-3 text-sm font-medium transition-colors relative text-muted-foreground hover:text-foreground data-[state=active]:text-foreground"
               >
                 Editor
+                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-foreground transition-opacity opacity-0 data-[state=active]:opacity-100" />
+              </Tabs.Trigger>
+              <Tabs.Trigger
+                value="agents"
+                className="flex-1 px-4 py-3 text-sm font-medium transition-colors relative text-muted-foreground hover:text-foreground data-[state=active]:text-foreground"
+              >
+                Agents
                 <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-foreground transition-opacity opacity-0 data-[state=active]:opacity-100" />
               </Tabs.Trigger>
               <Tabs.Trigger
@@ -935,6 +990,165 @@ export function LaTeXSettingsDialog({
                 </p>
               </div>
 
+              <SectionHeader>Compiler & Live Preview</SectionHeader>
+
+              <SelectField
+                label="Compiler"
+                description="Engine used when building your document"
+                value={settings.compiler}
+                onChange={(v) => onUpdateSettings({ compiler: v as LaTeXCompiler })}
+                options={(
+                  ["auto", "latexmk", "pdflatex", "xelatex", "lualatex", "tectonic"] as const
+                ).map((c) => {
+                  const statusInfo =
+                    c === "auto" ? null : compilersStatus ? compilersStatus[c] : null;
+                  const suffix =
+                    c === "auto"
+                      ? ""
+                      : statusInfo
+                        ? statusInfo.available
+                          ? " (Installed)"
+                          : " (Not found)"
+                        : "";
+                  return {
+                    value: c,
+                    label: `${COMPILER_DISPLAY_NAMES[c]}${suffix}`,
+                  };
+                })}
+              />
+
+              {(settings.compiler === "latexmk" || settings.compiler === "auto") && (
+                <SelectField
+                  label="Latexmk Engine"
+                  description="Underlying engine passed to latexmk"
+                  value={settings.latexmkEngine}
+                  onChange={(v) => onUpdateSettings({ latexmkEngine: v as LatexmkEngine })}
+                  options={[
+                    { value: "pdflatex", label: "pdfLaTeX" },
+                    { value: "xelatex", label: "XeLaTeX (Unicode / CJK)" },
+                    { value: "lualatex", label: "LuaLaTeX" },
+                  ]}
+                />
+              )}
+
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <span className="text-sm font-medium text-foreground-secondary">
+                    Auto-Compile Live Preview
+                  </span>
+                  <p className="text-xs text-muted mt-0.5">
+                    Automatically recompile after edits or AI modifications
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.autoCompile}
+                  onCheckedChange={(v) => onUpdateSettings({ autoCompile: v })}
+                />
+              </div>
+
+              {settings.autoCompile && (
+                <SelectField
+                  label="Auto-Compile Delay"
+                  value={settings.autoCompileDelayMs}
+                  onChange={(v) =>
+                    onUpdateSettings({
+                      autoCompileDelayMs: Math.max(300, Number.parseInt(v, 10) || 900),
+                    })
+                  }
+                  options={[
+                    { value: 400, label: "Fast (400 ms)" },
+                    { value: 900, label: "Balanced (900 ms)" },
+                    { value: 1500, label: "Moderate (1.5 s)" },
+                    { value: 2500, label: "Relaxed (2.5 s)" },
+                  ]}
+                />
+              )}
+
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <span className="text-sm font-medium text-foreground-secondary">
+                    Shell Escape (-shell-escape)
+                  </span>
+                  <p className="text-xs text-muted mt-0.5">
+                    Required for packages like minted or external tools (use on trusted repos)
+                  </p>
+                </div>
+                <Switch
+                  checked={settings.shellEscape}
+                  onCheckedChange={(v) => onUpdateSettings({ shellEscape: v })}
+                />
+              </div>
+
+              <div className="py-2 space-y-1.5">
+                <label
+                  htmlFor="latex-custom-args"
+                  className="text-sm font-medium text-foreground-secondary block"
+                >
+                  Extra Compiler Arguments
+                </label>
+                <input
+                  id="latex-custom-args"
+                  type="text"
+                  value={settings.customArgs.join(" ")}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      customArgs: splitArgsString(e.target.value),
+                    })
+                  }
+                  placeholder="-halt-on-error"
+                  className="w-full px-3 py-2 text-sm border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono bg-background"
+                />
+              </div>
+
+              <div className="py-2 space-y-1.5">
+                <label
+                  htmlFor="latex-custom-path"
+                  className="text-sm font-medium text-foreground-secondary block"
+                >
+                  Custom Compiler Binary Path (optional)
+                </label>
+                <input
+                  id="latex-custom-path"
+                  type="text"
+                  value={settings.customCompilerPath ?? ""}
+                  onChange={(e) =>
+                    onUpdateSettings({
+                      customCompilerPath: e.target.value.trim() || null,
+                    })
+                  }
+                  placeholder="/Library/TeX/texbin/latexmk"
+                  className="w-full px-3 py-2 text-sm border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono bg-background"
+                />
+              </div>
+
+              {onCleanAuxFiles && (
+                <div className="py-2 flex items-center justify-between border-t border-border mt-2 pt-3">
+                  <div>
+                    <span className="text-sm font-medium text-foreground-secondary">
+                      Auxiliary Files
+                    </span>
+                    <p className="text-xs text-muted mt-0.5">
+                      Remove .aux, .log, .fls, .fdb_latexmk, .toc, .bbl, etc.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={cleaningAux}
+                    onClick={async () => {
+                      setCleaningAux(true);
+                      try {
+                        await onCleanAuxFiles();
+                      } finally {
+                        setCleaningAux(false);
+                      }
+                    }}
+                    className="btn btn-outline btn-sm"
+                  >
+                    {cleaningAux ? "Cleaning..." : "Clean Aux Files"}
+                  </button>
+                </div>
+              )}
+
               <SectionHeader>Git</SectionHeader>
 
               <div className="flex items-center justify-between py-2">
@@ -1015,6 +1229,163 @@ export function LaTeXSettingsDialog({
                     ]}
                   />
                 </div>
+              )}
+            </Tabs.Content>
+
+            {/* ===== AGENTS TAB ===== */}
+            <Tabs.Content value="agents" className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              <div className="flex items-center justify-between pt-2 pb-1">
+                <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                  Detected Agent CLIs
+                </h3>
+                {onRefreshAgentProviders && (
+                  <button
+                    type="button"
+                    onClick={() => void onRefreshAgentProviders()}
+                    className="btn btn-outline btn-sm inline-flex items-center gap-1"
+                  >
+                    <ArrowsClockwiseIcon className="size-3.5" aria-hidden="true" />
+                    <span>Re-detect</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {agentProviders.map((p) => (
+                  <div
+                    key={p.id}
+                    className="border border-border bg-surface-secondary px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium text-foreground flex items-center gap-2">
+                        <span>{p.name}</span>
+                        <span className="text-[10px] font-mono uppercase text-muted">
+                          {p.transport}
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-mono text-muted truncate">
+                        {p.binaryPath || p.authError || "Not detected on PATH"}
+                      </div>
+                    </div>
+                    <span
+                      className={`text-[10px] font-mono uppercase px-1.5 py-0.5 border shrink-0 ${
+                        p.installed && p.authenticated
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border text-muted"
+                      }`}
+                    >
+                      {p.installed ? (p.authenticated ? "Ready" : "Auth Needed") : "Missing"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {agentSettings && onUpdateAgentSettings && (
+                <>
+                  <SectionHeader>Session Defaults</SectionHeader>
+
+                  <SelectField
+                    label="Default Provider"
+                    value={agentSettings.defaultProvider}
+                    onChange={(v) =>
+                      onUpdateAgentSettings({ defaultProvider: v as AgentProviderId })
+                    }
+                    options={[
+                      { value: "claude", label: "Claude Code" },
+                      { value: "codex", label: "OpenAI Codex" },
+                      { value: "antigravity", label: "Antigravity (ACP)" },
+                      { value: "custom-acp", label: "Custom ACP" },
+                    ]}
+                  />
+
+                  <SelectField
+                    label="Default Interaction Mode"
+                    value={agentSettings.defaultInteractionMode}
+                    onChange={(v) =>
+                      onUpdateAgentSettings({ defaultInteractionMode: v as InteractionMode })
+                    }
+                    options={[
+                      { value: "default", label: "Default (Edit)" },
+                      { value: "plan", label: "Plan" },
+                    ]}
+                  />
+
+                  <SelectField
+                    label="Default Permission Policy"
+                    value={agentSettings.defaultRuntimeMode}
+                    onChange={(v) =>
+                      onUpdateAgentSettings({ defaultRuntimeMode: v as RuntimeMode })
+                    }
+                    options={[
+                      { value: "approval-required", label: "Approval Required (Ask)" },
+                      { value: "auto-accept-edits", label: "Auto-Accept File Edits" },
+                      { value: "full-access", label: "Full Access" },
+                    ]}
+                  />
+
+                  {onUpdateCustomProvider && (
+                    <>
+                      <SectionHeader>Custom CLI Paths & ACP Server</SectionHeader>
+
+                      {(["claude", "codex", "antigravity"] as const).map((pid) => (
+                        <div key={pid} className="py-1.5 space-y-1">
+                          <label
+                            htmlFor={`agent-bin-${pid}`}
+                            className="text-xs font-mono uppercase text-foreground-secondary block"
+                          >
+                            {pid} Binary Path (optional)
+                          </label>
+                          <input
+                            id={`agent-bin-${pid}`}
+                            type="text"
+                            value={agentSettings.customProviders[pid].binaryPath}
+                            onChange={(e) =>
+                              onUpdateCustomProvider(pid, { binaryPath: e.target.value })
+                            }
+                            placeholder={`Auto-detect ${pid === "antigravity" ? "agy" : pid}`}
+                            className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
+                          />
+                        </div>
+                      ))}
+
+                      <div className="pt-2 border-t border-border space-y-2">
+                        <div className="text-xs font-mono uppercase text-foreground-secondary">
+                          Custom ACP Agent (Optional)
+                        </div>
+                        <input
+                          type="text"
+                          value={agentSettings.customProviders["custom-acp"].customName}
+                          onChange={(e) =>
+                            onUpdateCustomProvider("custom-acp", { customName: e.target.value })
+                          }
+                          placeholder="Display name (e.g. Custom ACP Agent)"
+                          aria-label="Custom ACP agent display name"
+                          className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
+                        />
+                        <input
+                          type="text"
+                          value={agentSettings.customProviders["custom-acp"].customCommand}
+                          onChange={(e) =>
+                            onUpdateCustomProvider("custom-acp", { customCommand: e.target.value })
+                          }
+                          placeholder="Command (e.g. /path/to/agent-acp)"
+                          aria-label="Custom ACP agent command"
+                          className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
+                        />
+                        <input
+                          type="text"
+                          value={agentSettings.customProviders["custom-acp"].customArgs}
+                          onChange={(e) =>
+                            onUpdateCustomProvider("custom-acp", { customArgs: e.target.value })
+                          }
+                          placeholder="Arguments (e.g. --stdio)"
+                          aria-label="Custom ACP agent arguments"
+                          className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
+                        />
+                      </div>
+                    </>
+                  )}
+                </>
               )}
             </Tabs.Content>
 
@@ -1108,7 +1479,11 @@ export function LaTeXSettingsDialog({
                 Reset to Defaults
               </button>
             ) : (
-              <div className="text-xs text-muted-foreground">Account settings are in preview.</div>
+              <div className="text-xs text-muted-foreground">
+                {activeTab === "agents"
+                  ? "Agent CLI settings auto-save locally."
+                  : "Account settings are in preview."}
+              </div>
             )}
             <Dialog.Close className="px-6 py-2 text-sm font-medium bg-background text-foreground border-2 border-foreground shadow-[3px_3px_0_0_var(--foreground)] hover:shadow-[1px_1px_0_0_var(--foreground)] hover:translate-x-[2px] hover:translate-y-[2px] transition-all">
               Done
