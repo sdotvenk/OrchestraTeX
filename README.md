@@ -4,7 +4,7 @@
 
 **Local-First Multi-Provider AI Agent & Overleaf-Grade Live LaTeX Workspace**
 
-*A standalone overhaul originating from [LMMs-Lab Writer](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer) — preserving the original upstream README verbatim in [README_ORIGINAL.md](README_ORIGINAL.md).*
+*A standalone local-first overhaul originating from [LMMs-Lab Writer](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer) — original upstream READMEs, marketing apps, and cloud-auth assets are preserved verbatim in [archive/lmms-lab-writer/](archive/lmms-lab-writer/).*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f0c000?style=flat-square)](LICENSE)
 [![macOS](https://img.shields.io/badge/-macOS-111111?style=flat-square&logo=apple&logoColor=white)](#cross-platform-packaging)
@@ -13,7 +13,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-2021-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
-English | [Original README](README_ORIGINAL.md) | [Developer Guide](docs/dev.md) | [中文](README_zh.md) | [日本語](README_ja.md)
+English | [Developer Guide](docs/dev.md) | [Archived Upstream README](archive/lmms-lab-writer/README_ORIGINAL.md) | [中文 (Upstream)](archive/lmms-lab-writer/README_zh.md) | [日本語 (Upstream)](archive/lmms-lab-writer/README_ja.md)
 
 </div>
 
@@ -81,9 +81,9 @@ See **[docs/dev.md](docs/dev.md)** for full architecture, Rust IPC command refer
 
 ## Original Project Overview
 
-> The sections below preserve the original upstream LMMs-Lab Writer README for full context and attribution. The complete verbatim original file is also archived at **[README_ORIGINAL.md](README_ORIGINAL.md)**.
+> The sections below preserve the original upstream LMMs-Lab Writer overview for context and attribution. The complete verbatim original READMEs, marketing apps, and upstream cloud-auth files are archived under **[archive/lmms-lab-writer/](archive/lmms-lab-writer/)** (see **[archive/lmms-lab-writer/README_ORIGINAL.md](archive/lmms-lab-writer/README_ORIGINAL.md)**).
 
-[![](imgs/demo.webp)](https://youtu.be/rX0FdCEqw0s?si=dXxYfSUVPemeBAOs)
+[![](archive/lmms-lab-writer/imgs/demo.webp)](https://youtu.be/rX0FdCEqw0s?si=dXxYfSUVPemeBAOs)
 
 ### Why LMMs-Lab Writer?
 
@@ -98,7 +98,7 @@ Say goodbye to hour-long TeX Live installations. LMMs-Lab Writer **automatically
 Supports **TinyTeX**, **Tectonic**, **MiKTeX**, **MacTeX**, and **TeX Live**—with streamlined, one-click management.
 
 <div align="center">
-<img src="imgs/latex.png" alt="One-click LaTeX setup with auto package installation" width="720">
+<img src="archive/lmms-lab-writer/imgs/latex.png" alt="One-click LaTeX setup with auto package installation" width="720">
 </div>
 
 ### Built for Every Language
@@ -106,7 +106,7 @@ Supports **TinyTeX**, **Tectonic**, **MiKTeX**, **MacTeX**, and **TeX Live**—w
 Write effortlessly in **English, Chinese, Japanese, Korean, Arabic, or any other language**. XeLaTeX and LuaLaTeX are supported out of the box with full Unicode and system font compatibility. CJK documents work instantly with `ctex`, `xeCJK`, and other multilingual packages—no extra setup needed.
 
 <div align="center">
-<img src="imgs/compile-cn.png" alt="Full CJK and Unicode support with XeLaTeX">
+<img src="archive/lmms-lab-writer/imgs/compile-cn.png" alt="Full CJK and Unicode support with XeLaTeX">
 </div>
 
 ### Git Integration for Modern Collaboration
@@ -120,7 +120,7 @@ Git isn't just an add-on; it's **deeply integrated into the sidebar**:
 - **Seamless GitHub CLI integration** for effortless authentication
 
 <div align="center">
-<img src="imgs/git-support.png" alt="Git integration — stage, commit, diff, push from the sidebar" width="720">
+<img src="archive/lmms-lab-writer/imgs/git-support.png" alt="Git integration — stage, commit, diff, push from the sidebar" width="720">
 </div>
 
 ### Fully Open Source & Local-First
@@ -138,8 +138,8 @@ MIT licensed. No vendor lock-in, no telemetry, no hidden costs.
 <td align="center"><strong>Dark Mode</strong></td>
 </tr>
 <tr>
-<td><img src="imgs/light.png" alt="Light mode"></td>
-<td><img src="imgs/dark.png" alt="Dark mode"></td>
+<td><img src="archive/lmms-lab-writer/imgs/light.png" alt="Light mode"></td>
+<td><img src="archive/lmms-lab-writer/imgs/dark.png" alt="Dark mode"></td>
 </tr>
 </table>
 </div>

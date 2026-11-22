@@ -11,32 +11,25 @@ AI-native LaTeX editor and multi-provider agent workspace. Tauri v2 desktop appl
 ```
 OrchestraTeX/
 ├── apps/
-│   ├── desktop/              # Tauri v2 desktop app
-│   │   ├── src/              # Next.js frontend (React 19, static export)
-│   │   │   ├── app/page.tsx  # Main editor page
-│   │   │   ├── components/   # React components (40+ files)
-│   │   │   │   ├── editor/   # Editor, file tree, terminal, diff, git panel
-│   │   │   │   ├── opencode/ # AI chat panel, messages, tools, sessions
-│   │   │   │   ├── auth/     # Login, deep-link, user dropdown
-│   │   │   │   ├── latex/    # Compiler settings, install prompt, main file picker
-│   │   │   │   └── ui/       # Shared UI (tabs, dialogs, toast, context menu, scroll)
-│   │   │   └── lib/tauri/    # Tauri IPC hooks
-│   │   └── src-tauri/        # Rust backend
-│   │       └── src/commands/ # Tauri commands (fs, git, latex, terminal, opencode, auth)
-│   ├── web/                  # Marketing website (Next.js 16, Vercel)
-│   │   ├── src/app/          # Next.js pages (landing, docs, auth, download)
-│   │   ├── content/docs/     # MDX documentation
-│   │   └── src/lib/supabase/ # Supabase auth client
-│   └── video/                # Marketing video (Remotion)
-│       └── src/              # Video generation components
+│   └── desktop/              # Tauri v2 desktop app
+│       ├── src/              # Next.js frontend (React 19, static export)
+│       │   ├── app/page.tsx  # Main editor page
+│       │   ├── components/   # React components
+│       │   │   ├── agent/    # Multi-provider AI agent chat, threads, cards, usage/limits
+│       │   │   ├── editor/   # Editor, LivePdfPreview, Outline, file tree, terminal, diff, git panel
+│       │   │   ├── latex/    # Settings (Build/Editor/Agents), install prompt, main file picker
+│       │   │   └── ui/       # Shared UI (tabs, dialogs, toast, context menu, scroll)
+│       │   └── lib/          # agent/, latex/, editor/, monaco/, tauri/ hooks & utilities
+│       └── src-tauri/        # Rust backend
+│           └── src/commands/ # Tauri commands (agent/, fs, git, latex, terminal, util)
 ├── packages/
 │   └── shared/               # Shared TypeScript types & utilities
 │       └── src/index.ts      # FileNode, GitStatus, CompileResult, etc.
+├── archive/
+│   └── lmms-lab-writer/      # Archived upstream LMMs-Lab Writer READMEs, web/video apps, cloud auth & release scripts
 ├── docs/                     # Project documentation
-│   ├── DESIGN.md             # Design system (retro-terminal, monochrome + orange)
-│   ├── MARKETING.md          # Marketing copy & launch strategy
-│   ├── SCREENSHOT-GUIDE.md   # Asset capture guide
-│   └── COPY-DAN-KOE.md      # Long-form copywriting
+│   ├── dev.md                # Architecture, overrides, commands
+│   └── DESIGN.md             # Design system (retro-terminal, monochrome + orange)
 ├── turbo.json
 └── pnpm-workspace.yaml
 ```
@@ -58,50 +51,35 @@ OrchestraTeX/
 | Changes Review   | `apps/desktop/src/components/editor/changes-review-panel.tsx` | Review changes before commit        |
 | Inline Diff      | `apps/desktop/src/components/editor/inline-diff-review.tsx` | Inline diff visualization            |
 | GitHub Publish   | `apps/desktop/src/components/editor/github-publish-dialog.tsx` | Create GitHub repo & push          |
-| OpenCode Panel   | `apps/desktop/src/components/opencode/opencode-panel.tsx` | AI chat interface                      |
-| LaTeX Settings   | `apps/desktop/src/components/latex/latex-settings-dialog.tsx` | Compiler configuration             |
+| Agent Panel      | `apps/desktop/src/components/agent/agent-panel.tsx`   | Multi-provider AI chat interface            |
+| LaTeX Settings   | `apps/desktop/src/components/latex/latex-settings-dialog.tsx` | Build / Editor / Agents configuration |
 | LaTeX Install    | `apps/desktop/src/components/latex/latex-install-prompt.tsx` | Missing LaTeX detection              |
-| Auth             | `apps/desktop/src/components/auth/`                   | Login, deep-link, user dropdown             |
 | Shared Types     | `packages/shared/src/index.ts`                        | FileNode, GitStatus, CompileResult, etc.    |
 
 ### Rust Command Modules
 
 | Module     | File                                                  | Key Commands                                     |
 | ---------- | ----------------------------------------------------- | ------------------------------------------------ |
-| `fs`       | `apps/desktop/src-tauri/src/commands/fs.rs`           | set_project_path, read_file, write_file, get_file_tree, watch_directory, create_file, rename_path, delete_path |
+| `agent`    | `apps/desktop/src-tauri/src/commands/agent/`          | Claude stream-json, Codex app-server, Antigravity/Custom ACP |
+| `fs`       | `apps/desktop/src-tauri/src/commands/fs.rs`           | set_project_path, read_file, read_file_bytes, write_file, get_file_tree, watch_directory, create_file, rename_path, delete_path |
 | `git`      | `apps/desktop/src-tauri/src/commands/git.rs`          | git_status, git_log, git_diff, git_commit, git_push, git_pull, git_clone, git_add, git_fetch, gh_check, gh_create_repo |
-| `latex`    | `apps/desktop/src-tauri/src/commands/latex.rs`        | latex_compile, latex_detect_compilers, latex_detect_main_file, latex_clean_aux_files |
+| `latex`    | `apps/desktop/src-tauri/src/commands/latex.rs`        | latex_compile, latex_detect_compilers, latex_detect_main_file, latex_clean_aux_files, latex_synctex_* |
 | `terminal` | `apps/desktop/src-tauri/src/commands/terminal.rs`     | spawn_pty, write_pty, resize_pty, kill_pty       |
-| `opencode` | `apps/desktop/src-tauri/src/commands/opencode.rs`     | opencode_status, opencode_start, opencode_stop   |
-| `auth`     | `apps/desktop/src-tauri/src/commands/auth.rs`         | start_auth_callback_server, get_auth_callback_port |
-| `util`     | `apps/desktop/src-tauri/src/commands/util.rs`         | Shared utilities for path validation             |
-
-### Website
-
-| Task          | Location                             | Notes                        |
-| ------------- | ------------------------------------ | ---------------------------- |
-| Landing Page  | `apps/web/src/app/page.tsx`          | Hero, features, CTA          |
-| Download Page | `apps/web/src/app/download/page.tsx` | Platform downloads           |
-| Docs Index    | `apps/web/src/app/docs/page.tsx`     | Documentation navigation     |
-| Auth Pages    | `apps/web/src/app/(auth)/`           | Login, signup                |
-| Supabase      | `apps/web/src/lib/supabase/`         | Auth client (browser/server) |
-| MDX Docs      | `apps/web/content/docs/`             | Quick start, installation    |
+| `util`     | `apps/desktop/src-tauri/src/commands/util.rs`         | Shared utilities for path validation & Windows process helpers |
 
 ## Commands
 
 ```bash
 # Development
 pnpm tauri:dev                              # Run Tauri desktop app in dev mode
-pnpm --filter @orchestratex/web dev         # Run website in dev mode
 
 # Build
 pnpm build                                  # Build all packages
 pnpm tauri:build                            # Build desktop app (.app/.dmg/.exe/.deb)
-pnpm --filter @orchestratex/web build       # Build website
 
 # Verify
-cd apps/desktop/src-tauri && cargo check    # Check Rust
-cd apps/web && pnpm tsc --noEmit            # Check website TypeScript
+cd apps/desktop/src-tauri && cargo check --all-targets
+cd apps/desktop && pnpm tsc --noEmit && pnpm test
 
 # Lint & Format
 pnpm exec biome check .                     # Biome lint + format check

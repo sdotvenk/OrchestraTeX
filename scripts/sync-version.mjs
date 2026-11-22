@@ -8,7 +8,6 @@ const repoRoot = process.cwd();
 const TARGET_JSON_FILES = [
   "package.json",
   "apps/desktop/package.json",
-  "apps/web/package.json",
   "packages/shared/package.json",
   "apps/desktop/src-tauri/tauri.conf.json",
 ];

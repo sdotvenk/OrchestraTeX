@@ -4,37 +4,36 @@ Technical documentation for **OrchestraTeX** (standalone overhaul of LMMs-Lab Wr
 
 ## Architecture Overview
 
-OrchestraTeX is a `pnpm` + Turbo monorepo containing a Tauri v2 desktop app, Next.js website, and shared packages.
+OrchestraTeX is a `pnpm` + Turbo monorepo containing a local-first Tauri v2 desktop app and shared TypeScript package (upstream LMMs-Lab Writer marketing/web/cloud-auth assets are archived under `archive/lmms-lab-writer/`).
 
 ```
 OrchestraTeX/
 ├── apps/
-│   ├── desktop/                     # Tauri v2 desktop app
-│   │   ├── src/                     # Next.js 16 frontend (React 19, static export)
-│   │   │   ├── app/page.tsx         # Main workspace layout (Editor + Live PDF + Agent + Terminal)
-│   │   │   ├── components/
-│   │   │   │   ├── agent/           # Multi-provider T3Code-style agent chat, cards, usage/limits
-│   │   │   │   ├── editor/          # Monaco editor, LivePdfPreview, PdfViewer, Outline, FileTree, Git, Terminal
-│   │   │   │   ├── latex/           # Settings dialog (Build/Editor/Agents/Account), compiler/synctex setup
-│   │   │   │   └── ui/              # Tabs, dialogs, toast, scroll
-│   │   │   └── lib/
-│   │   │       ├── agent/           # useAgent hook, rAF delta reducer, provider & thread settings
-│   │   │       ├── latex/           # useLatexCompiler, useLatexSettings, outline, word count, BibTeX parser
-│   │   │       ├── monaco/          # LaTeX language tokens, snippets, theme definitions
-│   │   │       └── tauri/           # useTauriDaemon (filesystem, watcher, Git, GitHub CLI)
-│   │   └── src-tauri/               # Rust backend
-│   │       ├── src/commands/
-│   │       │   ├── agent/           # Native CLI/protocol bridges (Claude stream-json, Codex app-server, ACP)
-│   │       │   ├── fs.rs            # File operations, binary reads, external imports, watcher
-│   │       │   ├── git.rs           # Git + GitHub CLI operations
-│   │       │   ├── latex.rs         # Local compilation (latexmk/pdflatex/xelatex/lualatex/tectonic) + SyncTeX
-│   │       │   ├── terminal.rs      # PTY spawn, write, resize, kill
-│   │       │   ├── auth.rs          # OAuth callback server
-│   │       │   └── util.rs          # Windows CREATE_NO_WINDOW helper
-│   │       ├── capabilities/default.json
-│   │       └── tauri.conf.json
-│   └── web/                         # Marketing website (Next.js)
+│   └── desktop/                     # Tauri v2 desktop app
+│       ├── src/                     # Next.js 16 frontend (React 19, static export)
+│       │   ├── app/page.tsx         # Main workspace layout (Editor + Live PDF + Agent + Terminal)
+│       │   ├── components/
+│       │   │   ├── agent/           # Multi-provider T3Code-style agent chat, cards, usage/limits
+│       │   │   ├── editor/          # Monaco editor, LivePdfPreview, PdfViewer, Outline, FileTree, Git, Terminal
+│       │   │   ├── latex/           # Settings dialog (Build/Editor/Agents), compiler/synctex setup
+│       │   │   └── ui/              # Tabs, dialogs, toast, scroll
+│       │   └── lib/
+│       │       ├── agent/           # useAgent hook, rAF delta reducer, provider & thread settings
+│       │       ├── latex/           # useLatexCompiler, useLatexSettings, outline, word count, BibTeX parser
+│       │       ├── monaco/          # LaTeX language tokens, snippets, theme definitions
+│       │       └── tauri/           # useTauriDaemon (filesystem, watcher, Git, GitHub CLI)
+│       └── src-tauri/               # Rust backend
+│           ├── src/commands/
+│           │   ├── agent/           # Native CLI/protocol bridges (Claude stream-json, Codex app-server, ACP)
+│           │   ├── fs.rs            # File operations, binary reads, external imports, watcher
+│           │   ├── git.rs           # Git + GitHub CLI operations
+│           │   ├── latex.rs         # Local compilation (latexmk/pdflatex/xelatex/lualatex/tectonic) + SyncTeX
+│           │   ├── terminal.rs      # PTY spawn, write, resize, kill
+│           │   └── util.rs          # Windows CREATE_NO_WINDOW helper
+│           ├── capabilities/default.json
+│           └── tauri.conf.json
 ├── packages/shared/                 # Shared TypeScript types & utilities
+├── archive/lmms-lab-writer/         # Archived upstream READMEs, web/video apps, cloud auth & release scripts
 └── docs/
     ├── dev.md                       # This file
     └── DESIGN.md                    # Design system (retro-terminal monochrome + orange)
@@ -115,7 +114,6 @@ Includes `set_project_path`, `read_file`, `write_file`, `read_file_bytes` (raw b
 ```bash
 # Development
 pnpm tauri:dev                              # Desktop app with hot reload
-pnpm --filter @orchestratex/web dev         # Marketing website
 
 # Build & Typecheck
 pnpm --filter @orchestratex/shared build

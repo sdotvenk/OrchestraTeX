@@ -5,7 +5,6 @@ import { AnimatePresence, motion, type PanInfo, useReducedMotion } from "framer-
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoginCodeModal } from "@/components/auth";
 import {
   type DockviewPanelItem,
   DockviewPanelLayout,
@@ -35,7 +34,6 @@ import {
 } from "@/components/ui/tab-bar";
 import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
-import { useAuth } from "@/lib/auth";
 import { useEditorSettings } from "@/lib/editor";
 import {
   type BibEntry,
@@ -296,8 +294,6 @@ const PANEL_SPRING = {
 
 const INSTANT_TRANSITION = { duration: 0 } as const;
 
-const _WEB_URL = process.env.NEXT_PUBLIC_WEB_URL || "https://writer.lmms-lab.com";
-
 const MIN_PANEL_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
 
@@ -308,7 +304,6 @@ export default function EditorPage() {
     gitAutoFetchIntervalMs: editorSettings.settings.gitAutoFetchIntervalSeconds * 1000,
   });
   const prefersReducedMotion = useReducedMotion();
-  const auth = useAuth();
   const { toast } = useToast();
   const recentProjects = useRecentProjects();
 
@@ -353,10 +348,9 @@ export default function EditorPage() {
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showLatexSettings, setShowLatexSettings] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<
-    "build" | "editor" | "agents" | "account"
-  >("build");
-  const [showLoginCodeModal, setShowLoginCodeModal] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<"build" | "editor" | "agents">(
+    "build",
+  );
 
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [livePreviewWidth, setLivePreviewWidth] = useState(() => {
@@ -3077,15 +3071,6 @@ export default function EditorPage() {
         agentProviders={agent.providers}
         onRefreshAgentProviders={agent.refreshProviders}
         initialTab={settingsInitialTab}
-        authLoading={auth.loading}
-        authConfigured={auth.isConfigured}
-        authProfile={auth.profile}
-        authError={auth.error}
-        onOpenLogin={() => {
-          setShowLatexSettings(false);
-          setShowLoginCodeModal(true);
-        }}
-        onSignOut={auth.signOut}
       />
 
       {mainFileDetectionResult && (
@@ -3120,20 +3105,6 @@ export default function EditorPage() {
           error={ghPublishError}
         />
       )}
-
-      <LoginCodeModal
-        isOpen={showLoginCodeModal}
-        onClose={() => setShowLoginCodeModal(false)}
-        onSuccess={async (accessToken) => {
-          if (accessToken) {
-            // Session storage failed, use access token directly
-            await auth.setAuthWithToken(accessToken);
-          } else {
-            // Session was stored properly, refresh normally
-            await auth.refreshAuth();
-          }
-        }}
-      />
     </div>
   );
 }
