@@ -1,6 +1,6 @@
 "use client";
 
-import type { FileNode, GitInfo, GitLogEntry, GitStatus } from "@lmms-lab/writer-shared";
+import type { FileNode, GitInfo, GitLogEntry, GitStatus } from "@orchestratex/shared";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pathSync } from "@/lib/path";

@@ -10,13 +10,13 @@ if [ "$ARCH" = "arm64" ]; then
 else
   ARCH_SUFFIX="x64"
 fi
-PKG_PATH="$TAURI_DIR/target/release/bundle/pkg/LMMs-Lab_Writer_${VERSION}_${ARCH_SUFFIX}.pkg"
-DMG_PATH="$TAURI_DIR/target/release/bundle/dmg/LMMs-Lab Writer_${VERSION}_${ARCH_SUFFIX}.dmg"
-APP_PATH="$TAURI_DIR/target/release/bundle/macos/LMMs-Lab Writer.app"
+PKG_PATH="$TAURI_DIR/target/release/bundle/pkg/OrchestraTeX_${VERSION}_${ARCH_SUFFIX}.pkg"
+DMG_PATH="$TAURI_DIR/target/release/bundle/dmg/OrchestraTeX_${VERSION}_${ARCH_SUFFIX}.dmg"
+APP_PATH="$TAURI_DIR/target/release/bundle/macos/OrchestraTeX.app"
 RELEASE_TAG="v${VERSION}"
-RELEASE_URL="https://github.com/EvolvingLMMs-Lab/lmms-lab-writer/releases/tag/${RELEASE_TAG}"
-DMG_ASSET_NAME="LMMs-Lab.Writer_${VERSION}_${ARCH_SUFFIX}.dmg"
-PKG_ASSET_NAME="LMMs-Lab_Writer_${VERSION}_${ARCH_SUFFIX}.pkg"
+RELEASE_URL="https://github.com/sdotvenk/OrchestraTeX/releases/tag/${RELEASE_TAG}"
+DMG_ASSET_NAME="OrchestraTeX_${VERSION}_${ARCH_SUFFIX}.dmg"
+PKG_ASSET_NAME="OrchestraTeX_${VERSION}_${ARCH_SUFFIX}.pkg"
 
 UPLOAD_GITHUB_RELEASE="${PUBLISH_GITHUB_RELEASE:-1}"
 CREATE_GITHUB_RELEASE="${CREATE_GITHUB_RELEASE:-0}"
@@ -47,7 +47,7 @@ while [ $# -gt 0 ]; do
 done
 
 echo "=========================================="
-echo "LMMs-Lab Writer Release Script"
+echo "OrchestraTeX Release Script"
 echo "=========================================="
 echo ""
 
@@ -97,9 +97,8 @@ echo "=========================================="
 echo ""
 echo "Downloads:"
 echo "  Release: ${RELEASE_URL}"
-echo "  DMG: https://github.com/EvolvingLMMs-Lab/lmms-lab-writer/releases/download/${RELEASE_TAG}/${DMG_ASSET_NAME}"
-echo "  PKG: https://github.com/EvolvingLMMs-Lab/lmms-lab-writer/releases/download/${RELEASE_TAG}/${PKG_ASSET_NAME}"
-echo "  Homebrew: brew install --cask EvolvingLMMs-Lab/tap/lmms-lab-writer"
+echo "  DMG: https://github.com/sdotvenk/OrchestraTeX/releases/download/${RELEASE_TAG}/${DMG_ASSET_NAME}"
+echo "  PKG: https://github.com/sdotvenk/OrchestraTeX/releases/download/${RELEASE_TAG}/${PKG_ASSET_NAME}"
 echo ""
 echo "GitHub Release:"
 echo "  Tag: ${RELEASE_TAG}"

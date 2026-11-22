@@ -31,7 +31,9 @@ async fn compute_enriched_path() -> String {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         if let Ok(Ok(output)) = timeout(
             Duration::from_secs(2),
-            command(&shell).args(["-lc", "printf '%s' \"$PATH\""]).output(),
+            command(&shell)
+                .args(["-lc", "printf '%s' \"$PATH\""])
+                .output(),
         )
         .await
         {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { GitFileChange, GitLogEntry, GitStatus } from "@lmms-lab/writer-shared";
+import type { GitFileChange, GitLogEntry, GitStatus } from "@orchestratex/shared";
 import {
   ArrowClockwiseIcon,
   ArrowCounterClockwiseIcon,

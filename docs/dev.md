@@ -1,13 +1,13 @@
 # Developer Guide
 
-Technical documentation for **LMMs-Lab Writer** (modified local-first multi-provider agent & OverLeaf-grade LaTeX workspace).
+Technical documentation for **OrchestraTeX** (standalone overhaul of LMMs-Lab Writer: local-first multi-provider agent & Overleaf-grade LaTeX workspace).
 
 ## Architecture Overview
 
-LMMs-Lab Writer is a `pnpm` + Turbo monorepo containing a Tauri v2 desktop app, Next.js website, and shared packages.
+OrchestraTeX is a `pnpm` + Turbo monorepo containing a Tauri v2 desktop app, Next.js website, and shared packages.
 
 ```
-lmms-lab-writer/
+OrchestraTeX/
 ├── apps/
 │   ├── desktop/                     # Tauri v2 desktop app
 │   │   ├── src/                     # Next.js 16 frontend (React 19, static export)
@@ -44,7 +44,7 @@ lmms-lab-writer/
 
 ## Architectural Decisions & Performance Overrides
 
-In updating LMMs-Lab Writer to replace the legacy embedded OpenCode daemon with a direct multi-provider CLI runtime and OverLeaf-style live PDF workspace, several architectural choices intentionally supersede guidelines from the original `docs/dev.md`:
+In evolving OrchestraTeX from LMMs-Lab Writer to replace the legacy embedded OpenCode daemon with a direct multi-provider CLI runtime and Overleaf-style live PDF workspace, several architectural choices intentionally supersede guidelines from the original `docs/dev.md`:
 
 1. **Domain-Split IPC Hooks Instead of Monolithic `useTauriDaemon`**:
    - *Original guideline*: Route every IPC call through `useTauriDaemon`.
@@ -115,13 +115,13 @@ Includes `set_project_path`, `read_file`, `write_file`, `read_file_bytes` (raw b
 ```bash
 # Development
 pnpm tauri:dev                              # Desktop app with hot reload
-pnpm --filter @lmms-lab/writer-web dev      # Marketing website
+pnpm --filter @orchestratex/web dev         # Marketing website
 
 # Build & Typecheck
-pnpm --filter @lmms-lab/writer-shared build
+pnpm --filter @orchestratex/shared build
 cd apps/desktop && pnpm tsc --noEmit
 cd apps/desktop && pnpm test
-pnpm --filter @lmms-lab/writer-desktop build
+pnpm --filter @orchestratex/desktop build
 cd apps/desktop/src-tauri && cargo check --all-targets && cargo test --lib
 
 # Lint & Format

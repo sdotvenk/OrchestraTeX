@@ -73,7 +73,7 @@ $projectRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
 $tauriDir = Join-Path $projectRoot "apps/desktop/src-tauri"
 
 Write-Host "=========================================="
-Write-Host "Building Windows bundles for LMMs-Lab Writer"
+Write-Host "Building Windows bundles for OrchestraTeX"
 Write-Host "=========================================="
 Write-Host ""
 Write-Host "Architectures: $($selectedArch -join ', ')"
@@ -120,7 +120,7 @@ foreach ($archName in $selectedArch) {
     Write-Host "[BUILD] $archName ($target)"
     Invoke-External -FilePath "pnpm" -Arguments @(
         "--filter",
-        "@lmms-lab/writer-desktop",
+        "@orchestratex/desktop",
         "tauri",
         "build",
         "--target",

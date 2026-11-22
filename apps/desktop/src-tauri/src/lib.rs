@@ -27,11 +27,7 @@ fn is_external_url(url: &url::Url, dev_port: u16) -> bool {
         return false;
     }
 
-    if host == "tauri.localhost" {
-        return false;
-    }
-
-    true
+    host != "tauri.localhost"
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -130,7 +126,7 @@ pub fn run() {
             };
 
             let mut builder = WebviewWindowBuilder::new(app, "main", webview_url)
-                .title("LMMs-Lab Writer")
+                .title("OrchestraTeX")
                 .inner_size(1400.0, 900.0)
                 .min_inner_size(960.0, 640.0)
                 .resizable(true)

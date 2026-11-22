@@ -1,4 +1,4 @@
-import type { FileNode } from "@lmms-lab/writer-shared";
+import type { FileNode } from "@orchestratex/shared";
 import { pathSync } from "@/lib/path";
 
 /**

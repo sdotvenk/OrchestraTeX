@@ -10,7 +10,8 @@ import type {
   RuntimeMode,
 } from "./types";
 
-const AGENT_SETTINGS_KEY = "lmms-lab-writer:agent-settings:v1";
+const AGENT_SETTINGS_KEY = "orchestratex:agent-settings:v1";
+const LEGACY_AGENT_SETTINGS_KEY = "lmms-lab-writer:agent-settings:v1";
 
 function createDefaultCustomProviders(): Record<AgentProviderId, ProviderCustomSettings> {
   return {
@@ -92,7 +93,9 @@ function loadStoredAgentSettings(): AgentSettings {
     return DEFAULT_AGENT_SETTINGS;
   }
   try {
-    const stored = window.localStorage.getItem(AGENT_SETTINGS_KEY);
+    const stored =
+      window.localStorage.getItem(AGENT_SETTINGS_KEY) ??
+      window.localStorage.getItem(LEGACY_AGENT_SETTINGS_KEY);
     if (!stored) {
       return DEFAULT_AGENT_SETTINGS;
     }

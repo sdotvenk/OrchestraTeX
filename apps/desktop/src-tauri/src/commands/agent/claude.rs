@@ -2,10 +2,10 @@ use super::binary::{decode_data_url, find_cli_binary, spawn_cli_command};
 use super::store::ThreadStore;
 use super::types::{
     now_millis, AccountInfo, AgentMessage, AgentPart, AgentProviderId, AgentStreamEvent,
-    AgentThread, AttachmentInput, InteractionMode, InteractionResponse, ModelInfo,
-    ModelTokenUsage, PendingInteraction, PermissionOption, PlanTaskItem, ProviderStatus,
-    QuestionItem, QuestionOption, RateLimitWindow, RateLimitsSnapshot, RuntimeMode,
-    SlashCommandInfo, TokenUsageSnapshot,
+    AgentThread, AttachmentInput, InteractionMode, InteractionResponse, ModelInfo, ModelTokenUsage,
+    PendingInteraction, PermissionOption, PlanTaskItem, ProviderStatus, QuestionItem,
+    QuestionOption, RateLimitWindow, RateLimitsSnapshot, RuntimeMode, SlashCommandInfo,
+    TokenUsageSnapshot,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -134,7 +134,10 @@ impl ClaudeSessionHandle {
         .ok_or_else(|| format!("Pending interaction '{}' not found", interaction_id))?;
 
         let response_payload = match (&pending.interaction, response) {
-            (PendingInteraction::Question { questions, .. }, InteractionResponse::QuestionAnswer { answers, dismissed }) => {
+            (
+                PendingInteraction::Question { questions, .. },
+                InteractionResponse::QuestionAnswer { answers, dismissed },
+            ) => {
                 if *dismissed {
                     json!({
                         "behavior": "deny",
@@ -157,9 +160,13 @@ impl ClaudeSessionHandle {
                     })
                 }
             }
-            (PendingInteraction::PlanApproval { .. }, InteractionResponse::PlanDecision { approved, feedback }) => {
+            (
+                PendingInteraction::PlanApproval { .. },
+                InteractionResponse::PlanDecision { approved, feedback },
+            ) => {
                 if *approved {
-                    let next_mode = map_claude_permission_mode(InteractionMode::Default, runtime_mode);
+                    let next_mode =
+                        map_claude_permission_mode(InteractionMode::Default, runtime_mode);
                     let _ = self.write_json(&json!({
                         "type": "control_request",
                         "request_id": format!("pm_{}", uuid::Uuid::new_v4()),
@@ -179,7 +186,12 @@ impl ClaudeSessionHandle {
                     })
                 }
             }
-            (PendingInteraction::Approval { .. }, InteractionResponse::ApprovalDecision { decision, reason, .. }) => {
+            (
+                PendingInteraction::Approval { .. },
+                InteractionResponse::ApprovalDecision {
+                    decision, reason, ..
+                },
+            ) => {
                 if decision == "allow_once" {
                     json!({
                         "behavior": "allow",
@@ -335,7 +347,8 @@ pub async fn probe_claude(
                     .map(|s| s.to_string()),
             });
             if !authenticated {
-                auth_error = Some("Not signed in to Claude Code. Run `claude auth login`.".to_string());
+                auth_error =
+                    Some("Not signed in to Claude Code. Run `claude auth login`.".to_string());
             }
         } else if !out.status.success() {
             auth_error = Some("Unable to verify Claude Code authentication.".to_string());
@@ -376,7 +389,10 @@ pub async fn probe_claude(
             if account.is_none() {
                 if let Some(acc) = init_resp.get("account") {
                     account = Some(AccountInfo {
-                        email: acc.get("email").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                        email: acc
+                            .get("email")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
                         organization: acc
                             .get("organization")
                             .and_then(|v| v.as_str())
@@ -627,10 +643,8 @@ pub async fn spawn_claude_session(
         }
     }
 
-    let perm_mode = map_claude_permission_mode(
-        thread.summary.interaction_mode,
-        thread.summary.runtime_mode,
-    );
+    let perm_mode =
+        map_claude_permission_mode(thread.summary.interaction_mode, thread.summary.runtime_mode);
     args.push("--permission-mode".to_string());
     args.push(perm_mode.to_string());
     if thread.summary.runtime_mode == RuntimeMode::FullAccess {
@@ -850,14 +864,16 @@ pub async fn spawn_claude_session(
                             }
                         }
                         "content_block_start" => {
-                            let idx = ev.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                            let idx =
+                                ev.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                             let Some(cb) = ev.get("content_block") else {
                                 continue;
                             };
                             let cb_type = cb.get("type").and_then(|v| v.as_str()).unwrap_or("");
                             match cb_type {
                                 "text" => {
-                                    let pid = format!("txt_{}_{}_{}", msg_id, current_step_key, idx);
+                                    let pid =
+                                        format!("txt_{}_{}_{}", msg_id, current_step_key, idx);
                                     let part = AgentPart::Text {
                                         id: pid.clone(),
                                         text: cb
@@ -887,7 +903,8 @@ pub async fn spawn_claude_session(
                                     );
                                 }
                                 "thinking" => {
-                                    let pid = format!("thk_{}_{}_{}", msg_id, current_step_key, idx);
+                                    let pid =
+                                        format!("thk_{}_{}_{}", msg_id, current_step_key, idx);
                                     let part = AgentPart::Reasoning {
                                         id: pid.clone(),
                                         text: cb
@@ -932,7 +949,8 @@ pub async fn spawn_claude_session(
                                     } else {
                                         format!("tool_{}", call_id)
                                     };
-                                    let input = cb.get("input").cloned().unwrap_or_else(|| json!({}));
+                                    let input =
+                                        cb.get("input").cloned().unwrap_or_else(|| json!({}));
                                     let part = AgentPart::Tool {
                                         id: pid.clone(),
                                         call_id: call_id.clone(),
@@ -970,22 +988,30 @@ pub async fn spawn_claude_session(
                             }
                         }
                         "content_block_delta" => {
-                            let idx = ev.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                            let idx =
+                                ev.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                             let Some(delta_obj) = ev.get("delta") else {
                                 continue;
                             };
-                            let delta_type = delta_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            let delta_type =
+                                delta_obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
                             if let Some(block) = active_blocks.get_mut(&idx) {
                                 match delta_type {
                                     "text_delta" => {
-                                        if let Some(txt) = delta_obj.get("text").and_then(|v| v.as_str()) {
+                                        if let Some(txt) =
+                                            delta_obj.get("text").and_then(|v| v.as_str())
+                                        {
                                             let part_id = block.part_id.clone();
                                             let _ = store_out
-                                                .mutate_thread_memory(&project_path, &thread_id, |t| {
-                                                    ThreadStore::append_delta_in_thread(
-                                                        t, &msg_id, &part_id, "text", txt,
-                                                    );
-                                                })
+                                                .mutate_thread_memory(
+                                                    &project_path,
+                                                    &thread_id,
+                                                    |t| {
+                                                        ThreadStore::append_delta_in_thread(
+                                                            t, &msg_id, &part_id, "text", txt,
+                                                        );
+                                                    },
+                                                )
                                                 .await;
                                             let _ = app_out.emit(
                                                 "agent-event",
@@ -1000,14 +1026,24 @@ pub async fn spawn_claude_session(
                                         }
                                     }
                                     "thinking_delta" => {
-                                        if let Some(txt) = delta_obj.get("thinking").and_then(|v| v.as_str()) {
+                                        if let Some(txt) =
+                                            delta_obj.get("thinking").and_then(|v| v.as_str())
+                                        {
                                             let part_id = block.part_id.clone();
                                             let _ = store_out
-                                                .mutate_thread_memory(&project_path, &thread_id, |t| {
-                                                    ThreadStore::append_delta_in_thread(
-                                                        t, &msg_id, &part_id, "reasoning", txt,
-                                                    );
-                                                })
+                                                .mutate_thread_memory(
+                                                    &project_path,
+                                                    &thread_id,
+                                                    |t| {
+                                                        ThreadStore::append_delta_in_thread(
+                                                            t,
+                                                            &msg_id,
+                                                            &part_id,
+                                                            "reasoning",
+                                                            txt,
+                                                        );
+                                                    },
+                                                )
                                                 .await;
                                             let _ = app_out.emit(
                                                 "agent-event",
@@ -1033,18 +1069,28 @@ pub async fn spawn_claude_session(
                             }
                         }
                         "content_block_stop" => {
-                            let idx = ev.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                            let idx =
+                                ev.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                             if let Some(block) = active_blocks.remove(&idx) {
                                 if block.kind == "tool" && !block.json_buf.is_empty() {
-                                    if let Ok(parsed_input) = serde_json::from_str::<Value>(&block.json_buf) {
-                                        let tool_name = block.tool_name.clone().unwrap_or_else(|| "tool".to_string());
-                                        let call_id = block.tool_call_id.clone().unwrap_or_default();
+                                    if let Ok(parsed_input) =
+                                        serde_json::from_str::<Value>(&block.json_buf)
+                                    {
+                                        let tool_name = block
+                                            .tool_name
+                                            .clone()
+                                            .unwrap_or_else(|| "tool".to_string());
+                                        let call_id =
+                                            block.tool_call_id.clone().unwrap_or_default();
                                         let file_path = extract_file_path_from_input(&parsed_input);
                                         tool_inputs_by_call.insert(
                                             call_id.clone(),
                                             (tool_name.clone(), parsed_input.clone()),
                                         );
-                                        if let Some(tasks) = extract_tasks_from_claude_tool(&tool_name, &parsed_input) {
+                                        if let Some(tasks) = extract_tasks_from_claude_tool(
+                                            &tool_name,
+                                            &parsed_input,
+                                        ) {
                                             let _ = store_out
                                                 .mutate_thread(&project_path, &thread_id, |t| {
                                                     ThreadStore::set_tasks(t, tasks.clone());
@@ -1073,7 +1119,11 @@ pub async fn spawn_claude_session(
                                         };
                                         let _ = store_out
                                             .mutate_thread(&project_path, &thread_id, |t| {
-                                                ThreadStore::upsert_part_in_thread(t, &msg_id, part.clone());
+                                                ThreadStore::upsert_part_in_thread(
+                                                    t,
+                                                    &msg_id,
+                                                    part.clone(),
+                                                );
                                             })
                                             .await;
                                         let _ = app_out.emit(
@@ -1135,7 +1185,8 @@ pub async fn spawn_claude_session(
 
                         if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
                             for (idx, block) in content.iter().enumerate() {
-                                let btype = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                let btype =
+                                    block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                                 match btype {
                                     "text" => {
                                         let text = block
@@ -1143,7 +1194,8 @@ pub async fn spawn_claude_session(
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        let pid = format!("txt_{}_{}_{}", msg_id, envelope_step_key, idx);
+                                        let pid =
+                                            format!("txt_{}_{}_{}", msg_id, envelope_step_key, idx);
                                         parts_to_upsert.push(AgentPart::Text { id: pid, text });
                                     }
                                     "thinking" => {
@@ -1152,8 +1204,10 @@ pub async fn spawn_claude_session(
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        let pid = format!("thk_{}_{}_{}", msg_id, envelope_step_key, idx);
-                                        parts_to_upsert.push(AgentPart::Reasoning { id: pid, text });
+                                        let pid =
+                                            format!("thk_{}_{}_{}", msg_id, envelope_step_key, idx);
+                                        parts_to_upsert
+                                            .push(AgentPart::Reasoning { id: pid, text });
                                     }
                                     "tool_use" => {
                                         let call_id = block
@@ -1330,10 +1384,8 @@ pub async fn spawn_claude_session(
                                             ThreadStore::upsert_part_in_thread(t, &msg_id, part);
                                         }
                                         if !changed_files.is_empty() {
-                                            if let Some(m) = t
-                                                .messages
-                                                .iter_mut()
-                                                .find(|m| m.id == msg_id)
+                                            if let Some(m) =
+                                                t.messages.iter_mut().find(|m| m.id == msg_id)
                                             {
                                                 for cf in &changed_files {
                                                     if !m.changed_files.contains(cf) {
@@ -1778,10 +1830,10 @@ pub fn parse_claude_rate_limit(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let resets_at = info.get("resetsAt").and_then(|v| v.as_i64());
-    let used_percent = info
-        .get("utilization")
-        .and_then(|v| v.as_f64())
-        .map(|u| if u <= 1.0 { u * 100.0 } else { u });
+    let used_percent =
+        info.get("utilization")
+            .and_then(|v| v.as_f64())
+            .map(|u| if u <= 1.0 { u * 100.0 } else { u });
 
     let mut windows = existing.map(|e| e.windows.clone()).unwrap_or_default();
     let new_win = RateLimitWindow {
@@ -1805,7 +1857,10 @@ pub fn parse_claude_rate_limit(
         windows,
         credits_balance: None,
         note: if used_percent.is_none() {
-            Some("Claude Code reports exact utilization once usage nears window thresholds.".to_string())
+            Some(
+                "Claude Code reports exact utilization once usage nears window thresholds."
+                    .to_string(),
+            )
         } else {
             None
         },

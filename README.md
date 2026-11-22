@@ -1,16 +1,10 @@
 <div align="center">
 
-<a href="https://writer.lmms-lab.com">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="imgs/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="imgs/logo-light.svg">
-  <img alt="LMMs-Lab Writer" src="imgs/logo-light.svg" width="512">
-</picture>
-</a>
+# OrchestraTeX
 
-**T3Code-Style Multi-Provider Agent Runtime & Overleaf-Grade Live LaTeX Workspace (Overhaul of [LMMs-Lab Writer](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer))**
+**Local-First Multi-Provider AI Agent & Overleaf-Grade Live LaTeX Workspace**
 
-> The original upstream README is preserved verbatim in **[README_ORIGINAL.md](README_ORIGINAL.md)** (and below under [Original Project Overview](#original-project-overview)).
+*A standalone overhaul originating from [LMMs-Lab Writer](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer) — preserving the original upstream README verbatim in [README_ORIGINAL.md](README_ORIGINAL.md).*
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f0c000?style=flat-square)](LICENSE)
 [![macOS](https://img.shields.io/badge/-macOS-111111?style=flat-square&logo=apple&logoColor=white)](#cross-platform-packaging)
@@ -25,11 +19,11 @@ English | [Original README](README_ORIGINAL.md) | [Developer Guide](docs/dev.md)
 
 ---
 
-## What Changed in This Overhaul (vs. Original LMMs-Lab Writer)
+## What Changed in OrchestraTeX (vs. Original LMMs-Lab Writer)
 
-This fork significantly overhauls the desktop application's **agentic runtime**, **LaTeX live-preview & authoring pipeline**, **performance architecture**, and **cross-platform packaging**, while keeping the retro-terminal monochrome + orange UI aesthetic and all existing Git, terminal, and local-first capabilities intact.
+OrchestraTeX is a major standalone overhaul of [LMMs-Lab Writer](https://github.com/EvolvingLMMs-Lab/lmms-lab-writer) that replaces the legacy embedded OpenCode daemon with a **direct multi-provider CLI/protocol runtime**, introduces an **Overleaf-grade live LaTeX authoring & PDF preview pipeline**, refactors the **performance architecture**, and cleans up **cross-platform packaging** — while preserving the retro-terminal monochrome + orange aesthetic and local-first Git/terminal capabilities.
 
-| Area | Original LMMs-Lab Writer | This Overhaul |
+| Area | Original LMMs-Lab Writer | OrchestraTeX |
 | --- | --- | --- |
 | **Agent Backend** | Embedded `opencode serve` daemon on `localhost:4096` (HTTP + SSE) | **Direct TOS-compliant native CLI/protocol bridges** in Rust: **Claude Code** (`stream-json` stdio), **OpenAI Codex** (`codex app-server --stdio` JSON-RPC 2.0), **Antigravity** (`agy acp --stdio` ACP), and **Custom ACP** binaries |
 | **Chat & Thread UX** | Single OpenCode session pane | **Full T3Code-style workspace**: persistent per-project threads (pin, rename, search, filter, fork, delete), model & reasoning effort selectors, **Default / Plan** interaction modes, **Ask / Auto-Edit / Full Access** permission policies, `/` slash commands, `@` file mentions, image paste/drop/lightbox, message queueing with **Steer / Edit / Remove**, and one-click terminal login |
@@ -65,11 +59,11 @@ Instead of bundling or proxying through an OpenCode daemon, the Rust backend (`a
 - **macOS (Apple Silicon & Intel)**: Removed hardcoded Catalina (`10.15`) checks from `apps/desktop/src-tauri/tauri.conf.json` and `scripts/build-pkg.sh`.
 - **Windows (64-bit)**: Resolves `.exe`/`.cmd`/`.bat` CLI wrappers automatically and hides console windows via `CREATE_NO_WINDOW`.
 
-## Quick Start (Overhauled Build)
+## Quick Start
 
 ```bash
-git clone <this-repo>
-cd lmms-lab-writer-t3
+git clone https://github.com/sdotvenk/OrchestraTeX.git
+cd OrchestraTeX
 pnpm install
 pnpm tauri:dev
 ```

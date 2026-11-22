@@ -274,9 +274,7 @@ pub async fn import_external_file(
     let dest_str = dest_full.to_string_lossy().to_string();
     validate_path_within_project(&dest_str, &project_path)?;
 
-    fs::copy(src, &dest_full)
-        .await
-        .map_err(|e| e.to_string())?;
+    fs::copy(src, &dest_full).await.map_err(|e| e.to_string())?;
     Ok(normalized_rel)
 }
 

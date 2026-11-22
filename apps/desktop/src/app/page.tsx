@@ -210,13 +210,13 @@ function buildBasenameIndex(nodes: TreeNode[]): Map<string, string[]> {
 const AI_COMMIT_DIFF_LIMIT = 30000;
 
 function collectRelativeFilesByExt(
-  nodes: import("@lmms-lab/writer-shared").FileNode[],
+  nodes: import("@orchestratex/shared").FileNode[],
   projectRoot: string,
   extRegex: RegExp,
 ): string[] {
   const normRoot = projectRoot.replace(/\\/g, "/").replace(/\/+$/, "");
   const out: string[] = [];
-  const visit = (items: import("@lmms-lab/writer-shared").FileNode[]) => {
+  const visit = (items: import("@orchestratex/shared").FileNode[]) => {
     for (const n of items) {
       if (n.type === "file") {
         const norm = n.path.replace(/\\/g, "/");
@@ -2509,23 +2509,23 @@ export default function EditorPage() {
                 type="button"
                 onClick={() => {
                   import("@tauri-apps/plugin-shell").then(({ open }) => {
-                    open("https://writer.lmms-lab.com");
+                    open("https://github.com/sdotvenk/OrchestraTeX");
                   });
                 }}
                 className="hover:opacity-70 transition-opacity flex items-center"
-                title="Visit writer.lmms-lab.com"
-                aria-label="Open LMMs-Lab website"
+                title="OrchestraTeX on GitHub"
+                aria-label="Open OrchestraTeX repository"
               >
                 <Image
                   src="/logo-small-light.svg"
-                  alt="LMMs-Lab Writer"
+                  alt="OrchestraTeX"
                   width={140}
                   height={28}
                   className="h-7 w-auto dark:hidden"
                 />
                 <Image
                   src="/logo-small-dark.svg"
-                  alt="LMMs-Lab Writer"
+                  alt="OrchestraTeX"
                   width={140}
                   height={28}
                   className="h-7 w-auto hidden dark:block"
@@ -2534,7 +2534,7 @@ export default function EditorPage() {
               <span className="text-border">/</span>
               <div className="flex items-center gap-2 min-w-0">
                 <div className="text-sm font-medium px-2 py-1 -ml-2 truncate">
-                  {daemon.projectPath ? pathSync.basename(daemon.projectPath) : "LMMs-Lab Writer"}
+                  {daemon.projectPath ? pathSync.basename(daemon.projectPath) : "OrchestraTeX"}
                 </div>
                 {isSaving && <span className="text-xs text-muted shrink-0">Saving...</span>}
               </div>
@@ -2800,20 +2800,31 @@ export default function EditorPage() {
                     </div>
                   ) : (
                     <div className="flex flex-col items-center justify-center text-center px-6">
-                      <Image
-                        src="/logo-light.svg"
-                        alt="LMMs-Lab Writer"
-                        width={320}
-                        height={96}
-                        className="h-24 w-auto mb-10 dark:hidden"
-                      />
-                      <Image
-                        src="/logo-dark.svg"
-                        alt="LMMs-Lab Writer"
-                        width={320}
-                        height={96}
-                        className="h-24 w-auto mb-10 hidden dark:block"
-                      />
+                      <div className="flex items-center gap-4 mb-3">
+                        <Image
+                          src="/logo-small-light.svg"
+                          alt="OrchestraTeX"
+                          width={56}
+                          height={67}
+                          className="h-14 w-auto dark:hidden"
+                        />
+                        <Image
+                          src="/logo-small-dark.svg"
+                          alt="OrchestraTeX"
+                          width={56}
+                          height={67}
+                          className="h-14 w-auto hidden dark:block"
+                        />
+                        <div className="text-left">
+                          <h1 className="font-mono text-3xl font-bold tracking-tight uppercase text-foreground">
+                            Orchestra<span className="text-accent">TeX</span>
+                          </h1>
+                          <p className="font-mono text-[11px] uppercase tracking-widest text-muted">
+                            Multi-Provider Agent &amp; Live LaTeX Workspace
+                          </p>
+                        </div>
+                      </div>
+                      <div className="w-64 border-b border-border mb-8" />
                       <button type="button" onClick={handleOpenFolder} className="btn btn-primary">
                         Open Folder
                       </button>

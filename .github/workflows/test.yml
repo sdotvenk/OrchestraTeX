@@ -26,7 +26,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @lmms-lab/writer-shared build
+      - run: pnpm --filter @orchestratex/shared build
 
       - run: pnpm test:ci
 

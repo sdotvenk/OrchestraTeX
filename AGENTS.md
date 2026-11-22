@@ -1,15 +1,15 @@
-# AGENTS.md - LMMs-Lab Writer
+# AGENTS.md - OrchestraTeX
 
-**Updated:** 2026-05-31 | **Branch:** main
+**Updated:** 2026-11-22 | **Branch:** main
 
 ## Overview
 
-AI-native LaTeX editor. Tauri v2 desktop application - let Claude, Cursor, Codex, and OpenCode write your papers while you focus on research. Local-first, cross-platform (macOS, Windows, Linux).
+AI-native LaTeX editor and multi-provider agent workspace. Tauri v2 desktop application — let Claude Code, OpenAI Codex, Antigravity, and Custom ACP agents collaborate on your LaTeX papers with Overleaf-style live PDF preview while you focus on research. Local-first, cross-platform (macOS, Windows, Linux).
 
 ## Architecture
 
 ```
-lmms-lab-writer/
+OrchestraTeX/
 ├── apps/
 │   ├── desktop/              # Tauri v2 desktop app
 │   │   ├── src/              # Next.js frontend (React 19, static export)
@@ -92,12 +92,12 @@ lmms-lab-writer/
 ```bash
 # Development
 pnpm tauri:dev                              # Run Tauri desktop app in dev mode
-pnpm --filter @lmms-lab/writer-web dev      # Run website in dev mode
+pnpm --filter @orchestratex/web dev         # Run website in dev mode
 
 # Build
 pnpm build                                  # Build all packages
 pnpm tauri:build                            # Build desktop app (.app/.dmg/.exe/.deb)
-pnpm --filter @lmms-lab/writer-web build    # Build website
+pnpm --filter @orchestratex/web build       # Build website
 
 # Verify
 cd apps/desktop/src-tauri && cargo check    # Check Rust
@@ -216,7 +216,7 @@ netstat -ano | findstr :3000
 pkill -f "tauri" && pkill -f "next"
 
 # Kill stuck processes (Windows)
-taskkill /f /im "lmms-lab-writer.exe" 2>nul & taskkill /f /im "node.exe" /fi "WINDOWTITLE eq next" 2>nul
+taskkill /f /im "orchestratex.exe" 2>nul & taskkill /f /im "node.exe" /fi "WINDOWTITLE eq next" 2>nul
 ```
 
 ### Debug Layers (check in order)
@@ -252,11 +252,11 @@ taskkill /f /im "lmms-lab-writer.exe" 2>nul & taskkill /f /im "node.exe" /fi "WI
 ### Build Locations
 
 ```
-macOS:   apps/desktop/src-tauri/target/release/bundle/macos/LMMs-Lab Writer.app
-         apps/desktop/src-tauri/target/release/bundle/dmg/LMMs-Lab Writer_*.dmg
-Windows: apps/desktop/src-tauri/target/release/bundle/nsis/LMMs-Lab Writer_*-setup.exe
-Linux:   apps/desktop/src-tauri/target/release/bundle/appimage/LMMs-Lab Writer_*.AppImage
-         apps/desktop/src-tauri/target/release/bundle/deb/lmms-lab-writer_*.deb
+macOS:   apps/desktop/src-tauri/target/release/bundle/macos/OrchestraTeX.app
+         apps/desktop/src-tauri/target/release/bundle/dmg/OrchestraTeX_*.dmg
+Windows: apps/desktop/src-tauri/target/release/bundle/nsis/OrchestraTeX_*-setup.exe
+Linux:   apps/desktop/src-tauri/target/release/bundle/appimage/OrchestraTeX_*.AppImage
+         apps/desktop/src-tauri/target/release/bundle/deb/orchestratex_*.deb
 ```
 
 ## Anti-Patterns

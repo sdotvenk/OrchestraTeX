@@ -84,10 +84,11 @@ impl ThreadStore {
 
     pub async fn list_threads(&self, project_path: &str) -> Result<Vec<ThreadSummary>, String> {
         let mut cache = self.cache.lock().await;
-        let key = self.ensure_loaded_in_cache(project_path, &mut cache).await?;
+        let key = self
+            .ensure_loaded_in_cache(project_path, &mut cache)
+            .await?;
         let threads = cache.get(&key).map(|v| v.as_slice()).unwrap_or(&[]);
-        let mut summaries: Vec<ThreadSummary> =
-            threads.iter().map(|t| t.summary.clone()).collect();
+        let mut summaries: Vec<ThreadSummary> = threads.iter().map(|t| t.summary.clone()).collect();
         summaries.sort_by(|a, b| {
             b.pinned
                 .cmp(&a.pinned)
@@ -102,7 +103,9 @@ impl ThreadStore {
         thread_id: &str,
     ) -> Result<Option<AgentThread>, String> {
         let mut cache = self.cache.lock().await;
-        let key = self.ensure_loaded_in_cache(project_path, &mut cache).await?;
+        let key = self
+            .ensure_loaded_in_cache(project_path, &mut cache)
+            .await?;
         Ok(cache
             .get(&key)
             .and_then(|threads| threads.iter().find(|t| t.summary.id == thread_id).cloned()))
@@ -122,10 +125,7 @@ impl ThreadStore {
             }
         }
         let _guard = self.io_lock.lock().await;
-        if !tokio::fs::try_exists(&self.root_dir)
-            .await
-            .unwrap_or(false)
-        {
+        if !tokio::fs::try_exists(&self.root_dir).await.unwrap_or(false) {
             return Ok(None);
         }
         let mut entries = tokio::fs::read_dir(&self.root_dir)
@@ -151,7 +151,9 @@ impl ThreadStore {
         let project_path = thread.summary.project_path.clone();
         let snapshot = {
             let mut cache = self.cache.lock().await;
-            let key = self.ensure_loaded_in_cache(&project_path, &mut cache).await?;
+            let key = self
+                .ensure_loaded_in_cache(&project_path, &mut cache)
+                .await?;
             let threads = cache.entry(key).or_default();
             if let Some(existing) = threads
                 .iter_mut()
@@ -179,7 +181,9 @@ impl ThreadStore {
         F: FnOnce(&mut AgentThread),
     {
         let mut cache = self.cache.lock().await;
-        let key = self.ensure_loaded_in_cache(project_path, &mut cache).await?;
+        let key = self
+            .ensure_loaded_in_cache(project_path, &mut cache)
+            .await?;
         if let Some(target) = cache
             .get_mut(&key)
             .and_then(|threads| threads.iter_mut().find(|t| t.summary.id == thread_id))
@@ -217,7 +221,9 @@ impl ThreadStore {
     {
         let (cloned, snapshot) = {
             let mut cache = self.cache.lock().await;
-            let key = self.ensure_loaded_in_cache(project_path, &mut cache).await?;
+            let key = self
+                .ensure_loaded_in_cache(project_path, &mut cache)
+                .await?;
             let Some(threads) = cache.get_mut(&key) else {
                 return Ok(None);
             };
@@ -237,7 +243,9 @@ impl ThreadStore {
     pub async fn delete_thread(&self, project_path: &str, thread_id: &str) -> Result<(), String> {
         let snapshot = {
             let mut cache = self.cache.lock().await;
-            let key = self.ensure_loaded_in_cache(project_path, &mut cache).await?;
+            let key = self
+                .ensure_loaded_in_cache(project_path, &mut cache)
+                .await?;
             let threads = cache.entry(key).or_default();
             threads.retain(|t| t.summary.id != thread_id);
             threads.clone()
@@ -246,6 +254,7 @@ impl ThreadStore {
         self.write_all_locked(project_path, &snapshot).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_thread(
         &self,
         project_path: String,
@@ -293,7 +302,13 @@ impl ThreadStore {
             let truncated: String = preview.chars().take(100).collect();
             thread.summary.last_preview = Some(truncated);
             if thread.summary.title == "New Chat" && message.role == "user" {
-                let title_text: String = preview.lines().next().unwrap_or(preview).chars().take(48).collect();
+                let title_text: String = preview
+                    .lines()
+                    .next()
+                    .unwrap_or(preview)
+                    .chars()
+                    .take(48)
+                    .collect();
                 if !title_text.is_empty() {
                     thread.summary.title = title_text;
                 }
@@ -304,11 +319,7 @@ impl ThreadStore {
         thread.summary.updated_at = now_millis();
     }
 
-    pub fn upsert_part_in_thread(
-        thread: &mut AgentThread,
-        message_id: &str,
-        part: AgentPart,
-    ) {
+    pub fn upsert_part_in_thread(thread: &mut AgentThread, message_id: &str, part: AgentPart) {
         if let Some(msg) = thread.messages.iter_mut().find(|m| m.id == message_id) {
             if let Some(existing) = msg.parts.iter_mut().find(|p| p.id() == part.id()) {
                 *existing = part;
@@ -372,7 +383,10 @@ impl ThreadStore {
 }
 
 pub fn project_storage_key(project_path: &str) -> String {
-    let normalized = project_path.replace('\\', "/").trim_end_matches('/').to_string();
+    let normalized = project_path
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in normalized.as_bytes() {
         hash ^= *byte as u64;

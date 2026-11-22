@@ -73,7 +73,7 @@ jobs:
         run: node scripts/sync-version.mjs --from-tag ${{ github.ref_name }}
 
       - name: Build Tauri app
-        run: pnpm --filter @lmms-lab/writer-desktop tauri build --ci -v ${{ matrix.target && format('--target {0}', matrix.target) }}
+        run: pnpm --filter @orchestratex/desktop tauri build --ci -v ${{ matrix.target && format('--target {0}', matrix.target) }}
 
       - name: Build PKG installer (macOS release)
         if: startsWith(matrix.os, 'macos') && startsWith(github.ref, 'refs/tags/v')
@@ -117,7 +117,8 @@ jobs:
           node scripts/generate-aur-bin-package.mjs \
             --tag "${{ github.ref_name }}" \
             --linux-artifacts-dir aur-input \
-            --out-dir aur-dist/lmms-lab-writer-bin
+            --out-dir aur-dist/orchestratex-bin \
+            --repo "${{ github.repository }}"
 
       - name: Archive AUR package files
         if: ${{ !contains(github.ref_name, '-') }}
@@ -125,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p aur-dist
-          tar -czf "aur-dist/lmms-lab-writer-bin-${{ github.ref_name }}-aur.tar.gz" -C aur-dist/lmms-lab-writer-bin .
+          tar -czf "aur-dist/orchestratex-bin-${{ github.ref_name }}-aur.tar.gz" -C aur-dist/orchestratex-bin .
 
       - name: Upload AUR package files
         if: ${{ !contains(github.ref_name, '-') }}
@@ -133,7 +134,7 @@ jobs:
         with:
           name: build-AUR
           path: |
-            aur-dist/lmms-lab-writer-bin/**
+            aur-dist/orchestratex-bin/**
             aur-dist/*.tar.gz
           include-hidden-files: true
           retention-days: 7
@@ -173,7 +174,7 @@ jobs:
         run: node scripts/sync-version.mjs --from-tag ${{ github.ref_name }}
 
       - name: Compile Tauri app on Arch Linux
-        run: pnpm --filter @lmms-lab/writer-desktop tauri build --ci -v --no-bundle
+        run: pnpm --filter @orchestratex/desktop tauri build --ci -v --no-bundle
 
   release-github:
     name: Publish GitHub Release
@@ -203,7 +204,7 @@ jobs:
           files: |
             release-artifacts/**/*.dmg
             release-artifacts/**/*.pkg
-            release-artifacts/**/lmms-lab-writer-bin-*-aur.tar.gz
+            release-artifacts/**/orchestratex-bin-*-aur.tar.gz
             release-artifacts/**/*.app.tar.gz
             release-artifacts/**/*.exe
             release-artifacts/**/*.msi
@@ -224,7 +225,7 @@ jobs:
     container:
       image: archlinux:base-devel
     env:
-      AUR_PKGNAME: lmms-lab-writer-bin
+      AUR_PKGNAME: orchestratex-bin
     permissions:
       contents: write
     steps:
@@ -309,7 +310,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.ref_name }}" arch-package-output/*.pkg.tar.zst --repo EvolvingLMMs-Lab/lmms-lab-writer --clobber
+        run: gh release upload "${{ github.ref_name }}" arch-package-output/*.pkg.tar.zst --repo "${{ github.repository }}" --clobber
 
   publish-aur:
     name: Publish AUR Package
@@ -325,7 +326,7 @@ jobs:
       fail-fast: false
       matrix:
         aur_pkgname:
-          - lmms-lab-writer-bin
+          - orchestratex-bin
     steps:
       - name: Install dependencies
         run: |

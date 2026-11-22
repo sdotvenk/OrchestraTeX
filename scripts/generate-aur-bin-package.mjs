@@ -14,8 +14,8 @@ function parseArgs(argv) {
     tag: "",
     version: "",
     linuxArtifactsDir: "aur-input",
-    outDir: "aur-dist/lmms-lab-writer-bin",
-    repo: "EvolvingLMMs-Lab/lmms-lab-writer",
+    outDir: "aur-dist/orchestratex-bin",
+    repo: "sdotvenk/OrchestraTeX",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -149,16 +149,16 @@ const ARCH_DEPENDS = [
 function buildPkgbuild({ version, sourceFileName, sourceUrl, sha256 }) {
   const depends = ARCH_DEPENDS.map((dependency) => `'${dependency}'`).join(" ");
 
-  return `pkgname=lmms-lab-writer-bin
+  return `pkgname=orchestratex-bin
 pkgver=${version}
 pkgrel=1
-pkgdesc="AI-native LaTeX editor desktop application (prebuilt binary)"
+pkgdesc="OrchestraTeX — multi-provider AI agent & live LaTeX workspace (prebuilt binary)"
 arch=('x86_64')
-url="https://github.com/EvolvingLMMs-Lab/lmms-lab-writer"
+url="https://github.com/sdotvenk/OrchestraTeX"
 license=('MIT')
 depends=(${depends})
-provides=('lmms-lab-writer')
-conflicts=('lmms-lab-writer')
+provides=('orchestratex')
+conflicts=('orchestratex')
 options=(!strip)
 source_x86_64=("${sourceFileName}::${sourceUrl}")
 sha256sums_x86_64=('${sha256}')
@@ -184,21 +184,21 @@ package() {
 function buildSrcinfo({ version, sourceFileName, sourceUrl, sha256 }) {
   const depends = ARCH_DEPENDS.map((dependency) => `\tdepends = ${dependency}`).join("\n");
 
-  return `pkgbase = lmms-lab-writer-bin
-\tpkgdesc = AI-native LaTeX editor desktop application (prebuilt binary)
+  return `pkgbase = orchestratex-bin
+\tpkgdesc = OrchestraTeX — multi-provider AI agent & live LaTeX workspace (prebuilt binary)
 \tpkgver = ${version}
 \tpkgrel = 1
-\turl = https://github.com/EvolvingLMMs-Lab/lmms-lab-writer
+\turl = https://github.com/sdotvenk/OrchestraTeX
 \tarch = x86_64
 \tlicense = MIT
 ${depends}
-\tprovides = lmms-lab-writer
-\tconflicts = lmms-lab-writer
+\tprovides = orchestratex
+\tconflicts = orchestratex
 \toptions = !strip
 \tsource_x86_64 = ${sourceFileName}::${sourceUrl}
 \tsha256sums_x86_64 = ${sha256}
 
-pkgname = lmms-lab-writer-bin
+pkgname = orchestratex-bin
 `;
 }
 
@@ -211,7 +211,7 @@ function main() {
   const debAssetName = path.basename(debPath);
   const releaseAssetName = toGithubReleaseAssetName(debAssetName);
   const encodedAssetName = encodeURIComponent(releaseAssetName);
-  const sourceFileName = `lmms-lab-writer_${version}_amd64.deb`;
+  const sourceFileName = `orchestratex_${version}_amd64.deb`;
   const sourceUrl = `https://github.com/${args.repo}/releases/download/${tag}/${encodedAssetName}`;
   const sha256 = sha256File(debPath);
 
@@ -234,7 +234,7 @@ function main() {
   fs.writeFileSync(path.join(args.outDir, ".SRCINFO"), srcinfo, "utf8");
   fs.writeFileSync(
     path.join(args.outDir, "README.md"),
-    `# lmms-lab-writer-bin (AUR)\n\nGenerated from release tag ${tag}.\n\nFiles:\n- PKGBUILD\n- .SRCINFO\n`,
+    `# orchestratex-bin (AUR)\n\nGenerated from release tag ${tag}.\n\nFiles:\n- PKGBUILD\n- .SRCINFO\n`,
     "utf8",
   );
 

@@ -471,7 +471,10 @@ fn try_parse_file_line_error(line: &str) -> Option<LatexDiagnostic> {
         if msg.is_empty() {
             continue;
         }
-        let clean_file = file_part.strip_prefix("./").unwrap_or(file_part).to_string();
+        let clean_file = file_part
+            .strip_prefix("./")
+            .unwrap_or(file_part)
+            .to_string();
         return Some(LatexDiagnostic {
             file: clean_file,
             line: line_num,
@@ -613,6 +616,7 @@ fn validate_relative_main_file(main_file: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn latex_compile(
     app: AppHandle,
     state: State<'_, LaTeXCompilationState>,
@@ -675,12 +679,7 @@ pub async fn latex_compile(
             .unwrap_or_else(|| compiler.clone())
     };
 
-    let cmd_args = build_compile_args(
-        &compiler,
-        latexmk_engine.as_deref(),
-        &args,
-        &file_name,
-    );
+    let cmd_args = build_compile_args(&compiler, latexmk_engine.as_deref(), &args, &file_name);
 
     let env_path = build_tex_env_path();
     let mut cmd = command(&compiler_bin);
@@ -837,11 +836,9 @@ pub async fn latex_compile(
     let log_path_buf = work_dir.join(format!("{}.log", base_name));
     let pdf_path_str = pdf_path_buf.to_string_lossy().to_string();
 
-    let mut combined_log = if let Ok(log_text) = tokio::fs::read_to_string(&log_path_buf).await {
-        log_text
-    } else {
-        String::new()
-    };
+    let mut combined_log = tokio::fs::read_to_string(&log_path_buf)
+        .await
+        .unwrap_or_default();
 
     {
         let output_lines = collected_lines.lock().await;
@@ -922,7 +919,9 @@ pub async fn latex_clean_aux_files(
             validate_relative_main_file(mf)?;
             let main_rel_path = Path::new(mf);
             let work_dir: PathBuf = match main_rel_path.parent() {
-                Some(parent) if !parent.as_os_str().is_empty() => Path::new(&directory).join(parent),
+                Some(parent) if !parent.as_os_str().is_empty() => {
+                    Path::new(&directory).join(parent)
+                }
                 _ => Path::new(&directory).to_path_buf(),
             };
             let file_name = main_rel_path
@@ -1231,8 +1230,9 @@ pub async fn latex_get_distributions() -> Result<Vec<LaTeXDistribution>, String>
         distributions.push(LaTeXDistribution {
             name: "Tectonic".to_string(),
             id: "tectonic".to_string(),
-            description: "Fast standalone Rust TeX engine via Homebrew with automatic package fetching."
-                .to_string(),
+            description:
+                "Fast standalone Rust TeX engine via Homebrew with automatic package fetching."
+                    .to_string(),
             install_command: Some("brew install tectonic".to_string()),
             download_url: Some("https://tectonic-typesetting.github.io/".to_string()),
         });
@@ -1356,8 +1356,24 @@ pub async fn latex_install(
 async fn install_windows(app: &AppHandle, distribution_id: &str) -> Result<InstallResult, String> {
     match distribution_id {
         "tinytex" => install_tinytex_windows(app).await,
-        "miktex" => install_winget_windows(app, "MiKTeX.MiKTeX", "MiKTeX", "https://miktex.org/download").await,
-        "tectonic" => install_winget_windows(app, "tectonic-typesetting.tectonic", "Tectonic", "https://tectonic-typesetting.github.io/").await,
+        "miktex" => {
+            install_winget_windows(
+                app,
+                "MiKTeX.MiKTeX",
+                "MiKTeX",
+                "https://miktex.org/download",
+            )
+            .await
+        }
+        "tectonic" => {
+            install_winget_windows(
+                app,
+                "tectonic-typesetting.tectonic",
+                "Tectonic",
+                "https://tectonic-typesetting.github.io/",
+            )
+            .await
+        }
         _ => Ok(InstallResult {
             success: false,
             message:
@@ -1513,7 +1529,10 @@ async fn install_winget_windows(
         "latex-install-progress",
         InstallProgress {
             stage: "installing".to_string(),
-            message: format!("Installing {} via winget... This may take several minutes.", display_name),
+            message: format!(
+                "Installing {} via winget... This may take several minutes.",
+                display_name
+            ),
             progress: Some(0.2),
         },
     );
@@ -1737,7 +1756,10 @@ async fn install_brew(
         "latex-install-progress",
         InstallProgress {
             stage: "installing".to_string(),
-            message: format!("Installing {} via Homebrew... This may take a while.", package),
+            message: format!(
+                "Installing {} via Homebrew... This may take a while.",
+                package
+            ),
             progress: Some(0.2),
         },
     );
@@ -2111,7 +2133,12 @@ mod tests {
     #[test]
     fn build_compile_args_matches_engines() {
         assert_eq!(
-            build_compile_args("latexmk", Some("xelatex"), &["-shell-escape".into()], "main.tex"),
+            build_compile_args(
+                "latexmk",
+                Some("xelatex"),
+                &["-shell-escape".into()],
+                "main.tex"
+            ),
             vec![
                 "-xelatex",
                 "-interaction=nonstopmode",
@@ -2127,7 +2154,12 @@ mod tests {
         );
         assert_eq!(
             build_compile_args("pdflatex", None, &[], "main.tex"),
-            vec!["-interaction=nonstopmode", "-file-line-error", "-synctex=1", "main.tex"]
+            vec![
+                "-interaction=nonstopmode",
+                "-file-line-error",
+                "-synctex=1",
+                "main.tex"
+            ]
         );
     }
 
@@ -2228,9 +2260,15 @@ SyncTeX result end
         tokio::fs::write(root.join("paper.tex"), "\\documentclass{article}")
             .await
             .unwrap();
-        tokio::fs::write(root.join("paper.aux"), "aux").await.unwrap();
-        tokio::fs::write(root.join("paper.log"), "log").await.unwrap();
-        tokio::fs::write(root.join("other.aux"), "keep").await.unwrap();
+        tokio::fs::write(root.join("paper.aux"), "aux")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("paper.log"), "log")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("other.aux"), "keep")
+            .await
+            .unwrap();
 
         let removed = latex_clean_aux_files(
             root.to_string_lossy().to_string(),

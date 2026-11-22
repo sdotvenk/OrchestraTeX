@@ -37,12 +37,14 @@ struct PendingAcpPermission {
     options: Vec<PermissionOption>,
 }
 
+type PendingRpcMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
+
 #[derive(Clone)]
 pub struct AcpClient {
     pub provider_id: AgentProviderId,
     stdin_tx: mpsc::UnboundedSender<String>,
     next_id: Arc<AtomicU64>,
-    pending_rpc: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>,
+    pending_rpc: PendingRpcMap,
     child: Arc<Mutex<Option<Child>>>,
     terminals: Arc<Mutex<HashMap<String, AcpTerminalProcess>>>,
     session_to_local: Arc<Mutex<HashMap<String, String>>>,
@@ -100,9 +102,10 @@ impl AcpClient {
             }
         });
 
-        let pending_rpc = Arc::new(Mutex::new(
-            HashMap::<u64, oneshot::Sender<Result<Value, String>>>::new(),
-        ));
+        let pending_rpc = Arc::new(Mutex::new(HashMap::<
+            u64,
+            oneshot::Sender<Result<Value, String>>,
+        >::new()));
         let child_arc = Arc::new(Mutex::new(Some(child)));
         let session_to_local = Arc::new(Mutex::new(HashMap::<String, String>::new()));
         let active_turns = Arc::new(Mutex::new(HashMap::<String, AcpActiveTurn>::new()));
@@ -174,7 +177,8 @@ impl AcpClient {
                                 let code = err.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
                                 let _ = tx.send(Err(format!("{} (code {})", err_msg, code)));
                             } else {
-                                let _ = tx.send(Ok(msg.get("result").cloned().unwrap_or(Value::Null)));
+                                let _ =
+                                    tx.send(Ok(msg.get("result").cloned().unwrap_or(Value::Null)));
                             }
                         }
                     }
@@ -236,7 +240,7 @@ impl AcpClient {
                         "terminal": true
                     },
                     "clientInfo": {
-                        "name": "lmms-lab-writer",
+                        "name": "orchestratex",
                         "version": "0.1.3"
                     }
                 }),
@@ -472,11 +476,16 @@ impl AcpClient {
         // Apply mode/model/effort if supported
         if let Some(available_modes) = self.session_modes.lock().await.get(&session_id).cloned() {
             let desired = if thread.summary.interaction_mode == InteractionMode::Plan {
-                available_modes.iter().find(|m| m.to_ascii_lowercase().contains("plan"))
-            } else {
                 available_modes
                     .iter()
-                    .find(|m| matches!(m.to_ascii_lowercase().as_str(), "default" | "code" | "accept-edits"))
+                    .find(|m| m.to_ascii_lowercase().contains("plan"))
+            } else {
+                available_modes.iter().find(|m| {
+                    matches!(
+                        m.to_ascii_lowercase().as_str(),
+                        "default" | "code" | "accept-edits"
+                    )
+                })
             };
             if let Some(mode_id) = desired {
                 let _ = self
@@ -489,7 +498,13 @@ impl AcpClient {
         }
 
         if let Some(ref model) = thread.summary.model {
-            if let Some(cfg_id) = self.session_model_config_id.lock().await.get(&session_id).cloned() {
+            if let Some(cfg_id) = self
+                .session_model_config_id
+                .lock()
+                .await
+                .get(&session_id)
+                .cloned()
+            {
                 let _ = self
                     .rpc_call(
                         "session/set_config_option",
@@ -515,7 +530,13 @@ impl AcpClient {
             }
         }
         if let Some(ref effort) = thread.summary.reasoning_effort {
-            if let Some(cfg_id) = self.session_effort_config_id.lock().await.get(&session_id).cloned() {
+            if let Some(cfg_id) = self
+                .session_effort_config_id
+                .lock()
+                .await
+                .get(&session_id)
+                .cloned()
+            {
                 let _ = self
                     .rpc_call(
                         "session/set_config_option",
@@ -598,10 +619,7 @@ impl AcpClient {
 
             client_clone.active_turns.lock().await.remove(&session_id);
 
-            let err_msg = match result {
-                Ok(_) => None,
-                Err(e) => Some(e),
-            };
+            let err_msg = result.err();
             let final_status = if err_msg.is_some() { "error" } else { "idle" };
 
             let _ = store
@@ -756,7 +774,9 @@ pub async fn probe_acp(
                     binary_path: None,
                     version: None,
                     authenticated: false,
-                    auth_error: Some("Configure a Custom ACP command in Settings → Agents.".to_string()),
+                    auth_error: Some(
+                        "Configure a Custom ACP command in Settings → Agents.".to_string(),
+                    ),
                     login_command: String::new(),
                     account: None,
                     models: Vec::new(),
@@ -770,7 +790,12 @@ pub async fn probe_acp(
             }
             (vec![], args, String::new(), name)
         }
-        _ => (vec![], vec![], String::new(), provider_id.display_name().to_string()),
+        _ => (
+            vec![],
+            vec![],
+            String::new(),
+            provider_id.display_name().to_string(),
+        ),
     };
 
     let custom_bin = if provider_id == AgentProviderId::CustomAcp {
@@ -778,7 +803,7 @@ pub async fn probe_acp(
     } else {
         custom_config.and_then(|c| c.binary_path.as_deref())
     };
-    let name_refs: Vec<&str> = names.iter().copied().collect();
+    let name_refs: Vec<&str> = names.to_vec();
     let bin_path = find_cli_binary(&name_refs, custom_bin).await;
     let Some(bin_path) = bin_path else {
         return ProviderStatus {
@@ -789,7 +814,10 @@ pub async fn probe_acp(
             binary_path: None,
             version: None,
             authenticated: false,
-            auth_error: Some(format!("{} binary not found in PATH.", provider_id.display_name())),
+            auth_error: Some(format!(
+                "{} binary not found in PATH.",
+                provider_id.display_name()
+            )),
             login_command: login_cmd,
             account: None,
             models: Vec::new(),
@@ -873,7 +901,11 @@ pub async fn probe_acp(
                 {
                     continue;
                 }
-                let id = trimmed.split_whitespace().next().unwrap_or(trimmed).to_string();
+                let id = trimmed
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or(trimmed)
+                    .to_string();
                 models.push(ModelInfo {
                     id: id.clone(),
                     name: trimmed.to_string(),
@@ -943,7 +975,7 @@ async fn probe_acp_stdio(
         "params": {
             "protocolVersion": 1,
             "clientCapabilities": { "fs": { "readTextFile": true, "writeTextFile": true }, "terminal": true },
-            "clientInfo": { "name": "lmms-lab-writer", "version": "0.1.3" }
+            "clientInfo": { "name": "orchestratex", "version": "0.1.3" }
         }
     }))
     .map_err(|e| e.to_string())?;
@@ -1285,7 +1317,10 @@ async fn handle_acp_agent_request(
                 .and_then(|v| v.as_str())
                 .unwrap_or("tool")
                 .to_string();
-            let raw_input = tool_call.get("rawInput").cloned().unwrap_or_else(|| json!({}));
+            let raw_input = tool_call
+                .get("rawInput")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let file_path = tool_call
                 .get("locations")
                 .and_then(|l| l.as_array())
@@ -1401,10 +1436,7 @@ async fn handle_acp_agent_request(
                 send_rpc_error(stdin_tx, rpc_id, -32602, "Missing path");
                 return;
             };
-            let content = params
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
             match validate_acp_write_path(path_str, project_root).await {
                 Ok(resolved) => {
                     if let Some(parent) = resolved.parent() {
@@ -1572,9 +1604,12 @@ async fn handle_acp_agent_request(
                     .await;
                     match wait_res {
                         Ok(Some(c)) => send_rpc_ok(&tx_clone, rpc_id, json!({ "exitCode": c })),
-                        Ok(None) => {
-                            send_rpc_error(&tx_clone, rpc_id, -32000, "Terminal closed unexpectedly")
-                        }
+                        Ok(None) => send_rpc_error(
+                            &tx_clone,
+                            rpc_id,
+                            -32000,
+                            "Terminal closed unexpectedly",
+                        ),
                         Err(_) => send_rpc_error(
                             &tx_clone,
                             rpc_id,
@@ -1613,7 +1648,12 @@ async fn handle_acp_agent_request(
             send_rpc_ok(stdin_tx, rpc_id, json!({}));
         }
         _ => {
-            send_rpc_error(stdin_tx, rpc_id, -32601, &format!("Unsupported method: {}", method));
+            send_rpc_error(
+                stdin_tx,
+                rpc_id,
+                -32601,
+                &format!("Unsupported method: {}", method),
+            );
         }
     }
 }
@@ -1740,10 +1780,7 @@ pub fn parse_acp_tool_call(update: &Value) -> Option<AgentPart> {
     }
     .to_string();
 
-    let input = update
-        .get("rawInput")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    let input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
     let output_val = update.get("rawOutput");
     let mut output = output_val.map(|v| {
         if let Some(s) = v.as_str() {
@@ -1802,7 +1839,11 @@ pub fn parse_acp_tool_call(update: &Value) -> Option<AgentPart> {
         title,
         status: status.clone(),
         input,
-        output: if status == "error" { None } else { output.clone() },
+        output: if status == "error" {
+            None
+        } else {
+            output.clone()
+        },
         error: if status == "error" { output } else { None },
         file_path,
         diff,

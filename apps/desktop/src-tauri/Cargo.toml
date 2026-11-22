@@ -1,12 +1,12 @@
 [package]
-name = "lmms-lab-writer"
+name = "orchestratex"
 version = "0.1.3"
-description = "AI-native LaTeX editor"
-authors = ["LMMs Lab"]
+description = "OrchestraTeX — Local-first multi-provider AI agent & live LaTeX workspace"
+authors = ["OrchestraTeX Contributors", "LMMs Lab"]
 edition = "2021"
 
 [lib]
-name = "lmms_lab_writer_lib"
+name = "orchestratex_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

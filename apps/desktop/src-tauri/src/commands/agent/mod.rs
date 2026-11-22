@@ -80,13 +80,11 @@ impl AgentManagerState {
     }
 }
 
-fn find_custom_config<'a>(
-    configs: &'a [ProviderCustomConfig],
+fn find_custom_config(
+    configs: &[ProviderCustomConfig],
     provider_id: AgentProviderId,
-) -> Option<&'a ProviderCustomConfig> {
-    configs
-        .iter()
-        .find(|c| c.provider_id == Some(provider_id))
+) -> Option<&ProviderCustomConfig> {
+    configs.iter().find(|c| c.provider_id == Some(provider_id))
 }
 
 #[tauri::command]
@@ -100,8 +98,8 @@ pub async fn agent_list_providers(
 
     let claude_custom = find_custom_config(&configs, AgentProviderId::Claude)
         .and_then(|c| c.binary_path.as_deref());
-    let codex_custom = find_custom_config(&configs, AgentProviderId::Codex)
-        .and_then(|c| c.binary_path.as_deref());
+    let codex_custom =
+        find_custom_config(&configs, AgentProviderId::Codex).and_then(|c| c.binary_path.as_deref());
     let agy_cfg = find_custom_config(&configs, AgentProviderId::Antigravity);
     let custom_acp_cfg = find_custom_config(&configs, AgentProviderId::CustomAcp);
 
@@ -168,7 +166,12 @@ pub async fn agent_refresh_rate_limits(
             );
             Ok(Some(snap))
         }
-        _ => Ok(state.rate_limit_cache.lock().await.get(&provider_id).cloned()),
+        _ => Ok(state
+            .rate_limit_cache
+            .lock()
+            .await
+            .get(&provider_id)
+            .cloned()),
     }
 }
 
@@ -315,7 +318,10 @@ pub async fn agent_update_thread(
             }
             if interaction_mode.is_some() || runtime_mode.is_some() {
                 let _ = handle
-                    .set_permission_mode(updated.summary.interaction_mode, updated.summary.runtime_mode)
+                    .set_permission_mode(
+                        updated.summary.interaction_mode,
+                        updated.summary.runtime_mode,
+                    )
                     .await;
             }
         }
@@ -577,7 +583,9 @@ pub async fn agent_send_message(
                 &bin,
             )
             .await?;
-            client.start_turn(&app, &store, &thread, &content, &atts).await
+            client
+                .start_turn(&app, &store, &thread, &content, &atts)
+                .await
         }
         AgentProviderId::Antigravity | AgentProviderId::CustomAcp => {
             let client =
@@ -615,10 +623,7 @@ async fn ensure_acp_client_for_thread(
     thread: &AgentThread,
     configs: &[ProviderCustomConfig],
 ) -> Result<AcpClient, String> {
-    let key = format!(
-        "{:?}:{}",
-        thread.summary.provider_id, thread.summary.id
-    );
+    let key = format!("{:?}:{}", thread.summary.provider_id, thread.summary.id);
     if let Some(existing) = state.acp_clients.lock().await.get(&key).cloned() {
         return Ok(existing);
     }
@@ -643,9 +648,7 @@ async fn ensure_acp_client_for_thread(
             let bin = find_cli_binary(&[], Some(cmd))
                 .await
                 .ok_or_else(|| format!("Custom ACP binary '{}' not found.", cmd))?;
-            let args = cfg
-                .and_then(|c| c.custom_args.clone())
-                .unwrap_or_default();
+            let args = cfg.and_then(|c| c.custom_args.clone()).unwrap_or_default();
             (bin, args)
         }
         _ => return Err("Unsupported ACP provider".to_string()),
@@ -727,7 +730,13 @@ pub async fn agent_steer_turn(
     }
 
     // For Claude & ACP, interrupt active turn and immediately send steered follow-up
-    let _ = agent_interrupt_turn(app.clone(), state.clone(), project_path.clone(), thread_id.clone()).await;
+    let _ = agent_interrupt_turn(
+        app.clone(),
+        state.clone(),
+        project_path.clone(),
+        thread_id.clone(),
+    )
+    .await;
     tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
     agent_send_message(
         app,
@@ -885,7 +894,9 @@ pub async fn agent_respond_interaction(
                 .await
                 .clone()
                 .ok_or_else(|| "Codex app-server not active".to_string())?;
-            client.respond_interaction(&interaction_id, &response).await?;
+            client
+                .respond_interaction(&interaction_id, &response)
+                .await?;
         }
         AgentProviderId::Antigravity | AgentProviderId::CustomAcp => {
             let key = format!("{:?}:{}", thread.summary.provider_id, thread.summary.id);
@@ -896,7 +907,9 @@ pub async fn agent_respond_interaction(
                 .get(&key)
                 .cloned()
                 .ok_or_else(|| "ACP session not active".to_string())?;
-            client.respond_permission(&interaction_id, &response).await?;
+            client
+                .respond_permission(&interaction_id, &response)
+                .await?;
         }
     }
 
@@ -956,7 +969,12 @@ pub async fn agent_one_shot_prompt(
             let bin = find_cli_binary(&["agy"], custom_binary_path.as_deref())
                 .await
                 .ok_or_else(|| "Antigravity CLI ('agy') not found.".to_string())?;
-            let mut args = vec!["-p".to_string(), prompt, "--output-format".to_string(), "json".to_string()];
+            let mut args = vec![
+                "-p".to_string(),
+                prompt,
+                "--output-format".to_string(),
+                "json".to_string(),
+            ];
             if let Some(ref m) = model {
                 if !m.trim().is_empty() {
                     args.push("--model".to_string());
@@ -983,7 +1001,9 @@ pub async fn agent_one_shot_prompt(
             }
             Ok(raw.trim().to_string())
         }
-        AgentProviderId::CustomAcp => Err("One-shot prompt is not supported for Custom ACP.".to_string()),
+        AgentProviderId::CustomAcp => {
+            Err("One-shot prompt is not supported for Custom ACP.".to_string())
+        }
     }
 }
 

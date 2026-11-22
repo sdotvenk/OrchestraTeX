@@ -1,12 +1,12 @@
 #!/bin/bash
-# Build PKG installer for LMMs-Lab Writer
+# Build PKG installer for OrchestraTeX
 # Creates a PKG with post-install script that removes quarantine attribute
 
 set -euo pipefail
 
 # Configuration
-APP_NAME="LMMs-Lab Writer"
-BUNDLE_ID="com.lmms-lab.writer"
+APP_NAME="OrchestraTeX"
+BUNDLE_ID="com.orchestratex.desktop"
 
 # Paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -105,7 +105,7 @@ cat > "$DIST_XML" << EOF
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
     <title>$APP_NAME</title>
-    <organization>com.lmms-lab</organization>
+    <organization>com.orchestratex</organization>
     <domains enable_localSystem="true"/>
     <options customize="never" require-scripts="true" rootVolumeOnly="true"/>
     <choices-outline>

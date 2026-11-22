@@ -1,4 +1,4 @@
-import type { FileNode } from "@lmms-lab/writer-shared";
+import type { FileNode } from "@orchestratex/shared";
 import type { AttachmentInput } from "@/lib/agent/types";
 
 export function formatTokenCount(count: number | null | undefined): string {

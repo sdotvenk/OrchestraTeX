@@ -1,12 +1,12 @@
 #!/bin/bash
-# Post-installation script for LMMs-Lab Writer
+# Post-installation script for OrchestraTeX
 # Removes macOS quarantine attribute to prevent "damaged app" error
 
-APP_PATH="/Applications/LMMs-Lab Writer.app"
+APP_PATH="/Applications/OrchestraTeX.app"
 
 if [ -d "$APP_PATH" ]; then
     xattr -cr "$APP_PATH"
-    echo "Quarantine attribute removed from LMMs-Lab Writer"
+    echo "Quarantine attribute removed from OrchestraTeX"
 fi
 
 exit 0

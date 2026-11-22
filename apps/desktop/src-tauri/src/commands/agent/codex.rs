@@ -34,15 +34,18 @@ struct PendingCodexServerRequest {
     project_path: String,
 }
 
+type PendingRpcMap = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>;
+type ActiveAssistantMsgs = Arc<Mutex<HashMap<String, (String, String, String)>>>;
+
 #[derive(Clone)]
 pub struct CodexClient {
     stdin_tx: mpsc::UnboundedSender<String>,
     next_id: Arc<AtomicU64>,
-    pending_rpc: Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>>,
+    pending_rpc: PendingRpcMap,
     child: Arc<Mutex<Option<Child>>>,
     codex_to_local: Arc<Mutex<HashMap<String, (String, String)>>>,
     active_turns: Arc<Mutex<HashMap<String, String>>>,
-    active_assistant_msgs: Arc<Mutex<HashMap<String, (String, String, String)>>>,
+    active_assistant_msgs: ActiveAssistantMsgs,
     pending_server_requests: Arc<Mutex<HashMap<String, PendingCodexServerRequest>>>,
     rate_limit_cache: Arc<Mutex<HashMap<AgentProviderId, RateLimitsSnapshot>>>,
 }
@@ -82,16 +85,20 @@ impl CodexClient {
             }
         });
 
-        let pending_rpc = Arc::new(Mutex::new(
-            HashMap::<u64, oneshot::Sender<Result<Value, String>>>::new(),
-        ));
+        let pending_rpc = Arc::new(Mutex::new(HashMap::<
+            u64,
+            oneshot::Sender<Result<Value, String>>,
+        >::new()));
         let child_arc = Arc::new(Mutex::new(Some(child)));
         let codex_to_local = Arc::new(Mutex::new(HashMap::<String, (String, String)>::new()));
         let active_turns = Arc::new(Mutex::new(HashMap::<String, String>::new()));
-        let active_assistant_msgs =
-            Arc::new(Mutex::new(HashMap::<String, (String, String, String)>::new()));
-        let pending_server_requests =
-            Arc::new(Mutex::new(HashMap::<String, PendingCodexServerRequest>::new()));
+        let active_assistant_msgs = Arc::new(Mutex::new(
+            HashMap::<String, (String, String, String)>::new(),
+        ));
+        let pending_server_requests = Arc::new(Mutex::new(HashMap::<
+            String,
+            PendingCodexServerRequest,
+        >::new()));
 
         let client = Self {
             stdin_tx: stdin_tx.clone(),
@@ -152,7 +159,8 @@ impl CodexClient {
                                     .to_string();
                                 let _ = tx.send(Err(err_msg));
                             } else {
-                                let _ = tx.send(Ok(msg.get("result").cloned().unwrap_or(Value::Null)));
+                                let _ =
+                                    tx.send(Ok(msg.get("result").cloned().unwrap_or(Value::Null)));
                             }
                         }
                     }
@@ -200,7 +208,7 @@ impl CodexClient {
                 "initialize",
                 json!({
                     "clientInfo": {
-                        "name": "lmms-lab-writer",
+                        "name": "orchestratex",
                         "version": "0.1.3"
                     },
                     "capabilities": {
@@ -688,38 +696,33 @@ pub async fn probe_codex(
     .ok()
     .flatten();
 
-    let client = match ensure_codex_client(
-        app,
-        store,
-        rate_limit_cache.clone(),
-        client_slot,
-        &bin_path,
-    )
-    .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return ProviderStatus {
-                id: AgentProviderId::Codex,
-                name: AgentProviderId::Codex.display_name().to_string(),
-                transport: "app-server".to_string(),
-                installed: true,
-                binary_path: Some(bin_path),
-                version,
-                authenticated: false,
-                auth_error: Some(e),
-                login_command: AgentProviderId::Codex.login_command().to_string(),
-                account: None,
-                models: Vec::new(),
-                commands: Vec::new(),
-                rate_limits: None,
-                supports_steer: true,
-                supports_fork: true,
-                supports_compact: true,
-                supports_questions: true,
-            };
-        }
-    };
+    let client =
+        match ensure_codex_client(app, store, rate_limit_cache.clone(), client_slot, &bin_path)
+            .await
+        {
+            Ok(c) => c,
+            Err(e) => {
+                return ProviderStatus {
+                    id: AgentProviderId::Codex,
+                    name: AgentProviderId::Codex.display_name().to_string(),
+                    transport: "app-server".to_string(),
+                    installed: true,
+                    binary_path: Some(bin_path),
+                    version,
+                    authenticated: false,
+                    auth_error: Some(e),
+                    login_command: AgentProviderId::Codex.login_command().to_string(),
+                    account: None,
+                    models: Vec::new(),
+                    commands: Vec::new(),
+                    rate_limits: None,
+                    supports_steer: true,
+                    supports_fork: true,
+                    supports_compact: true,
+                    supports_questions: true,
+                };
+            }
+        };
 
     let (acc_res, models_res, rl_res) = tokio::join!(
         client.rpc_call("account/read", json!({})),
@@ -878,7 +881,7 @@ fn parse_codex_model_info(m: &Value) -> Option<ModelInfo> {
 async fn ensure_codex_assistant_msg(
     app: &AppHandle,
     store: &ThreadStore,
-    active_msgs: &Arc<Mutex<HashMap<String, (String, String, String)>>>,
+    active_msgs: &ActiveAssistantMsgs,
     turn_id: &str,
     local_tid: &str,
     project_path: &str,
@@ -957,7 +960,10 @@ async fn handle_codex_notification(
             }
         }
         "turn/started" => {
-            let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+            let codex_tid = params
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let turn_id = params
                 .get("turn")
                 .and_then(|t| t.get("id"))
@@ -994,7 +1000,10 @@ async fn handle_codex_notification(
             }
         }
         "turn/completed" => {
-            let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+            let codex_tid = params
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let turn = params.get("turn").cloned().unwrap_or(Value::Null);
             let turn_id = turn.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let status_str = turn
@@ -1057,7 +1066,10 @@ async fn handle_codex_notification(
             }
         }
         "thread/tokenUsage/updated" => {
-            let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+            let codex_tid = params
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if let Some((local_tid, project_path)) =
                 client.codex_to_local.lock().await.get(codex_tid).cloned()
             {
@@ -1078,7 +1090,10 @@ async fn handle_codex_notification(
             }
         }
         "turn/plan/updated" => {
-            let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+            let codex_tid = params
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if let Some((local_tid, project_path)) =
                 client.codex_to_local.lock().await.get(codex_tid).cloned()
             {
@@ -1099,7 +1114,10 @@ async fn handle_codex_notification(
             }
         }
         "item/started" | "item/completed" => {
-            let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+            let codex_tid = params
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let turn_id = params.get("turnId").and_then(|v| v.as_str()).unwrap_or("");
             let Some(item) = params.get("item") else {
                 return;
@@ -1156,7 +1174,10 @@ async fn handle_codex_notification(
             emit_codex_delta(app, store, client, params, "tool_output").await;
         }
         "error" => {
-            let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+            let codex_tid = params
+                .get("threadId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let will_retry = params
                 .get("willRetry")
                 .and_then(|v| v.as_bool())
@@ -1190,7 +1211,10 @@ async fn emit_codex_delta(
     params: &Value,
     part_type: &str,
 ) {
-    let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+    let codex_tid = params
+        .get("threadId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let turn_id = params.get("turnId").and_then(|v| v.as_str()).unwrap_or("");
     let item_id = params.get("itemId").and_then(|v| v.as_str()).unwrap_or("");
     let delta = params.get("delta").and_then(|v| v.as_str()).unwrap_or("");
@@ -1245,7 +1269,10 @@ async fn handle_codex_server_request(
     rpc_id: Value,
     params: &Value,
 ) {
-    let codex_tid = params.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
+    let codex_tid = params
+        .get("threadId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let Some((local_tid, project_path)) =
         client.codex_to_local.lock().await.get(codex_tid).cloned()
     else {
@@ -1499,11 +1526,20 @@ pub fn parse_codex_rate_limits(
     let credits_balance = rl
         .get("credits")
         .and_then(|c| {
-            let unlimited = c.get("unlimited").and_then(|v| v.as_bool()).unwrap_or(false);
+            let unlimited = c
+                .get("unlimited")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if unlimited {
                 Some("Unlimited".to_string())
-            } else if c.get("hasCredits").and_then(|v| v.as_bool()).unwrap_or(false) {
-                c.get("balance").and_then(|b| b.as_str()).map(|s| s.to_string())
+            } else if c
+                .get("hasCredits")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                c.get("balance")
+                    .and_then(|b| b.as_str())
+                    .map(|s| s.to_string())
             } else {
                 None
             }
@@ -1530,7 +1566,10 @@ pub fn parse_codex_token_usage(token_usage: Option<&Value>) -> Option<TokenUsage
         .map(|l| {
             let total_last = l.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0);
             let inp = l.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-            let cached = l.get("cachedInputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+            let cached = l
+                .get("cachedInputTokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             if total_last > 0 {
                 total_last
             } else {
@@ -1540,8 +1579,14 @@ pub fn parse_codex_token_usage(token_usage: Option<&Value>) -> Option<TokenUsage
         .unwrap_or(0);
 
     Some(TokenUsageSnapshot {
-        input_tokens: total.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0),
-        output_tokens: total.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0),
+        input_tokens: total
+            .get("inputTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        output_tokens: total
+            .get("outputTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
         cache_read_tokens: total
             .get("cachedInputTokens")
             .and_then(|v| v.as_u64())
@@ -1664,10 +1709,7 @@ fn parse_codex_thread_item(item: &Value, completed: bool) -> Option<(AgentPart, 
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            Some((
-                AgentPart::Text { id: item_id, text },
-                changed_files,
-            ))
+            Some((AgentPart::Text { id: item_id, text }, changed_files))
         }
         "reasoning" => {
             let mut chunks: Vec<String> = Vec::new();
@@ -1724,7 +1766,11 @@ fn parse_codex_thread_item(item: &Value, completed: bool) -> Option<(AgentPart, 
                         "command": command_str,
                         "cwd": item.get("cwd").cloned().unwrap_or(Value::Null),
                     }),
-                    output: if status == "error" { None } else { output.clone() },
+                    output: if status == "error" {
+                        None
+                    } else {
+                        output.clone()
+                    },
                     error: if status == "error" { output } else { None },
                     file_path: None,
                     diff: None,

@@ -21,8 +21,8 @@ const modernMono = Roboto_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LMMs-Lab Writer",
-  description: "AI-native LaTeX editor",
+  title: "OrchestraTeX",
+  description: "Local-first multi-provider AI agent & live LaTeX workspace",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

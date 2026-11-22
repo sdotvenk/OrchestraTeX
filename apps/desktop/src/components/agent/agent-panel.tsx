@@ -1,6 +1,6 @@
 "use client";
 
-import type { FileNode } from "@lmms-lab/writer-shared";
+import type { FileNode } from "@orchestratex/shared";
 import { Gear, GitFork, ListBullets, Plugs, Plus, WarningCircle, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import type {

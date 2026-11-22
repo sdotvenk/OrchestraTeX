@@ -9,7 +9,7 @@ TAURI_DIR="$(dirname "$SCRIPT_DIR")"
 TARGET_DIR="$TAURI_DIR/target/release/bundle/macos"
 PKG_SCRIPTS_DIR="$SCRIPT_DIR"
 
-APP_NAME="LMMs-Lab Writer"
+APP_NAME="OrchestraTeX"
 APP_BUNDLE="$TARGET_DIR/$APP_NAME.app"
 PKG_OUTPUT="$TARGET_DIR/$APP_NAME.pkg"
 VERSION="$(node -p "require('$TAURI_DIR/tauri.conf.json').version")"
@@ -40,7 +40,7 @@ pkgbuild \
     --root "$APP_BUNDLE" \
     --install-location "/Applications/$APP_NAME.app" \
     --scripts "$TEMP_SCRIPTS" \
-    --identifier "com.lmms-lab.writer" \
+    --identifier "com.orchestratex.desktop" \
     --version "$VERSION" \
     "$COMPONENT_PKG"
 

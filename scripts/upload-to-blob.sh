@@ -21,8 +21,8 @@ else
   ARCH_SUFFIX="x64"
 fi
 
-PKG_PATH="$TAURI_DIR/target/release/bundle/pkg/LMMs-Lab_Writer_${VERSION}_${ARCH_SUFFIX}.pkg"
-DMG_PATH="$TAURI_DIR/target/release/bundle/dmg/LMMs-Lab Writer_${VERSION}_${ARCH_SUFFIX}.dmg"
+PKG_PATH="$TAURI_DIR/target/release/bundle/pkg/OrchestraTeX_${VERSION}_${ARCH_SUFFIX}.pkg"
+DMG_PATH="$TAURI_DIR/target/release/bundle/dmg/OrchestraTeX_${VERSION}_${ARCH_SUFFIX}.dmg"
 
 for FILE in "$DMG_PATH" "$PKG_PATH"; do
   if [ ! -f "$FILE" ]; then
