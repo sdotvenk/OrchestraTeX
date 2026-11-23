@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckIcon, InfoIcon, XIcon } from "@phosphor-icons/react";
+import { CheckCircleIcon, InfoIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
 import type React from "react";
 import { createContext, useCallback, useContext, useState } from "react";
@@ -27,12 +27,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const id = Math.random().toString(36).substring(2, 9);
     const newToast: Toast = { id, message, type };
 
-    setToasts((prev) => [...prev, newToast]);
+    setToasts((prev) => [...prev.slice(-2), newToast]);
 
-    // Auto-dismiss after 3 seconds
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3000);
+    }, 3600);
   }, []);
 
   const dismiss = useCallback((id: string) => {
@@ -42,7 +41,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast, dismiss }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none">
         <AnimatePresence>
           {toasts.map((t) => (
             <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
@@ -58,22 +57,22 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      initial={{ opacity: 0, y: 12, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 100, scale: 0.95 }}
-      transition={{ duration: 0.2 }}
+      exit={{ opacity: 0, y: 8, scale: 0.97 }}
+      transition={{ duration: 0.16, ease: [0.2, 0, 0, 1] }}
       className="pointer-events-auto"
     >
       <div
-        className="bg-background border-2 border-foreground max-w-[320px] p-3 flex items-start gap-3"
-        style={{ boxShadow: "4px 4px 0 0 var(--foreground)" }}
+        className="bg-toast-bg text-toast-fg max-w-[440px] min-h-[38px] pl-3.5 pr-2 py-1.5 rounded-full flex items-center gap-2.5 border border-white/10"
+        style={{ boxShadow: "var(--shadow-2)" }}
       >
-        <div className="flex-shrink-0 mt-0.5">{Icon}</div>
-        <p className="text-sm text-foreground flex-1 leading-tight">{toast.message}</p>
+        <div className="flex-shrink-0">{Icon}</div>
+        <p className="text-[12.5px] leading-snug flex-1">{toast.message}</p>
         <button
           type="button"
           onClick={() => onDismiss(toast.id)}
-          className="flex-shrink-0 text-foreground hover:opacity-60 transition-opacity"
+          className="flex-shrink-0 size-6 rounded-full inline-flex items-center justify-center text-toast-fg/70 hover:text-toast-fg hover:bg-white/10 transition-colors"
           aria-label="Dismiss"
         >
           <XIcon className="w-3.5 h-3.5" />
@@ -86,11 +85,11 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
 function getIcon(type: ToastType) {
   switch (type) {
     case "success":
-      return <CheckIcon size={18} className="text-foreground" />;
+      return <CheckCircleIcon size={16} weight="fill" className="text-emerald-400" />;
     case "error":
-      return <XIcon size={18} className="text-foreground" />;
+      return <WarningCircleIcon size={16} weight="fill" className="text-rose-400" />;
     case "info":
-      return <InfoIcon size={18} className="text-foreground" />;
+      return <InfoIcon size={16} weight="fill" className="text-sky-300" />;
   }
 }
 

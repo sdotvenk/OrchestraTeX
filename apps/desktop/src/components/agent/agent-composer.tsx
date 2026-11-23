@@ -4,11 +4,15 @@ import type { FileNode } from "@orchestratex/shared";
 import {
   ArrowUp,
   CaretDown,
+  Check,
   FileText,
+  Gauge,
+  Lightning,
   Paperclip,
   PencilSimple,
   Plus,
   Queue,
+  ShieldCheck,
   Stop,
   Trash,
   X,
@@ -27,11 +31,21 @@ import type {
   SlashCommandInfo,
 } from "@/lib/agent/types";
 import { BUILTIN_SLASH_COMMANDS } from "@/lib/agent/use-agent";
+import { ProviderIcon } from "./icons";
 import { fileToAttachmentInput, flattenFileNodes } from "./utils";
 
 interface LocalAttachment {
   id: string;
   input: AttachmentInput;
+}
+
+export interface AgentDraftInjection {
+  id: number;
+  text: string;
+  contextChip?: {
+    label: string;
+    snippet: string;
+  };
 }
 
 interface AgentComposerProps {
@@ -47,7 +61,7 @@ interface AgentComposerProps {
   defaultEffortByProvider: Partial<Record<AgentProviderId, string>>;
   defaultInteractionMode: InteractionMode;
   defaultRuntimeMode: RuntimeMode;
-  draftInjection?: { id: number; text: string } | null;
+  draftInjection?: AgentDraftInjection | null;
   onDraftConsumed?: () => void;
   onSendMessage: (content: string, attachments?: AttachmentInput[]) => Promise<void>;
   onQueueMessage: (threadId: string, content: string, attachments?: AttachmentInput[]) => void;
@@ -64,7 +78,34 @@ interface AgentComposerProps {
   onChangeEffort: (effort: string) => Promise<void> | void;
   onChangeInteractionMode: (mode: InteractionMode) => Promise<void> | void;
   onChangeRuntimeMode: (mode: RuntimeMode) => Promise<void> | void;
+  usageTrigger?: React.ReactNode;
 }
+
+const RUNTIME_OPTIONS: readonly {
+  id: RuntimeMode;
+  label: string;
+  note: string;
+  isAuto: boolean;
+}[] = [
+  {
+    id: "approval-required",
+    label: "Approval required",
+    note: "Ask before editing files or running commands",
+    isAuto: false,
+  },
+  {
+    id: "auto-accept-edits",
+    label: "Auto-accept edits",
+    note: "Apply file edits automatically; ask for shell",
+    isAuto: true,
+  },
+  {
+    id: "full-access",
+    label: "Full access",
+    note: "Run edits and build commands without prompts",
+    isAuto: true,
+  },
+] as const;
 
 export function AgentComposer({
   projectPath,
@@ -92,16 +133,20 @@ export function AgentComposer({
   onChangeEffort,
   onChangeInteractionMode,
   onChangeRuntimeMode,
+  usageTrigger,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
+  const [contextChip, setContextChip] = useState<{ label: string; snippet: string } | null>(null);
   const [lightboxImage, setLightboxImage] = useState<LocalAttachment | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [activePopoverIdx, setActivePopoverIdx] = useState(0);
   const [dismissedPopoverKey, setDismissedPopoverKey] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<"modes" | "model" | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
 
   const adjustTextareaHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -110,12 +155,35 @@ export function AgentComposer({
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   }, []);
 
-  // Inject external draft (e.g. "Ask Agent about Selection" from Monaco)
+  // Close mode/model popovers on outside click or Escape
+  useEffect(() => {
+    if (!openMenu) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (menuContainerRef.current && !menuContainerRef.current.contains(e.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenMenu(null);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    window.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      window.removeEventListener("keydown", handleEsc);
+    };
+  }, [openMenu]);
+
+  // Inject external selection as a connected context chip (or plain draft)
   useEffect(() => {
     if (!draftInjection) return;
-    setText((prev) =>
-      prev.trim() ? `${prev.trimEnd()}\n\n${draftInjection.text}` : draftInjection.text,
-    );
+    if (draftInjection.contextChip) {
+      setContextChip(draftInjection.contextChip);
+    } else if (draftInjection.text.trim()) {
+      setText((prev) =>
+        prev.trim() ? `${prev.trimEnd()}\n\n${draftInjection.text}` : draftInjection.text,
+      );
+    }
     setActivePopoverIdx(0);
     onDraftConsumed?.();
     requestAnimationFrame(() => {
@@ -147,6 +215,7 @@ export function AgentComposer({
   const interactionMode = activeThread?.summary.interactionMode ?? defaultInteractionMode;
   const runtimeMode = activeThread?.summary.runtimeMode ?? defaultRuntimeMode;
   const isRunning = activeThread?.summary.status === "running";
+  const isAutoRuntime = runtimeMode !== "approval-required";
 
   const projectFilePaths = useMemo(
     () => flattenFileNodes(files, projectPath),
@@ -263,32 +332,41 @@ export function AgentComposer({
   const handleSubmit = useCallback(
     async (mode: "auto" | "steer" | "queue" = "auto") => {
       const trimmed = text.trim();
-      if (!trimmed && attachments.length === 0) return;
+      if (!trimmed && attachments.length === 0 && !contextChip) return;
 
-      const currentText = text;
+      const chipPrefix = contextChip
+        ? contextChip.snippet.trim()
+          ? `Regarding \`${contextChip.label}\`:\n\`\`\`latex\n${contextChip.snippet.trim()}\n\`\`\`\n\n`
+          : `Regarding \`${contextChip.label}\`: `
+        : "";
+      const composedContent = `${chipPrefix}${text}`.trim();
       const currentAtts = attachments.map((a) => a.input);
+
       setText("");
       setAttachments([]);
+      setContextChip(null);
       setDismissedPopoverKey(null);
       setActivePopoverIdx(0);
+      setOpenMenu(null);
       requestAnimationFrame(() => adjustTextareaHeight());
 
       if (mode === "steer" && activeThread && providerObj?.supportsSteer) {
-        await onSteerActiveTurn(activeThread.summary.id, currentText, currentAtts);
+        await onSteerActiveTurn(activeThread.summary.id, composedContent, currentAtts);
         return;
       }
 
       if (mode === "queue" && activeThread) {
-        onQueueMessage(activeThread.summary.id, currentText, currentAtts);
+        onQueueMessage(activeThread.summary.id, composedContent, currentAtts);
         return;
       }
 
-      await onSendMessage(currentText, currentAtts);
+      await onSendMessage(composedContent, currentAtts);
     },
     [
       activeThread,
       adjustTextareaHeight,
       attachments,
+      contextChip,
       onQueueMessage,
       onSendMessage,
       onSteerActiveTurn,
@@ -331,19 +409,26 @@ export function AgentComposer({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (isRunning && activeThread) {
-        void handleSubmit(providerObj?.supportsSteer ? "queue" : "queue");
+        void handleSubmit(providerObj?.supportsSteer ? "steer" : "queue");
       } else {
         void handleSubmit("auto");
       }
     }
   };
 
+  const canSend =
+    Boolean(projectPath) &&
+    (text.trim().length > 0 || attachments.length > 0 || Boolean(contextChip));
+  const modelLabel = selectedModelInfo?.name ?? currentModel ?? providerObj?.name ?? "Default";
+  const folderShort = projectPath ? projectPath.split(/[\\/]/).filter(Boolean).pop() : null;
+  const runtimeLabel =
+    RUNTIME_OPTIONS.find((r) => r.id === runtimeMode)?.label ?? "Auto-accept edits";
+
   return (
     <section
+      ref={menuContainerRef}
       aria-label="Message composer"
-      className={`border-t border-border bg-background relative ${
-        dragOver ? "ring-2 ring-inset ring-foreground" : ""
-      }`}
+      className="px-3 pb-2.5 pt-1 bg-panel relative shrink-0"
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -359,12 +444,13 @@ export function AgentComposer({
     >
       {/* Popover for `/` slash commands or `@` file mentions */}
       {popoverState && (
-        <div className="absolute bottom-full left-2 right-2 mb-1 z-40 border border-foreground bg-background shadow-[4px_4px_0_0_var(--foreground)] max-h-56 overflow-y-auto">
-          <div className="px-2.5 py-1 border-b border-border bg-surface-secondary text-[10px] font-mono uppercase tracking-wider text-muted flex items-center justify-between">
-            <span>
-              {popoverState.kind === "slash" ? "Slash Commands" : "Project Files (@mention)"}
-            </span>
-            <span>Tab / Enter</span>
+        <div
+          className="absolute bottom-full left-3 right-3 mb-1.5 z-40 rounded-xl border border-border bg-panel max-h-56 overflow-y-auto p-1"
+          style={{ boxShadow: "var(--shadow-2)" }}
+        >
+          <div className="px-2.5 py-1 text-[11px] font-medium text-muted flex items-center justify-between">
+            <span>{popoverState.kind === "slash" ? "Commands" : "Project files"}</span>
+            <span className="font-mono text-[10px]">Tab / Enter</span>
           </div>
           {popoverState.kind === "slash"
             ? popoverState.items.map((cmd, idx) => (
@@ -375,31 +461,21 @@ export function AgentComposer({
                     e.preventDefault();
                     applySlashCommand(cmd);
                   }}
-                  className={`w-full px-2.5 py-1.5 text-left flex items-center justify-between gap-2 text-xs transition-colors ${
+                  className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12.5px] transition-colors ${
                     idx === activePopoverIdx
-                      ? "bg-foreground text-background"
-                      : "hover:bg-surface-secondary text-foreground"
+                      ? "bg-accent-soft text-foreground-strong"
+                      : "hover:bg-subtle text-foreground"
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-mono font-semibold shrink-0">/{cmd.name}</span>
+                    <span className="font-mono font-medium text-accent shrink-0">/{cmd.name}</span>
                     {cmd.argumentHint && (
-                      <span
-                        className={`font-mono text-[10px] truncate ${
-                          idx === activePopoverIdx ? "text-background/70" : "text-muted"
-                        }`}
-                      >
+                      <span className="font-mono text-[11px] text-muted truncate">
                         {cmd.argumentHint}
                       </span>
                     )}
                   </div>
-                  <span
-                    className={`text-[11px] truncate ${
-                      idx === activePopoverIdx ? "text-background/80" : "text-muted"
-                    }`}
-                  >
-                    {cmd.description}
-                  </span>
+                  <span className="text-[11.5px] text-muted truncate">{cmd.description}</span>
                 </button>
               ))
             : popoverState.items.map((filePath, idx) => (
@@ -410,44 +486,188 @@ export function AgentComposer({
                     e.preventDefault();
                     applyMentionFile(filePath);
                   }}
-                  className={`w-full px-2.5 py-1.5 text-left flex items-center gap-2 text-xs font-mono transition-colors ${
+                  className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center gap-2 text-[12px] font-mono transition-colors ${
                     idx === activePopoverIdx
-                      ? "bg-foreground text-background"
-                      : "hover:bg-surface-secondary text-foreground"
+                      ? "bg-accent-soft text-foreground-strong"
+                      : "hover:bg-subtle text-foreground"
                   }`}
                 >
-                  <FileText className="size-3.5 shrink-0" aria-hidden="true" />
+                  <FileText className="size-3.5 text-muted shrink-0" aria-hidden="true" />
                   <span className="truncate">{filePath}</span>
                 </button>
               ))}
         </div>
       )}
 
+      {/* Silkscreen-style Consolidated Chat Modes Popover */}
+      {openMenu === "modes" && (
+        <div
+          className="absolute bottom-full left-3 mb-2 w-[290px] max-w-[calc(100%-24px)] z-40 rounded-xl border border-border bg-panel p-2.5 space-y-2.5"
+          style={{ boxShadow: "var(--shadow-2)" }}
+          role="dialog"
+          aria-label="Chat settings"
+        >
+          <div className="space-y-1">
+            {RUNTIME_OPTIONS.map((opt) => {
+              const selected = runtimeMode === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => void onChangeRuntimeMode(opt.id)}
+                  className={`w-full px-2.5 py-2 rounded-lg text-left flex items-start gap-2.5 transition-colors ${
+                    selected ? "bg-accent-soft" : "hover:bg-subtle"
+                  }`}
+                >
+                  {opt.isAuto ? (
+                    <Lightning className="size-4 text-accent mt-0.5 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ShieldCheck className="size-4 text-muted mt-0.5 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[12.5px] font-medium text-foreground-strong">
+                      {opt.label}
+                    </span>
+                    <span className="block text-[11px] text-muted leading-snug">{opt.note}</span>
+                  </span>
+                  {selected && (
+                    <Check className="size-3.5 text-accent mt-1 shrink-0" aria-hidden="true" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="pt-2 border-t border-border flex items-center justify-between gap-2">
+            <span className="text-[12px] text-muted">Mode</span>
+            <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5">
+              {(["default", "plan"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => void onChangeInteractionMode(m)}
+                  className={`px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors ${
+                    interactionMode === m
+                      ? "bg-panel text-foreground-strong shadow-xs"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  {m === "plan" ? "Plan" : "Edit"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {supportedEfforts.length > 0 && (
+            <div className="pt-2 border-t border-border flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-[12px] text-muted shrink-0">
+                <Gauge className="size-3.5" aria-hidden="true" />
+                <span>Effort</span>
+              </span>
+              <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5 flex-wrap justify-end">
+                {supportedEfforts.map((eff) => (
+                  <button
+                    key={eff}
+                    type="button"
+                    onClick={() => void onChangeEffort(eff)}
+                    className={`px-2 py-1 rounded-md text-[11px] font-medium capitalize transition-colors ${
+                      currentEffort === eff
+                        ? "bg-panel text-foreground-strong shadow-xs"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    {eff}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Silkscreen-style Grouped Provider & Model Popover */}
+      {openMenu === "model" && (
+        <div
+          className="absolute bottom-full right-3 mb-2 w-[270px] max-w-[calc(100%-24px)] max-h-[320px] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-1.5 space-y-2"
+          style={{ boxShadow: "var(--shadow-2)" }}
+          role="dialog"
+          aria-label="Choose provider and model"
+        >
+          {providers.map((p) => {
+            const isCurrentProvider = p.id === currentProviderId;
+            return (
+              <div key={p.id} className="space-y-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onChangeProvider(p.id);
+                    if (p.models.length === 0) setOpenMenu(null);
+                  }}
+                  className="w-full px-2 py-1 rounded-md flex items-center gap-2 text-left hover:bg-subtle transition-colors"
+                >
+                  <ProviderIcon providerId={p.id} className="size-3.5 shrink-0" />
+                  <span className="text-[11.5px] font-semibold text-foreground-strong truncate">
+                    {p.name}
+                  </span>
+                  <span className="ml-auto text-[10.5px] text-muted">
+                    {!p.installed ? "Not found" : !p.authenticated ? "Sign in" : ""}
+                  </span>
+                </button>
+                {p.models.length > 0 && (
+                  <div className="pl-2 space-y-0.5">
+                    {p.models.map((m) => {
+                      const isSelected = isCurrentProvider && m.id === currentModel;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={async () => {
+                            if (!isCurrentProvider) {
+                              await onChangeProvider(p.id);
+                            }
+                            await onChangeModel(m.id);
+                            setOpenMenu(null);
+                          }}
+                          className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] transition-colors ${
+                            isSelected
+                              ? "bg-accent-soft text-accent font-medium"
+                              : "text-foreground hover:bg-subtle"
+                          }`}
+                        >
+                          <span className="truncate">{m.name}</span>
+                          {isSelected && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* Queued Messages Strip */}
       {queuedMessages.length > 0 && activeThread && (
-        <div className="px-2.5 pt-2 space-y-1">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted flex items-center gap-1">
+        <div className="mb-2 space-y-1">
+          <div className="text-[11px] font-medium text-muted flex items-center gap-1 px-1">
             <Queue className="size-3" aria-hidden="true" />
             <span>Queued ({queuedMessages.length})</span>
           </div>
           {queuedMessages.map((q) => (
             <div
               key={q.id}
-              className="flex items-center justify-between gap-2 px-2 py-1 border border-border bg-surface-secondary text-xs"
+              className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-border bg-subtle text-[12px]"
             >
-              <span className="truncate font-mono text-foreground-secondary flex-1">
+              <span className="truncate text-foreground flex-1">
                 {q.content || `${q.attachments.length} image(s)`}
               </span>
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
                   onClick={() => void onSteerQueuedMessage(activeThread.summary.id, q)}
-                  className="px-1.5 py-0.5 text-[10px] font-mono uppercase border border-border bg-background hover:bg-surface-tertiary text-foreground"
-                  title={
-                    providerObj?.supportsSteer
-                      ? "Steer active turn immediately"
-                      : "Interrupt and run immediately"
-                  }
+                  className="px-2 py-0.5 rounded-md text-[11px] font-medium border border-border bg-panel hover:bg-accent-soft hover:text-accent transition-colors"
                 >
                   Steer
                 </button>
@@ -471,7 +691,7 @@ export function AgentComposer({
                       textareaRef.current?.focus();
                     });
                   }}
-                  className="p-0.5 text-muted hover:text-foreground"
+                  className="p-1 rounded-md text-muted hover:text-foreground hover:bg-panel"
                   title="Edit queued message"
                   aria-label="Edit queued message"
                 >
@@ -480,7 +700,7 @@ export function AgentComposer({
                 <button
                   type="button"
                   onClick={() => onRemoveQueuedMessage(activeThread.summary.id, q.id)}
-                  className="p-0.5 text-muted hover:text-error"
+                  className="p-1 rounded-md text-muted hover:text-error hover:bg-panel"
                   title="Remove from queue"
                   aria-label="Remove from queue"
                 >
@@ -492,277 +712,263 @@ export function AgentComposer({
         </div>
       )}
 
-      {/* Image Attachment Strip */}
-      {attachments.length > 0 && (
-        <div className="px-2.5 pt-2 flex flex-wrap gap-1.5">
-          {attachments.map((att) => (
-            <div
-              key={att.id}
-              className="relative group border border-border bg-surface-secondary p-0.5"
-            >
-              <button
-                type="button"
-                onClick={() => setLightboxImage(att)}
-                className="block size-12 overflow-hidden bg-background"
-                title={att.input.filename}
+      {/* Raised Rounded Composer Card */}
+      <div
+        className={`rounded-[14px] border bg-panel transition-all ${
+          dragOver
+            ? "border-accent ring-2 ring-accent/20"
+            : "border-border-dark focus-within:border-accent"
+        }`}
+        style={{ boxShadow: "var(--shadow-1)" }}
+      >
+        {/* Connected Context Chip & Image Attachments */}
+        {(contextChip || attachments.length > 0) && (
+          <div className="px-3 pt-2.5 flex flex-wrap items-center gap-1.5">
+            {contextChip && (
+              <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-accent-soft text-accent text-[11.5px] font-mono">
+                <FileText className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate max-w-[200px]">{contextChip.label}</span>
+                <button
+                  type="button"
+                  onClick={() => setContextChip(null)}
+                  className="p-0.5 rounded hover:bg-panel/60"
+                  aria-label="Remove selection context"
+                >
+                  <X className="size-2.5" aria-hidden="true" />
+                </button>
+              </span>
+            )}
+
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                className="relative group rounded-lg border border-border bg-subtle p-0.5"
               >
-                {att.input.dataUrl && (
-                  <Image
-                    unoptimized
-                    src={att.input.dataUrl}
-                    alt={att.input.filename}
-                    width={48}
-                    height={48}
-                    className="w-full h-full object-cover"
-                  />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAttachments((prev) => prev.filter((item) => item.id !== att.id))}
-                className="absolute -top-1.5 -right-1.5 size-4 bg-foreground text-background flex items-center justify-center text-[10px]"
-                aria-label={`Remove ${att.input.filename}`}
-              >
-                <X className="size-2.5" aria-hidden="true" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Main Prompt Input */}
-      <div className="p-2.5 pb-1.5">
-        <textarea
-          ref={textareaRef}
-          value={text}
-          onChange={(e) => {
-            setDismissedPopoverKey(null);
-            setActivePopoverIdx(0);
-            setText(e.target.value);
-            requestAnimationFrame(() => adjustTextareaHeight());
-          }}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          rows={2}
-          disabled={!projectPath}
-          placeholder={
-            !projectPath
-              ? "Open a folder to start..."
-              : isRunning
-                ? "Type to queue next message or steer..."
-                : "Ask about your paper, edit TeX, run commands... (/ for commands, @ for files)"
-          }
-          aria-label="Agent prompt input"
-          className="w-full resize-none bg-transparent text-xs font-mono text-foreground placeholder:text-muted focus:outline-none leading-relaxed max-h-[180px]"
-        />
-      </div>
-
-      {/* Bottom T3-style Control Bar */}
-      <div className="px-2.5 pb-2 pt-1 flex items-center justify-between gap-1.5 flex-wrap border-t border-border/50">
-        <div className="flex items-center gap-1 flex-wrap min-w-0">
-          {/* Hidden image input */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              if (e.target.files?.length) {
-                void handleAddFiles(e.target.files);
-              }
-              e.target.value = "";
-            }}
-          />
-
-          <button
-            type="button"
-            disabled={!projectPath}
-            onClick={() => fileInputRef.current?.click()}
-            className="p-1 border border-border bg-surface-secondary hover:bg-surface-tertiary text-muted hover:text-foreground disabled:opacity-40"
-            title="Attach image (or paste / drop)"
-            aria-label="Attach image"
-          >
-            <Paperclip className="size-3.5" aria-hidden="true" />
-          </button>
-
-          {/* Provider selector */}
-          <div className="relative inline-flex items-center">
-            <select
-              aria-label="Agent provider"
-              value={currentProviderId}
-              onChange={(e) => void onChangeProvider(e.target.value as AgentProviderId)}
-              className="appearance-none pl-1.5 pr-5 py-0.5 text-[10px] font-mono uppercase border border-border bg-surface-secondary text-foreground hover:border-foreground focus:outline-none cursor-pointer"
-            >
-              {providers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                  {!p.installed ? " (missing)" : !p.authenticated ? " (auth)" : ""}
-                </option>
-              ))}
-            </select>
-            <CaretDown
-              className="size-2.5 text-muted pointer-events-none absolute right-1.5"
-              aria-hidden="true"
-            />
-          </div>
-
-          {/* Model selector */}
-          {models.length > 0 && (
-            <div className="relative inline-flex items-center max-w-[130px]">
-              <select
-                aria-label="Agent model"
-                value={currentModel}
-                onChange={(e) => void onChangeModel(e.target.value)}
-                className="appearance-none w-full pl-1.5 pr-4 py-0.5 text-[10px] font-mono border border-border bg-surface-secondary text-foreground hover:border-foreground focus:outline-none truncate cursor-pointer"
-              >
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-              <CaretDown
-                className="size-2.5 text-muted pointer-events-none absolute right-1"
-                aria-hidden="true"
-              />
-            </div>
-          )}
-
-          {/* Effort selector */}
-          {supportedEfforts.length > 0 && (
-            <div className="relative inline-flex items-center">
-              <select
-                aria-label="Reasoning effort"
-                value={currentEffort}
-                onChange={(e) => void onChangeEffort(e.target.value)}
-                className="appearance-none pl-1.5 pr-4 py-0.5 text-[10px] font-mono uppercase border border-border bg-surface-secondary text-foreground hover:border-foreground focus:outline-none cursor-pointer"
-              >
-                {supportedEfforts.map((eff) => (
-                  <option key={eff} value={eff}>
-                    {eff}
-                  </option>
-                ))}
-              </select>
-              <CaretDown
-                className="size-2.5 text-muted pointer-events-none absolute right-1"
-                aria-hidden="true"
-              />
-            </div>
-          )}
-
-          {/* Interaction Mode toggle */}
-          <button
-            type="button"
-            onClick={() =>
-              void onChangeInteractionMode(interactionMode === "plan" ? "default" : "plan")
-            }
-            className={`px-1.5 py-0.5 text-[10px] font-mono uppercase border transition-colors ${
-              interactionMode === "plan"
-                ? "border-foreground bg-foreground text-background"
-                : "border-border bg-surface-secondary text-muted hover:text-foreground"
-            }`}
-            title="Toggle Plan vs Default interaction mode"
-          >
-            {interactionMode === "plan" ? "Plan" : "Edit"}
-          </button>
-
-          {/* Runtime Permission Mode selector */}
-          <div className="relative inline-flex items-center">
-            <select
-              aria-label="Permission policy"
-              value={runtimeMode}
-              onChange={(e) => void onChangeRuntimeMode(e.target.value as RuntimeMode)}
-              className="appearance-none pl-1.5 pr-4 py-0.5 text-[10px] font-mono uppercase border border-border bg-surface-secondary text-muted hover:text-foreground hover:border-foreground focus:outline-none cursor-pointer"
-            >
-              <option value="approval-required">Ask</option>
-              <option value="auto-accept-edits">Auto-Edit</option>
-              <option value="full-access">Full Access</option>
-            </select>
-            <CaretDown
-              className="size-2.5 text-muted pointer-events-none absolute right-1"
-              aria-hidden="true"
-            />
-          </div>
-        </div>
-
-        {/* Send / Steer / Queue / Stop Actions */}
-        <div className="flex items-center gap-1 shrink-0">
-          {isRunning && activeThread && (
-            <>
-              {(text.trim().length > 0 || attachments.length > 0) && (
-                <>
-                  {providerObj?.supportsSteer && (
-                    <button
-                      type="button"
-                      onClick={() => void handleSubmit("steer")}
-                      className="btn btn-outline btn-sm py-1 px-2 text-[10px]"
-                      title="Steer current turn with this message"
-                    >
-                      Steer
-                    </button>
+                <button
+                  type="button"
+                  onClick={() => setLightboxImage(att)}
+                  className="block size-11 rounded-md overflow-hidden bg-panel"
+                  title={att.input.filename}
+                >
+                  {att.input.dataUrl && (
+                    <Image
+                      unoptimized
+                      src={att.input.dataUrl}
+                      alt={att.input.filename}
+                      width={44}
+                      height={44}
+                      className="w-full h-full object-cover"
+                    />
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void handleSubmit("queue")}
-                    className="btn btn-outline btn-sm py-1 px-2 text-[10px] inline-flex items-center gap-1"
-                    title="Queue message for next turn"
-                  >
-                    <Plus className="size-3" aria-hidden="true" />
-                    <span>Queue</span>
-                  </button>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={() => void onInterruptTurn(activeThread.summary.id)}
-                className="btn btn-sm py-1 px-2 border border-error text-error bg-background hover:bg-error/10 inline-flex items-center gap-1"
-                title="Stop generation"
-              >
-                <Stop className="size-3" weight="fill" aria-hidden="true" />
-                <span>Stop</span>
-              </button>
-            </>
-          )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAttachments((prev) => prev.filter((item) => item.id !== att.id))
+                  }
+                  className="absolute -top-1.5 -right-1.5 size-4 rounded-full bg-foreground-strong text-panel flex items-center justify-center"
+                  aria-label={`Remove ${att.input.filename}`}
+                >
+                  <X className="size-2.5" aria-hidden="true" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
 
-          {!isRunning && (
+        {/* Textarea */}
+        <div className="px-3 pt-2.5 pb-1">
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => {
+              setDismissedPopoverKey(null);
+              setActivePopoverIdx(0);
+              setText(e.target.value);
+              requestAnimationFrame(() => adjustTextareaHeight());
+            }}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            rows={2}
+            disabled={!projectPath}
+            placeholder={
+              !projectPath
+                ? "Open a paper folder to start..."
+                : isRunning
+                  ? providerObj?.supportsSteer
+                    ? "Type to steer this turn..."
+                    : "Type to queue next message..."
+                  : "Ask anything, @ a file, / for commands..."
+            }
+            aria-label="Agent prompt input"
+            className="w-full resize-none bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed max-h-[180px]"
+          />
+        </div>
+
+        {/* Bottom Control Row (Silkscreen v1.3.1 compact layout) */}
+        <div className="px-2 pb-2 pt-1 flex items-center justify-between gap-1.5">
+          {/* Left: Attach + Consolidated ChatModes button */}
+          <div className="flex items-center gap-1 shrink-0">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) {
+                  void handleAddFiles(e.target.files);
+                }
+                e.target.value = "";
+              }}
+            />
+
             <button
               type="button"
-              disabled={!projectPath || (!text.trim() && attachments.length === 0)}
-              onClick={() => void handleSubmit("auto")}
-              className="btn btn-primary btn-sm py-1 px-2.5 inline-flex items-center gap-1 disabled:opacity-40"
-              title="Send message (Enter)"
+              disabled={!projectPath}
+              onClick={() => fileInputRef.current?.click()}
+              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+              title="Attach image (or paste / drop)"
+              aria-label="Attach image"
             >
-              <ArrowUp className="size-3" weight="bold" aria-hidden="true" />
-              <span>Send</span>
+              <Paperclip className="size-4" aria-hidden="true" />
             </button>
-          )}
+
+            <button
+              type="button"
+              onClick={() => setOpenMenu((m) => (m === "modes" ? null : "modes"))}
+              className={`h-7 px-2 rounded-lg inline-flex items-center gap-1 text-[11.5px] transition-colors ${
+                openMenu === "modes" || interactionMode === "plan"
+                  ? "bg-accent-soft text-accent"
+                  : "text-muted hover:text-foreground hover:bg-subtle"
+              }`}
+              title={`${runtimeLabel}${interactionMode === "plan" ? " · Plan mode" : ""}${currentEffort ? ` · ${currentEffort} effort` : ""}`}
+              aria-label="Chat settings"
+              aria-expanded={openMenu === "modes"}
+            >
+              {isAutoRuntime ? (
+                <Lightning className="size-3.5" aria-hidden="true" />
+              ) : (
+                <ShieldCheck className="size-3.5" aria-hidden="true" />
+              )}
+              {interactionMode === "plan" && <span className="font-medium">Plan</span>}
+              <CaretDown className="size-2.5 opacity-75" aria-hidden="true" />
+            </button>
+
+            {usageTrigger}
+          </div>
+
+          {/* Right: ModelChip + Send/Stop */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <button
+              type="button"
+              onClick={() => setOpenMenu((m) => (m === "model" ? null : "model"))}
+              className="h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground hover:bg-subtle transition-colors min-w-0 max-w-[175px]"
+              title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}`}
+              aria-label="Choose agent and model"
+              aria-expanded={openMenu === "model"}
+            >
+              <ProviderIcon providerId={currentProviderId} className="size-3.5 shrink-0" />
+              <span className="truncate font-medium text-foreground">{modelLabel}</span>
+              {currentEffort && (
+                <span className="text-[11px] text-muted-foreground shrink-0 capitalize">
+                  {currentEffort}
+                </span>
+              )}
+              <CaretDown className="size-2.5 opacity-75 shrink-0" aria-hidden="true" />
+            </button>
+
+            {isRunning && activeThread ? (
+              <div className="flex items-center gap-1 shrink-0">
+                {canSend && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void handleSubmit(providerObj?.supportsSteer ? "steer" : "queue")
+                    }
+                    className="h-7 px-2 rounded-full border border-border bg-subtle hover:bg-accent-soft hover:text-accent text-[11px] font-medium inline-flex items-center gap-1 transition-colors"
+                    title={providerObj?.supportsSteer ? "Steer active turn" : "Queue for next turn"}
+                  >
+                    {providerObj?.supportsSteer ? (
+                      <span>Steer</span>
+                    ) : (
+                      <>
+                        <Plus className="size-3" aria-hidden="true" />
+                        <span>Queue</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void onInterruptTurn(activeThread.summary.id)}
+                  className="size-7 rounded-full bg-error-bg text-error hover:brightness-95 inline-flex items-center justify-center transition-all"
+                  title="Stop generation"
+                  aria-label="Stop generation"
+                >
+                  <Stop className="size-3.5" weight="fill" aria-hidden="true" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={!canSend}
+                onClick={() => void handleSubmit("auto")}
+                className={`size-7 rounded-full inline-flex items-center justify-center transition-all shrink-0 ${
+                  canSend
+                    ? "bg-primary text-primary-text hover:bg-primary-hover"
+                    : "bg-sunken text-muted-foreground cursor-default"
+                }`}
+                title="Send message (Enter)"
+                aria-label="Send message"
+              >
+                <ArrowUp className="size-3.5" weight="bold" aria-hidden="true" />
+              </button>
+            )}
+          </div>
         </div>
+      </div>
+
+      {/* Quiet Context Strip below composer */}
+      <div className="px-1 pt-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+        <span className="truncate font-mono text-[10.5px]">{folderShort ?? "No folder open"}</span>
+        <span className="shrink-0">{runtimeLabel}</span>
       </div>
 
       {/* Image Lightbox Preview */}
       {lightboxImage?.input.dataUrl && (
-        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-6">
-          <div className="border-2 border-foreground bg-background max-w-2xl max-h-[85vh] flex flex-col">
-            <div className="px-3 py-2 border-b border-border flex items-center justify-between gap-4">
-              <span className="text-xs font-mono truncate">{lightboxImage.input.filename}</span>
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px] flex items-center justify-center p-6 modal-overlay">
+          <button
+            type="button"
+            aria-label="Close image preview"
+            onClick={() => setLightboxImage(null)}
+            className="fixed inset-0 cursor-default"
+          />
+          <div
+            className="relative z-10 rounded-2xl border border-border bg-panel max-w-2xl max-h-[85vh] flex flex-col overflow-hidden modal-content"
+            style={{ boxShadow: "var(--shadow-3)" }}
+          >
+            <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-4">
+              <span className="text-xs font-mono text-foreground truncate">
+                {lightboxImage.input.filename}
+              </span>
               <button
                 type="button"
                 onClick={() => setLightboxImage(null)}
-                className="text-muted hover:text-foreground"
+                className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle"
                 aria-label="Close image preview"
               >
                 <X className="size-4" aria-hidden="true" />
               </button>
             </div>
-            <div className="p-2 overflow-auto">
+            <div className="p-3 overflow-auto">
               <Image
                 unoptimized
                 src={lightboxImage.input.dataUrl}
                 alt={lightboxImage.input.filename}
                 width={800}
                 height={600}
-                className="max-w-full max-h-[70vh] w-auto h-auto object-contain mx-auto"
+                className="max-w-full max-h-[70vh] w-auto h-auto rounded-lg object-contain mx-auto"
               />
             </div>
           </div>

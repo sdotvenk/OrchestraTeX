@@ -1,7 +1,15 @@
 "use client";
 
 import type { FileNode } from "@orchestratex/shared";
-import { Gear, GitFork, ListBullets, Plugs, Plus, WarningCircle, X } from "@phosphor-icons/react";
+import {
+  ArrowsInSimple,
+  ArrowsOutSimple,
+  CaretDown,
+  GitFork,
+  Plus,
+  WarningCircle,
+  X,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useState } from "react";
 import type {
   AgentProviderId,
@@ -11,8 +19,7 @@ import type {
   RuntimeMode,
 } from "@/lib/agent/types";
 import type { useAgent } from "@/lib/agent/use-agent";
-import { AgentComposer } from "./agent-composer";
-import { ProviderIcon } from "./icons";
+import { AgentComposer, type AgentDraftInjection } from "./agent-composer";
 import { MessageTimeline } from "./message-timeline";
 import { ProviderOnboarding } from "./provider-onboarding";
 import { TasksDisplay } from "./tasks-display";
@@ -33,11 +40,13 @@ interface AgentPanelProps {
   activeFile?: string | null;
   usageOpen: boolean;
   onUsageOpenChange: (open: boolean) => void;
-  draftInjection?: { id: number; text: string } | null;
+  draftInjection?: AgentDraftInjection | null;
   onDraftConsumed?: () => void;
   onFileClick?: (path: string) => void;
   onRunTerminalCommand: (command: string) => void;
   onOpenAgentSettings: () => void;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
   onClose?: () => void;
 }
 
@@ -57,6 +66,8 @@ export function AgentPanel({
   onFileClick,
   onRunTerminalCommand,
   onOpenAgentSettings,
+  isExpanded = false,
+  onToggleExpand,
   onClose,
 }: AgentPanelProps) {
   const [view, setView] = useState<"chat" | "threads" | "providers">("chat");
@@ -68,7 +79,6 @@ export function AgentPanel({
   const currentProviderId =
     activeThread?.summary.providerId ?? activeProvider?.id ?? agentSettings.defaultProvider;
 
-  // Automatically surface setup onboarding if providers finished loading and active provider isn't ready
   const [userBypassedOnboarding, setUserBypassedOnboarding] = useState(false);
   const anyReadyProvider = useMemo(
     () => agent.providers.some((p) => p.installed && p.authenticated),
@@ -161,28 +171,37 @@ export function AgentPanel({
   };
 
   const queuedForActive = activeThread ? (agent.queuesByThread[activeThread.summary.id] ?? []) : [];
+  const isRunning = activeThread?.summary.status === "running";
 
   return (
-    <div className="h-full w-full flex flex-col bg-background min-w-0">
-      {/* Header Toolbar */}
-      <div className="h-9 px-2.5 border-b border-border flex items-center justify-between gap-1.5 bg-surface-secondary shrink-0">
-        <div className="flex items-center gap-1 min-w-0">
+    <div className="h-full w-full flex flex-col bg-panel min-w-0">
+      {/* Calm Silkscreen-style Agent Header */}
+      <div className="h-10 px-3 border-b border-border flex items-center justify-between gap-2 bg-panel shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0">
           <button
             type="button"
             onClick={() => setView((v) => (v === "threads" ? "chat" : "threads"))}
-            className={`inline-flex items-center gap-1.5 px-1.5 py-1 text-xs font-mono border transition-colors min-w-0 ${
+            className={`inline-flex items-center gap-1.5 h-7 px-2 -ml-1 rounded-lg text-[13px] font-semibold transition-colors min-w-0 ${
               view === "threads"
-                ? "border-foreground bg-foreground text-background"
-                : "border-transparent hover:border-border text-foreground"
+                ? "bg-accent-soft text-accent"
+                : "text-foreground-strong hover:bg-subtle"
             }`}
-            title="Switch or manage threads"
+            title="Switch or manage chats"
           >
-            <ListBullets className="size-3.5 shrink-0" aria-hidden="true" />
-            <span className="truncate max-w-[130px]">
-              {activeThread?.summary.title || "New Chat"}
+            <span className="truncate max-w-[165px]">
+              {activeThread?.summary.title || "New chat"}
             </span>
+            <CaretDown className="size-3 text-muted shrink-0" aria-hidden="true" />
           </button>
 
+          {isRunning && (
+            <span className="px-2 py-0.5 rounded-full bg-success-bg text-success text-[10.5px] font-medium shrink-0">
+              Working
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-0.5 shrink-0">
           <button
             type="button"
             disabled={!projectPath}
@@ -190,11 +209,11 @@ export function AgentPanel({
               void agent.createThread();
               setView("chat");
             }}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary disabled:opacity-40 shrink-0"
-            title="New thread"
-            aria-label="New thread"
+            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+            title="New chat"
+            aria-label="New chat"
           >
-            <Plus className="size-3.5" aria-hidden="true" />
+            <Plus className="size-4" aria-hidden="true" />
           </button>
 
           {activeThread && activeProvider?.supportsFork && (
@@ -204,69 +223,35 @@ export function AgentPanel({
                 void agent.forkThread(activeThread.summary.id);
                 setView("chat");
               }}
-              className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary shrink-0"
-              title="Fork current thread"
-              aria-label="Fork thread"
+              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+              title="Fork current chat"
+              aria-label="Fork chat"
             >
               <GitFork className="size-3.5" aria-hidden="true" />
             </button>
           )}
-        </div>
 
-        <div className="flex items-center gap-1 shrink-0">
-          <UsagePopover
-            open={usageOpen}
-            onOpenChange={onUsageOpenChange}
-            provider={activeProvider}
-            usage={activeThread?.usage}
-            threadStatus={activeThread?.summary.status}
-            onRefreshLimits={async () => {
-              if (activeProvider) {
-                await agent.refreshRateLimits(activeProvider.id);
-              } else {
-                await agent.refreshProviders();
-              }
-            }}
-            onCompact={
-              activeThread && activeProvider?.supportsCompact
-                ? () => agent.compactThread(activeThread.summary.id)
-                : undefined
-            }
-          />
-
-          <button
-            type="button"
-            onClick={() => setView((v) => (v === "providers" ? "chat" : "providers"))}
-            className={`p-1 border transition-colors ${
-              view === "providers"
-                ? "border-foreground bg-foreground text-background"
-                : "border-border bg-background hover:bg-surface-tertiary text-foreground"
-            }`}
-            title="Agent providers & auth status"
-            aria-label="Agent providers"
-          >
-            {activeProvider ? (
-              <ProviderIcon providerId={activeProvider.id} className="size-3.5" />
-            ) : (
-              <Plugs className="size-3.5" aria-hidden="true" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={onOpenAgentSettings}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary"
-            title="Agent & LaTeX settings"
-            aria-label="Open agent settings"
-          >
-            <Gear className="size-3.5" aria-hidden="true" />
-          </button>
+          {onToggleExpand && (
+            <button
+              type="button"
+              onClick={onToggleExpand}
+              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+              title={isExpanded ? "Restore pane width" : "Expand agent pane"}
+              aria-label={isExpanded ? "Restore pane width" : "Expand agent pane"}
+            >
+              {isExpanded ? (
+                <ArrowsInSimple className="size-3.5" aria-hidden="true" />
+              ) : (
+                <ArrowsOutSimple className="size-3.5" aria-hidden="true" />
+              )}
+            </button>
+          )}
 
           {onClose && (
             <button
               type="button"
               onClick={onClose}
-              className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary"
+              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
               title="Hide Agent Panel (Cmd+L)"
               aria-label="Close agent panel"
             >
@@ -283,9 +268,9 @@ export function AgentPanel({
 
       {/* Global / Turn Error Banner */}
       {agent.error && (
-        <div className="px-3 py-1.5 border-b border-error/40 bg-error/10 flex items-center justify-between gap-2 text-xs font-mono text-error">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <WarningCircle className="size-3.5 shrink-0" aria-hidden="true" />
+        <div className="mx-3 mt-2 px-3 py-2 rounded-xl border border-error/30 bg-error-bg flex items-center justify-between gap-2 text-[12px] text-error">
+          <div className="flex items-center gap-2 min-w-0">
+            <WarningCircle className="size-4 shrink-0" aria-hidden="true" />
             <span className="truncate" title={agent.error}>
               {agent.error}
             </span>
@@ -293,7 +278,7 @@ export function AgentPanel({
           <button
             type="button"
             onClick={agent.clearError}
-            className="p-0.5 hover:opacity-75 shrink-0"
+            className="size-5 rounded-md inline-flex items-center justify-center hover:bg-panel/50 shrink-0"
             aria-label="Dismiss error"
           >
             <X className="size-3" aria-hidden="true" />
@@ -378,6 +363,28 @@ export function AgentPanel({
             onChangeEffort={handleChangeEffort}
             onChangeInteractionMode={handleChangeInteractionMode}
             onChangeRuntimeMode={handleChangeRuntimeMode}
+            usageTrigger={
+              <UsagePopover
+                open={usageOpen}
+                onOpenChange={onUsageOpenChange}
+                provider={activeProvider}
+                usage={activeThread?.usage}
+                threadStatus={activeThread?.summary.status}
+                compactRing={true}
+                onRefreshLimits={async () => {
+                  if (activeProvider) {
+                    await agent.refreshRateLimits(activeProvider.id);
+                  } else {
+                    await agent.refreshProviders();
+                  }
+                }}
+                onCompact={
+                  activeThread && activeProvider?.supportsCompact
+                    ? () => agent.compactThread(activeThread.summary.id)
+                    : undefined
+                }
+              />
+            }
           />
         </>
       )}

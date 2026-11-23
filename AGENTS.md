@@ -111,23 +111,22 @@ pnpm format                                 # Biome formatter write
 
 ### Design System
 
-Retro-Terminal Fintech aesthetic. Monochrome + orange accent. No rounded corners.
+Calm, tactile, research-first desktop aesthetic (inspired by Silkscreen, adapted for space-efficient LaTeX editing). Warm paper chrome (`--bg`), crisp white rounded inset frames (`ox-frame`, `12px` radius), hairline borders, sentence-case UI typography (`IBM Plex Sans`), and monospace (`IBM Plex Mono`) reserved strictly for LaTeX source, identifiers, file paths, and tabular metrics.
 
-| Token      | Value     |
-| ---------- | --------- |
-| background | `#f5f5f0` |
-| foreground | `#000000` |
-| accent     | `#ff5500` |
-| border     | `#e5e5e5` |
-| muted      | `#666666` |
+Three switchable palettes share the same semantic CSS token contract in `apps/desktop/src/app/globals.css` (Light + Dark):
 
-**Button Style (Neo-Brutalism)**:
+| Palette | `--bg` (Light) | `--accent` | `--primary-bg` |
+| --- | --- | --- | --- |
+| **Atelier** (default) | `#f6f5f0` | `#2c4f7c` | `#d14e2a` |
+| **Conductor** | `#f3f5f8` | `#3652b8` | `#c48b28` |
+| **Monograph** | `#f7f4f0` | `#6e3450` | `#256b60` |
 
-- Primary: `bg-accent text-white`, sharp corners, uppercase monospace
-- Secondary: `bg-foreground text-white`, sharp corners
-- Ghost: `border border-border`, hover with accent
-- Use `btn btn-sm` classes with box-shadow offset effect
-- NEVER use rounded corners
+**Button & Control Style**:
+
+- Primary (`.btn-primary`): `var(--primary-bg)` fill, **at most one per view** (Compile / Send), rounded `8px` (`rounded-full` for pill CTAs)
+- Secondary (`.btn-secondary`): `var(--panel)` with `1px var(--line-strong)` hairline border, soft hover `var(--subtle)`
+- Ghost (`.btn-ghost`): transparent, `var(--subtle)` hover, `var(--accent-soft)` active
+- Never use brutalist offset shadows or raw hex colors outside `globals.css` tokens
 
 See `docs/DESIGN.md` for full design system documentation.
 
@@ -242,8 +241,7 @@ Linux:   apps/desktop/src-tauri/target/release/bundle/appimage/OrchestraTeX_*.Ap
 | Pattern                       | Why                                 |
 | ----------------------------- | ----------------------------------- |
 | `as any`, `@ts-ignore`        | Type safety is non-negotiable       |
-| `rounded-*` classes           | Sharp corners only                  |
-| Colors other than grayscale + orange | Monochrome + accent design   |
+| Raw hex colors in components  | Use semantic tokens in `globals.css` so all 3 palettes + dark mode stay consistent |
 | `std::fs` in async Rust       | Use `tokio::fs` or `spawn_blocking` |
 | `std::thread::sleep` in async | Use `tokio::time::sleep`            |
 | `std::process::Command` in async | Use `tokio::process::Command`    |

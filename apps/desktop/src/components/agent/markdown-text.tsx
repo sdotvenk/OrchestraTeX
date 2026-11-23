@@ -41,15 +41,13 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   };
 
   return (
-    <div className="my-2 border border-border bg-surface-secondary overflow-hidden">
-      <div className="flex items-center justify-between px-2.5 py-1 border-b border-border bg-surface-tertiary/60">
-        <span className="text-[10px] font-mono uppercase tracking-wider text-muted">
-          {language || "text"}
-        </span>
+    <div className="my-2 rounded-lg border border-border bg-sunken/70 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-subtle/80">
+        <span className="text-[11px] font-mono text-muted">{language || "text"}</span>
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono text-muted hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-muted hover:text-foreground hover:bg-panel transition-colors"
           title="Copy code"
         >
           {copied ? (
@@ -65,7 +63,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           )}
         </button>
       </div>
-      <pre className="p-2.5 overflow-x-auto text-xs font-mono leading-relaxed text-foreground">
+      <pre className="p-3 overflow-x-auto text-[12px] font-mono leading-relaxed text-foreground">
         <code>{code}</code>
       </pre>
     </div>
@@ -128,7 +126,7 @@ export const MarkdownText = memo(function MarkdownText({
             <button
               type="button"
               onClick={() => onFileClick(matchedFile)}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 text-xs font-mono border border-border bg-surface-secondary hover:border-accent hover:text-accent transition-colors align-baseline"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded-md text-[12px] font-mono bg-accent-soft text-accent hover:brightness-95 transition-all align-baseline"
               title={`Open ${matchedFile}`}
             >
               <FileText className="size-3 shrink-0" aria-hidden="true" />
@@ -138,7 +136,7 @@ export const MarkdownText = memo(function MarkdownText({
         }
         return (
           <code
-            className="px-1 py-0.5 text-[12px] font-mono bg-surface-secondary border border-border/60 text-foreground"
+            className="px-1.5 py-0.5 rounded-md text-[12px] font-mono bg-sunken text-foreground-strong"
             {...rest}
           >
             {children}

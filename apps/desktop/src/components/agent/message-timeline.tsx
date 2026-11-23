@@ -2,12 +2,11 @@
 
 import {
   ArrowDown,
-  Brain,
   CaretDown,
   CaretRight,
+  CheckCircle,
   FileText,
   Sparkle,
-  SpinnerGap,
   WarningCircle,
 } from "@phosphor-icons/react";
 import Image from "next/image";
@@ -34,31 +33,89 @@ interface MessageTimelineProps {
   onRespondInteraction: (interactionId: string, response: InteractionResponse) => Promise<void>;
 }
 
-function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+/**
+ * Live streaming thought trace:
+ * - While reasoning is actively streaming, displays a calm muted live feed with elapsed timer.
+ * - Once answer text arrives or the turn finishes, folds quietly into a single clickable row
+ *   ("Thought for Ns ›") unless the user explicitly toggled it open.
+ */
+function ReasoningBlock({
+  text,
+  streaming,
+  hasFollowingContent,
+}: {
+  text: string;
+  streaming: boolean;
+  hasFollowingContent: boolean;
+}) {
+  const isActivelyThinking = streaming && !hasFollowingContent;
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
+  const [elapsedSec, setElapsedSec] = useState<number>(0);
+  const startTimeRef = useRef<number | null>(null);
+  const streamRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isActivelyThinking) {
+      if (startTimeRef.current === null) {
+        startTimeRef.current = Date.now();
+      }
+      const id = window.setInterval(() => {
+        if (startTimeRef.current !== null) {
+          setElapsedSec(Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000)));
+        }
+      }, 500);
+      return () => window.clearInterval(id);
+    }
+    if (startTimeRef.current !== null) {
+      setElapsedSec(Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000)));
+      startTimeRef.current = null;
+    }
+    return undefined;
+  }, [isActivelyThinking]);
+
+  // Keep live thought trace scrolled to the newest line while thinking
+  useEffect(() => {
+    if (!isActivelyThinking || !streamRef.current || text.length === 0) return;
+    streamRef.current.scrollTop = streamRef.current.scrollHeight;
+  }, [isActivelyThinking, text]);
+
+  const expanded = userExpanded ?? isActivelyThinking;
+
+  const label = isActivelyThinking
+    ? elapsedSec > 0
+      ? `Thinking · ${elapsedSec}s`
+      : "Thinking..."
+    : elapsedSec > 0
+      ? `Thought for ${elapsedSec}s`
+      : "Thought process";
 
   return (
-    <div className="border border-border bg-surface-secondary/40 my-1">
+    <div className="my-1">
       <button
         type="button"
-        onClick={() => setExpanded((p) => !p)}
-        className="w-full px-2.5 py-1 flex items-center justify-between gap-2 text-left hover:bg-surface-secondary transition-colors"
+        onClick={() => setUserExpanded((prev) => !(prev ?? isActivelyThinking))}
+        className="inline-flex items-center gap-1.5 py-0.5 text-[12px] text-muted hover:text-foreground transition-colors"
       >
-        <div className="flex items-center gap-1.5">
-          {expanded ? (
-            <CaretDown className="size-3 text-muted" aria-hidden="true" />
-          ) : (
-            <CaretRight className="size-3 text-muted" aria-hidden="true" />
-          )}
-          <Brain className="size-3.5 text-muted" aria-hidden="true" />
-          <span className="text-[11px] font-mono uppercase tracking-wider text-muted">
-            {streaming ? "Thinking..." : "Reasoning"}
-          </span>
-        </div>
-        <span className="text-[10px] font-mono text-muted">{text.length} chars</span>
+        {isActivelyThinking ? (
+          <span
+            className="size-1.5 rounded-full bg-accent thought-dot shrink-0"
+            aria-hidden="true"
+          />
+        ) : expanded ? (
+          <CaretDown className="size-3 text-muted-foreground shrink-0" aria-hidden="true" />
+        ) : (
+          <CaretRight className="size-3 text-muted-foreground shrink-0" aria-hidden="true" />
+        )}
+        <span className="font-medium">{label}</span>
       </button>
-      {expanded && (
-        <div className="border-t border-border px-2.5 py-2 text-xs font-mono text-muted whitespace-pre-wrap max-h-60 overflow-y-auto bg-background/40">
+
+      {expanded && text.trim().length > 0 && (
+        <div
+          ref={streamRef}
+          className={`mt-1 pl-3 border-l-2 border-border text-[12px] leading-relaxed text-muted whitespace-pre-wrap break-words overflow-y-auto ${
+            isActivelyThinking ? "max-h-36 thought-stream-fade py-1" : "max-h-60 py-0.5"
+          }`}
+        >
           {text}
         </div>
       )}
@@ -66,7 +123,7 @@ function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean 
   );
 }
 
-function ChangedFilesStrip({
+function ChangedFilesCard({
   files,
   projectPath,
   onFileClick,
@@ -75,25 +132,30 @@ function ChangedFilesStrip({
   projectPath: string | null;
   onFileClick?: (path: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   if (files.length === 0) return null;
 
   return (
-    <div className="mt-2 pt-1.5 border-t border-border/60">
+    <div className="mt-2.5 rounded-xl border border-border bg-panel overflow-hidden">
       <button
         type="button"
         onClick={() => setExpanded((p) => !p)}
-        className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-muted hover:text-foreground"
+        className="w-full px-3 py-2 bg-success-bg/70 hover:bg-success-bg flex items-center justify-between gap-2 text-left transition-colors"
       >
+        <div className="flex items-center gap-1.5 text-[12px] font-medium text-success">
+          <CheckCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
+          <span>
+            {files.length} {files.length === 1 ? "file" : "files"} updated
+          </span>
+        </div>
         {expanded ? (
-          <CaretDown className="size-2.5" aria-hidden="true" />
+          <CaretDown className="size-3 text-success" aria-hidden="true" />
         ) : (
-          <CaretRight className="size-2.5" aria-hidden="true" />
+          <CaretRight className="size-3 text-success" aria-hidden="true" />
         )}
-        <span>Changed Files ({files.length})</span>
       </button>
       {expanded && (
-        <div className="mt-1.5 flex flex-wrap gap-1">
+        <div className="px-2.5 py-2 flex flex-wrap gap-1.5 bg-panel">
           {files.map((fp) => {
             const rel = toRelativeProjectPath(fp, projectPath);
             return (
@@ -101,9 +163,9 @@ function ChangedFilesStrip({
                 key={fp}
                 type="button"
                 onClick={() => onFileClick?.(rel)}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-mono border border-border bg-surface-secondary hover:border-foreground text-foreground"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11.5px] font-mono bg-subtle hover:bg-accent-soft hover:text-accent text-foreground transition-colors"
               >
-                <FileText className="size-3 text-muted" aria-hidden="true" />
+                <FileText className="size-3 text-muted shrink-0" aria-hidden="true" />
                 <span>{rel}</span>
               </button>
             );
@@ -144,35 +206,34 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
     return { childToolsByParent: childMap, knownCallIds: callIdSet };
   }, [message.parts]);
 
-  return (
-    <div className="space-y-1.5 py-2 border-b border-border/50 last:border-b-0">
-      <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-muted">
-        <div className="flex items-center gap-1.5">
-          {message.providerId && (
-            <ProviderIcon providerId={message.providerId} className="size-3 text-foreground" />
-          )}
-          <span className="uppercase tracking-wider text-foreground-secondary font-medium">
-            {message.model || message.providerId || "Assistant"}
-          </span>
-          {isLast && isStreaming && (
-            <span className="inline-flex items-center gap-1 text-foreground">
-              <SpinnerGap className="size-3 animate-spin" aria-hidden="true" />
-              <span>streaming</span>
-            </span>
-          )}
-        </div>
-        <span>{formatRelativeTime(message.createdAt)}</span>
-      </div>
+  const hasAnyVisibleParts = message.parts.some(
+    (p) =>
+      p.type === "tool" ||
+      p.type === "image" ||
+      ((p.type === "text" || p.type === "reasoning") && p.text.trim().length > 0),
+  );
 
-      <div className="space-y-1">
-        {message.parts.map((part) => {
+  return (
+    <div className="space-y-2 py-1">
+      <div className="space-y-1.5">
+        {message.parts.map((part, idx) => {
           if (part.type === "reasoning") {
+            const hasFollowing = message.parts
+              .slice(idx + 1)
+              .some(
+                (next) =>
+                  next.type === "tool" || (next.type === "text" && next.text.trim().length > 0),
+              );
             return (
-              <ReasoningBlock key={part.id} text={part.text} streaming={isLast && isStreaming} />
+              <ReasoningBlock
+                key={part.id}
+                text={part.text}
+                streaming={isLast && isStreaming}
+                hasFollowingContent={hasFollowing}
+              />
             );
           }
           if (part.type === "tool") {
-            // Skip child tools that are already nested under their parent
             if (part.parentToolCallId && knownCallIds.has(part.parentToolCallId)) {
               return null;
             }
@@ -201,7 +262,7 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             return (
               <div
                 key={part.id}
-                className="border border-border bg-surface-secondary p-1 inline-block"
+                className="rounded-xl border border-border bg-subtle p-1 inline-block overflow-hidden"
               >
                 <Image
                   unoptimized
@@ -209,27 +270,55 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
                   alt={part.filename ?? "Attachment"}
                   width={320}
                   height={240}
-                  className="max-h-48 w-auto h-auto object-contain"
+                  className="max-h-48 w-auto h-auto rounded-lg object-contain"
                 />
               </div>
             );
           }
           return null;
         })}
+
+        {isLast && isStreaming && !hasAnyVisibleParts && (
+          <div className="flex items-center gap-2 py-1 text-[12.5px] text-muted">
+            <span className="inline-flex items-center gap-1" aria-hidden="true">
+              <span className="size-1.5 rounded-full bg-muted-foreground thought-dot" />
+              <span
+                className="size-1.5 rounded-full bg-muted-foreground thought-dot"
+                style={{ animationDelay: "0.2s" }}
+              />
+              <span
+                className="size-1.5 rounded-full bg-muted-foreground thought-dot"
+                style={{ animationDelay: "0.4s" }}
+              />
+            </span>
+            <span>Working...</span>
+          </div>
+        )}
       </div>
 
       {message.error && (
-        <div className="p-2 border border-error/50 bg-error/10 text-xs font-mono text-error flex items-start gap-2">
-          <WarningCircle className="size-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+        <div className="p-2.5 rounded-xl border border-error/30 bg-error-bg text-[12px] text-error flex items-start gap-2">
+          <WarningCircle className="size-4 shrink-0 mt-0.5" aria-hidden="true" />
           <span className="break-words">{message.error}</span>
         </div>
       )}
 
-      <ChangedFilesStrip
+      <ChangedFilesCard
         files={message.changedFiles}
         projectPath={projectPath}
         onFileClick={onFileClick}
       />
+
+      {!isStreaming && hasAnyVisibleParts && (
+        <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
+          {message.providerId && (
+            <ProviderIcon providerId={message.providerId} className="size-3 opacity-80" />
+          )}
+          <span>{message.model || message.providerId || "Assistant"}</span>
+          <span>·</span>
+          <span>{formatRelativeTime(message.createdAt)}</span>
+        </div>
+      )}
     </div>
   );
 });
@@ -279,14 +368,12 @@ export const MessageTimeline = memo(function MessageTimeline({
   const pendingInteraction = thread?.pendingInteraction ?? null;
   const scrollTrigger = `${messages.length}:${lastContentSig}:${pendingInteraction?.id ?? ""}`;
 
-  // Reset scroll pin when switching threads
   useEffect(() => {
     void threadId;
     pinnedToBottomRef.current = true;
     requestAnimationFrame(() => scrollToBottom(false));
   }, [threadId, scrollToBottom]);
 
-  // Auto-follow while pinned to bottom during streaming
   useEffect(() => {
     if (!scrollTrigger || !pinnedToBottomRef.current) return;
     requestAnimationFrame(() => scrollToBottom(false));
@@ -295,14 +382,24 @@ export const MessageTimeline = memo(function MessageTimeline({
   const activeRelFile = activeFile ? toRelativeProjectPath(activeFile, projectPath) : null;
 
   const quickPrompts = [
-    activeRelFile
-      ? `Proofread and tighten the writing in @${activeRelFile} while keeping technical precision.`
-      : "Review the paper structure and suggest improvements.",
-    "Fix any LaTeX compilation errors or warnings in this project.",
-    activeRelFile
-      ? `Add clear equations and citations where helpful in @${activeRelFile}.`
-      : "Help organize sections, figures, and bibliography.",
-    "Summarize the main contributions and check consistency across sections.",
+    {
+      label: activeRelFile ? `Proofread ${activeRelFile}` : "Review paper structure",
+      prompt: activeRelFile
+        ? `Proofread and tighten the writing in @${activeRelFile} while keeping technical precision.`
+        : "Review the paper structure and suggest improvements.",
+    },
+    {
+      label: "Fix LaTeX build errors",
+      prompt: "Fix any LaTeX compilation errors or warnings in this project.",
+    },
+    {
+      label: activeRelFile
+        ? `Check equations in ${activeRelFile}`
+        : "Organize citations & sections",
+      prompt: activeRelFile
+        ? `Verify equations, notation consistency, and citations in @${activeRelFile}.`
+        : "Help organize sections, figures, and bibliography.",
+    },
   ];
 
   const isRunning = thread?.summary.status === "running";
@@ -312,34 +409,33 @@ export const MessageTimeline = memo(function MessageTimeline({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 py-2 space-y-2"
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
       >
         {messages.length === 0 ? (
-          <div className="py-6 space-y-4">
-            <div className="border border-border bg-surface-secondary p-3 space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider font-semibold">
-                <Sparkle className="size-3.5" aria-hidden="true" />
-                <span>LaTeX Research Assistant</span>
-              </div>
-              <p className="text-xs text-muted leading-relaxed">
-                Ask the agent to draft sections, verify proofs, manage bibliography citations, or
-                resolve LaTeX build errors. Type <code className="font-mono">/</code> for commands
-                or <code className="font-mono">@</code> to reference project files.
-              </p>
-            </div>
+          <div className="py-4 space-y-4">
+            <p className="text-[13px] text-muted leading-relaxed">
+              Ask about your paper, edit TeX directly, verify notation, or fix build errors. Type{" "}
+              <code className="px-1 py-0.5 rounded bg-sunken font-mono text-[12px] text-foreground-strong">
+                @
+              </code>{" "}
+              for files or{" "}
+              <code className="px-1 py-0.5 rounded bg-sunken font-mono text-[12px] text-foreground-strong">
+                /
+              </code>{" "}
+              for commands.
+            </p>
 
-            <div className="space-y-1.5">
-              <div className="text-[10px] font-mono uppercase tracking-wider text-muted">
-                Quick Starters
-              </div>
-              {quickPrompts.map((prompt) => (
+            <div className="flex flex-col items-start gap-2">
+              {quickPrompts.map((item) => (
                 <button
-                  key={prompt}
+                  key={item.label}
                   type="button"
-                  onClick={() => onQuickPrompt(prompt)}
-                  className="w-full text-left px-2.5 py-2 border border-border bg-background hover:border-foreground hover:bg-surface-secondary text-xs text-foreground transition-colors"
+                  onClick={() => onQuickPrompt(item.prompt)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full border border-border bg-panel hover:border-border-dark hover:bg-subtle text-[12.5px] font-medium text-foreground transition-colors text-left"
+                  style={{ boxShadow: "var(--shadow-1)" }}
                 >
-                  {prompt}
+                  <Sparkle className="size-3.5 text-muted shrink-0" aria-hidden="true" />
+                  <span>{item.label}</span>
                 </button>
               ))}
             </div>
@@ -355,39 +451,33 @@ export const MessageTimeline = memo(function MessageTimeline({
               );
 
               return (
-                <div
-                  key={msg.id}
-                  className="border border-border bg-surface-secondary p-2.5 space-y-2"
-                >
-                  <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-muted">
-                    <span>You</span>
-                    <span>{formatRelativeTime(msg.createdAt)}</span>
+                <div key={msg.id} className="flex justify-end">
+                  <div className="max-w-[86%] rounded-2xl bg-subtle px-3.5 py-2.5 space-y-2 text-foreground-strong">
+                    {images.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {images.map((img) => (
+                          <Image
+                            unoptimized
+                            key={img.id}
+                            src={img.url}
+                            alt={img.filename ?? "Attachment"}
+                            width={160}
+                            height={80}
+                            className="h-20 w-auto rounded-lg border border-border object-contain bg-panel"
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {textParts.map((tp) => (
+                      <div
+                        key={tp.id}
+                        className="text-[13px] whitespace-pre-wrap break-words leading-relaxed"
+                      >
+                        {tp.text}
+                      </div>
+                    ))}
                   </div>
-
-                  {images.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {images.map((img) => (
-                        <Image
-                          unoptimized
-                          key={img.id}
-                          src={img.url}
-                          alt={img.filename ?? "Attachment"}
-                          width={160}
-                          height={80}
-                          className="h-20 w-auto border border-border object-contain bg-background"
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  {textParts.map((tp) => (
-                    <div
-                      key={tp.id}
-                      className="text-xs font-mono text-foreground whitespace-pre-wrap break-words leading-relaxed"
-                    >
-                      {tp.text}
-                    </div>
-                  ))}
                 </div>
               );
             }
@@ -407,7 +497,6 @@ export const MessageTimeline = memo(function MessageTimeline({
           })
         )}
 
-        {/* Interactive cards when agent requests input/approval/plan confirmation */}
         {pendingInteraction && (
           <div>
             {pendingInteraction.kind === "question" && (
@@ -465,10 +554,11 @@ export const MessageTimeline = memo(function MessageTimeline({
         <button
           type="button"
           onClick={() => scrollToBottom(true)}
-          className="absolute bottom-3 right-3 z-20 px-2.5 py-1 border border-foreground bg-background text-foreground shadow-[2px_2px_0_0_var(--foreground)] text-[10px] font-mono uppercase tracking-wider inline-flex items-center gap-1 hover:bg-surface-secondary"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 px-3 py-1.5 rounded-full border border-border bg-panel text-foreground text-[12px] font-medium inline-flex items-center gap-1.5 hover:bg-subtle transition-colors"
+          style={{ boxShadow: "var(--shadow-2)" }}
         >
-          <ArrowDown className="size-3" aria-hidden="true" />
-          <span>Jump to latest</span>
+          <ArrowDown className="size-3.5" aria-hidden="true" />
+          <span>Latest</span>
         </button>
       )}
     </div>

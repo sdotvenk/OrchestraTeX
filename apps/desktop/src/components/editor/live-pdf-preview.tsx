@@ -78,7 +78,6 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   const errorDiags = diagnostics.filter((d) => d.severity === "error");
   const warningDiags = diagnostics.filter((d) => d.severity !== "error");
 
-  // Reload compiled PDF bytes immediately on pdfPath/pdfVersion updates (zero cache)
   useEffect(() => {
     if (!pdfPath || pdfVersion < 0) {
       setPdfData(null);
@@ -104,7 +103,6 @@ export const LivePdfPreview = memo(function LivePdfPreview({
     };
   }, [pdfPath, pdfVersion]);
 
-  // Automatically surface Issues drawer when compile fails
   useEffect(() => {
     if (compileStatus === "error" && (errorDiags.length > 0 || lastResult?.error)) {
       setDrawerOpen(true);
@@ -132,15 +130,15 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   };
 
   return (
-    <div className="h-full w-full flex flex-col bg-background border-l border-border min-w-0">
-      {/* Top OverLeaf-style PDF & Build Toolbar */}
-      <div className="h-9 px-2 border-b border-border bg-surface-secondary flex items-center justify-between gap-1.5 shrink-0">
-        <div className="flex items-center gap-1 min-w-0">
+    <div className="h-full w-full flex flex-col bg-panel border-l border-border min-w-0">
+      {/* Calm, Space-Efficient PDF Header Strip */}
+      <div className="h-[36px] px-2.5 border-b border-border bg-panel flex items-center justify-between gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 min-w-0">
           {compileStatus === "compiling" ? (
             <button
               type="button"
               onClick={onStopCompile}
-              className="px-2 py-1 text-[11px] font-mono uppercase border border-error text-error bg-background hover:bg-error/10 inline-flex items-center gap-1 shrink-0"
+              className="h-6 px-2.5 rounded-full bg-error-bg text-error hover:brightness-95 text-[11.5px] font-medium inline-flex items-center gap-1 shrink-0 transition-all"
               title="Stop compilation"
             >
               <Stop className="size-3" weight="fill" aria-hidden="true" />
@@ -151,26 +149,13 @@ export const LivePdfPreview = memo(function LivePdfPreview({
               type="button"
               disabled={!projectPath || !mainFile}
               onClick={onCompile}
-              className="px-2 py-1 text-[11px] font-mono uppercase bg-foreground text-background hover:opacity-90 disabled:opacity-40 inline-flex items-center gap-1 shrink-0"
-              title="Recompile PDF (Cmd/Ctrl+Enter)"
+              className="size-7 rounded-lg text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 inline-flex items-center justify-center shrink-0 transition-colors"
+              title="Recompile PDF (Cmd/Ctrl+Shift+B)"
+              aria-label="Recompile PDF"
             >
-              <ArrowClockwise className="size-3" aria-hidden="true" />
-              <span>Recompile</span>
+              <ArrowClockwise className="size-3.5" aria-hidden="true" />
             </button>
           )}
-
-          <button
-            type="button"
-            onClick={onToggleAutoCompile}
-            className={`px-1.5 py-1 text-[10px] font-mono uppercase border transition-colors shrink-0 ${
-              autoCompile
-                ? "border-foreground bg-background text-foreground"
-                : "border-border bg-surface-tertiary text-muted"
-            }`}
-            title="Toggle automatic compilation on save"
-          >
-            Auto: {autoCompile ? "On" : "Off"}
-          </button>
 
           {/* Status & Issues Pill */}
           <button
@@ -179,45 +164,64 @@ export const LivePdfPreview = memo(function LivePdfPreview({
               setDrawerOpen((p) => !p);
               setDrawerTab(errorDiags.length > 0 || warningDiags.length > 0 ? "issues" : "log");
             }}
-            className="px-1.5 py-1 text-[10px] font-mono border border-border bg-background hover:bg-surface-tertiary inline-flex items-center gap-1 truncate"
-            title="Toggle compilation issues and raw logs"
+            className={`h-6 px-2.5 rounded-full text-[11.5px] font-medium inline-flex items-center gap-1.5 truncate transition-colors ${
+              compileStatus === "error" || errorDiags.length > 0
+                ? "bg-error-bg text-error"
+                : compileStatus === "success"
+                  ? "bg-success-bg text-success"
+                  : "bg-subtle text-muted hover:text-foreground"
+            }`}
+            title="Toggle compilation issues and logs"
           >
             {compileStatus === "compiling" ? (
               <>
-                <SpinnerGap className="size-3 animate-spin" aria-hidden="true" />
+                <SpinnerGap className="size-3 animate-spin shrink-0" aria-hidden="true" />
                 <span>Compiling...</span>
               </>
             ) : compileStatus === "error" || errorDiags.length > 0 ? (
               <>
-                <WarningCircle className="size-3 text-error" weight="fill" aria-hidden="true" />
-                <span className="text-error">
-                  {errorDiags.length} err
+                <WarningCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
+                <span className="tabular-nums">
+                  {errorDiags.length} {errorDiags.length === 1 ? "error" : "errors"}
                   {warningDiags.length > 0 ? ` · ${warningDiags.length} warn` : ""}
                 </span>
               </>
             ) : compileStatus === "success" ? (
               <>
-                <CheckCircle className="size-3 text-success" weight="fill" aria-hidden="true" />
-                <span>
-                  OK
+                <CheckCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
+                <span className="tabular-nums">
+                  PDF ready
                   {lastCompileDurationMs != null
-                    ? ` ${(lastCompileDurationMs / 1000).toFixed(1)}s`
+                    ? ` · ${(lastCompileDurationMs / 1000).toFixed(1)}s`
                     : ""}
                   {warningDiags.length > 0 ? ` · ${warningDiags.length} warn` : ""}
                 </span>
               </>
             ) : (
-              <span className="text-muted">Logs</span>
+              <span>Logs</span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={onToggleAutoCompile}
+            className={`h-6 px-2 rounded-full text-[11px] font-medium transition-colors shrink-0 ${
+              autoCompile
+                ? "bg-accent-soft text-accent"
+                : "bg-subtle text-muted hover:text-foreground"
+            }`}
+            title="Toggle automatic compilation on save"
+          >
+            Auto {autoCompile ? "on" : "off"}
           </button>
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-0.5 shrink-0">
           <button
             type="button"
             disabled={!pdfPath}
             onClick={onForwardSync}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary disabled:opacity-40"
+            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
             title="Sync from cursor position to PDF"
             aria-label="Forward sync to PDF"
           >
@@ -228,8 +232,8 @@ export const LivePdfPreview = memo(function LivePdfPreview({
             type="button"
             disabled={!pdfPath}
             onClick={() => void handleDownloadPdf()}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary disabled:opacity-40"
-            title="Download / Export PDF"
+            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+            title="Export PDF"
             aria-label="Download PDF"
           >
             <DownloadSimple className="size-3.5" aria-hidden="true" />
@@ -239,7 +243,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
             type="button"
             disabled={!projectPath}
             onClick={onCleanAuxFiles}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary disabled:opacity-40"
+            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
             title="Clean auxiliary files (.aux, .log, .fls...)"
             aria-label="Clean auxiliary files"
           >
@@ -252,10 +256,10 @@ export const LivePdfPreview = memo(function LivePdfPreview({
               setDrawerTab("log");
               setDrawerOpen((p) => !p);
             }}
-            className={`p-1 hover:bg-surface-tertiary ${
+            className={`size-7 rounded-lg inline-flex items-center justify-center transition-colors ${
               drawerOpen
-                ? "text-foreground bg-surface-tertiary"
-                : "text-muted hover:text-foreground"
+                ? "bg-accent-soft text-accent"
+                : "text-muted hover:text-foreground hover:bg-subtle"
             }`}
             title="Toggle compile log drawer"
             aria-label="Toggle compile logs"
@@ -266,8 +270,8 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary"
-            title="Close Live PDF Preview"
+            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+            title="Hide PDF Preview (Cmd+P)"
             aria-label="Close Live PDF Preview"
           >
             <X className="size-3.5" aria-hidden="true" />
@@ -275,8 +279,8 @@ export const LivePdfPreview = memo(function LivePdfPreview({
         </div>
       </div>
 
-      {/* Main PDF Body */}
-      <div className="flex-1 min-h-0 flex flex-col">
+      {/* Main PDF Body on Calm Drafting Mat */}
+      <div className="flex-1 min-h-0 flex flex-col bg-stage">
         {pdfData ? (
           <PdfViewer
             pdfData={pdfData}
@@ -286,24 +290,26 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
-            <FilePdf className="size-10 text-muted opacity-40" aria-hidden="true" />
+            <FilePdf className="size-10 text-muted-foreground opacity-60" aria-hidden="true" />
             {loadError ? (
               <div className="text-xs font-mono text-error max-w-xs break-words">{loadError}</div>
             ) : compileStatus === "compiling" ? (
               <div className="space-y-1">
-                <div className="text-xs font-mono uppercase tracking-wider">
-                  Compiling {mainFile}...
+                <div className="text-[13px] font-medium text-foreground-strong">
+                  Compiling <span className="font-mono">{mainFile}</span>...
                 </div>
                 <p className="text-xs text-muted">
-                  PDF preview will appear automatically once built.
+                  Preview will appear as soon as the build finishes.
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 max-w-xs">
-                <div className="text-xs font-mono uppercase tracking-wider">Live PDF Preview</div>
+              <div className="space-y-2.5 max-w-xs">
+                <div className="text-[13.5px] font-semibold text-foreground-strong">
+                  Live PDF preview
+                </div>
                 <p className="text-xs text-muted">
                   {mainFile
-                    ? `Click Recompile to build ${mainFile} and start live preview.`
+                    ? `Compile ${mainFile} to start live preview and SyncTeX.`
                     : "Select a main .tex file to compile and preview."}
                 </p>
                 {mainFile && (
@@ -321,18 +327,18 @@ export const LivePdfPreview = memo(function LivePdfPreview({
         )}
       </div>
 
-      {/* Collapsible Bottom Issues & Raw Log Drawer */}
+      {/* Collapsible Bottom Issues & Raw Log Sheet */}
       {drawerOpen && (
-        <div className="h-48 border-t border-foreground bg-background flex flex-col shrink-0">
-          <div className="px-2.5 py-1 border-b border-border bg-surface-secondary flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1">
+        <div className="h-52 border-t border-border bg-panel flex flex-col shrink-0">
+          <div className="px-3 py-1.5 border-b border-border bg-panel flex items-center justify-between gap-2">
+            <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5">
               <button
                 type="button"
                 onClick={() => setDrawerTab("issues")}
-                className={`px-2 py-0.5 text-[10px] font-mono uppercase border ${
+                className={`px-2.5 py-0.5 rounded-md text-[11.5px] font-medium transition-colors ${
                   drawerTab === "issues"
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-border bg-background text-muted hover:text-foreground"
+                    ? "bg-panel text-foreground-strong shadow-xs"
+                    : "text-muted hover:text-foreground"
                 }`}
               >
                 Issues ({errorDiags.length + warningDiags.length})
@@ -340,13 +346,13 @@ export const LivePdfPreview = memo(function LivePdfPreview({
               <button
                 type="button"
                 onClick={() => setDrawerTab("log")}
-                className={`px-2 py-0.5 text-[10px] font-mono uppercase border ${
+                className={`px-2.5 py-0.5 rounded-md text-[11.5px] font-medium transition-colors ${
                   drawerTab === "log"
-                    ? "border-foreground bg-foreground text-background"
-                    : "border-border bg-background text-muted hover:text-foreground"
+                    ? "bg-panel text-foreground-strong shadow-xs"
+                    : "text-muted hover:text-foreground"
                 }`}
               >
-                Raw Log ({compileLog.length})
+                Build log ({compileLog.length})
               </button>
             </div>
 
@@ -355,16 +361,16 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                 <button
                   type="button"
                   onClick={() => onFixDiagnosticsWithAi(errorDiags)}
-                  className="px-2 py-0.5 text-[10px] font-mono uppercase bg-foreground text-background hover:opacity-90 inline-flex items-center gap-1"
+                  className="btn btn-primary btn-sm h-6 px-2.5 text-[11px]"
                 >
                   <Sparkle className="size-3" aria-hidden="true" />
-                  <span>Fix All with AI</span>
+                  <span>Fix with Agent</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}
-                className="p-0.5 text-muted hover:text-foreground"
+                className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle"
                 aria-label="Close drawer"
               >
                 <X className="size-3.5" aria-hidden="true" />
@@ -372,12 +378,12 @@ export const LivePdfPreview = memo(function LivePdfPreview({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
             {drawerTab === "issues" ? (
               diagnostics.length === 0 ? (
-                <div className="text-xs font-mono text-muted py-4 text-center">
+                <div className="text-xs text-muted py-6 text-center">
                   {lastResult?.error ? (
-                    <span className="text-error">{lastResult.error}</span>
+                    <span className="text-error font-mono">{lastResult.error}</span>
                   ) : (
                     "No LaTeX errors or warnings."
                   )}
@@ -386,31 +392,33 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                 diagnostics.map((d) => (
                   <div
                     key={`${d.severity}-${d.file}-${d.line}-${d.message}`}
-                    className={`border px-2 py-1.5 flex items-start justify-between gap-2 text-xs ${
+                    className={`rounded-xl border px-3 py-2 flex items-start justify-between gap-2 text-xs ${
                       d.severity === "error"
-                        ? "border-error/40 bg-error/5"
-                        : "border-border bg-surface-secondary"
+                        ? "border-error/25 bg-error-bg/50"
+                        : "border-border bg-subtle/50"
                     }`}
                   >
                     <button
                       type="button"
                       onClick={() => onJumpToDiagnostic(d)}
-                      className="text-left min-w-0 flex-1 hover:underline"
+                      className="text-left min-w-0 flex-1 group"
                     >
-                      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase">
+                      <div className="flex items-center gap-2 text-[11px]">
                         <span
-                          className={
-                            d.severity === "error" ? "text-error font-semibold" : "text-muted"
-                          }
+                          className={`px-1.5 py-0.2 rounded-full font-medium capitalize ${
+                            d.severity === "error"
+                              ? "bg-error-bg text-error"
+                              : "bg-warn-bg text-warn"
+                          }`}
                         >
                           {d.severity}
                         </span>
-                        <span className="text-foreground">
+                        <span className="font-mono text-accent group-hover:underline">
                           {d.file}
                           {d.line > 0 ? `:${d.line}` : ""}
                         </span>
                       </div>
-                      <div className="font-mono text-[11px] text-foreground break-words mt-0.5">
+                      <div className="text-[12px] text-foreground break-words mt-1 leading-snug">
                         {d.message}
                       </div>
                     </button>
@@ -419,10 +427,10 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                       <button
                         type="button"
                         onClick={() => onFixDiagnosticsWithAi([d])}
-                        className="px-1.5 py-0.5 text-[10px] font-mono uppercase border border-border bg-background hover:border-foreground shrink-0 inline-flex items-center gap-1"
+                        className="btn btn-secondary btn-sm h-6 px-2 text-[11px] shrink-0"
                         title="Send error to Agent"
                       >
-                        <Sparkle className="size-2.5" aria-hidden="true" />
+                        <Sparkle className="size-3 text-accent" aria-hidden="true" />
                         <span>Fix</span>
                       </button>
                     )}
@@ -432,7 +440,9 @@ export const LivePdfPreview = memo(function LivePdfPreview({
             ) : (
               <div className="font-mono text-[11px] leading-relaxed space-y-0.5">
                 {compileLog.length === 0 ? (
-                  <div className="text-muted text-center py-4">No compile output captured yet.</div>
+                  <div className="text-muted text-center py-6 font-sans text-xs">
+                    No compile output captured yet.
+                  </div>
                 ) : (
                   compileLog.map((entry) => (
                     <div
@@ -441,8 +451,8 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                         entry.is_error
                           ? "text-error whitespace-pre-wrap break-all"
                           : entry.is_warning
-                            ? "text-foreground-secondary font-medium whitespace-pre-wrap break-all"
-                            : "text-foreground-secondary whitespace-pre-wrap break-all"
+                            ? "text-warn whitespace-pre-wrap break-all"
+                            : "text-muted whitespace-pre-wrap break-all"
                       }
                     >
                       {entry.line}

@@ -51,6 +51,14 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
     );
   }
 
+  if (
+    settings.uiPalette !== "atelier" &&
+    settings.uiPalette !== "conductor" &&
+    settings.uiPalette !== "monograph"
+  ) {
+    settings.uiPalette = DEFAULT_EDITOR_SETTINGS.uiPalette;
+  }
+
   settings.fontFamily = sanitizeString(settings.fontFamily);
   settings.fontSize = clampInteger(settings.fontSize, DEFAULT_EDITOR_SETTINGS.fontSize, 8, 32);
   settings.lineHeight =
@@ -107,6 +115,12 @@ export function useEditorSettings() {
 
   // Derive editor theme from app theme
   const editorTheme: EditorTheme = resolvedTheme === "dark" ? "one-dark" : "one-light";
+
+  // Apply UI color palette attribute to <html>
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.dataset.palette = settings.uiPalette;
+  }, [settings.uiPalette]);
 
   // Persist settings to localStorage
   useEffect(() => {

@@ -81,7 +81,7 @@ function getToolSummaryLabel(part: ToolPart, projectPath?: string | null): strin
 function DiffBlock({ diff }: { diff: string }) {
   const lines = diff.split("\n");
   return (
-    <div className="border border-border bg-background overflow-x-auto text-[11px] font-mono leading-relaxed">
+    <div className="rounded-lg border border-border bg-panel overflow-x-auto text-[11px] font-mono leading-relaxed">
       {lines.map((line, i) => {
         const lineKey = `diff-${i}-${line.slice(0, 24)}`;
         const isAdd = line.startsWith("+") && !line.startsWith("+++");
@@ -92,12 +92,12 @@ function DiffBlock({ diff }: { diff: string }) {
             key={lineKey}
             className={
               isAdd
-                ? "px-2 bg-success/10 text-success whitespace-pre"
+                ? "px-2.5 bg-success-bg/70 text-success whitespace-pre"
                 : isDel
-                  ? "px-2 bg-error/10 text-error whitespace-pre"
+                  ? "px-2.5 bg-error-bg/70 text-error whitespace-pre"
                   : isHunk
-                    ? "px-2 bg-surface-tertiary text-muted whitespace-pre"
-                    : "px-2 text-foreground-secondary whitespace-pre"
+                    ? "px-2.5 bg-subtle text-muted whitespace-pre"
+                    : "px-2.5 text-foreground whitespace-pre"
             }
           >
             {line || " "}
@@ -133,8 +133,8 @@ export const ToolDisplay = memo(function ToolDisplay({
     isLongOutput && !showFullOutput ? `${outputText.slice(0, 2000)}\n...` : outputText;
 
   return (
-    <div className={depth > 0 ? "ml-4 border-l-2 border-border pl-2.5" : ""}>
-      <div className="border border-border bg-surface-secondary/50 my-1">
+    <div className={depth > 0 ? "ml-3 border-l border-border pl-2.5" : ""}>
+      <div className="rounded-xl border border-border/80 bg-subtle/45 overflow-hidden my-1">
         <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
           <button
             type="button"
@@ -162,12 +162,12 @@ export const ToolDisplay = memo(function ToolDisplay({
 
             <Icon className="size-3.5 text-muted shrink-0" aria-hidden="true" />
 
-            <span className="text-xs font-mono font-medium text-foreground shrink-0">
+            <span className="text-[12px] font-mono font-medium text-foreground-strong shrink-0">
               {part.tool}
             </span>
 
             {summary && !relFile && (
-              <span className="text-xs font-mono text-muted truncate">{summary}</span>
+              <span className="text-[11.5px] font-mono text-muted truncate">{summary}</span>
             )}
           </button>
 
@@ -175,28 +175,26 @@ export const ToolDisplay = memo(function ToolDisplay({
             <button
               type="button"
               onClick={() => onFileClick(relFile)}
-              className="text-[11px] font-mono text-accent hover:underline truncate max-w-[220px] shrink-0"
+              className="px-1.5 py-0.5 rounded-md bg-panel border border-border text-[11px] font-mono text-accent hover:border-accent truncate max-w-[200px] shrink-0 transition-colors"
               title={`Open ${relFile}`}
             >
               {relFile}
             </button>
           ) : relFile ? (
-            <span className="text-[11px] font-mono text-muted truncate max-w-[220px] shrink-0">
+            <span className="text-[11px] font-mono text-muted truncate max-w-[200px] shrink-0">
               {relFile}
             </span>
           ) : null}
         </div>
 
         {expanded && (
-          <div className="border-t border-border px-2.5 py-2 space-y-2 bg-background/50">
+          <div className="border-t border-border/80 px-2.5 py-2 space-y-2 bg-panel/70">
             {part.diff && <DiffBlock diff={part.diff} />}
 
             {part.input && Object.keys(part.input).length > 0 && (
               <div>
-                <div className="text-[10px] font-mono uppercase tracking-wider text-muted mb-1">
-                  Input
-                </div>
-                <pre className="p-2 border border-border bg-surface-secondary text-[11px] font-mono overflow-x-auto max-h-40 text-foreground-secondary">
+                <div className="text-[11px] font-medium text-muted mb-1">Input</div>
+                <pre className="p-2 rounded-lg bg-sunken text-[11px] font-mono overflow-x-auto max-h-40 text-foreground">
                   {JSON.stringify(part.input, null, 2)}
                 </pre>
               </div>
@@ -205,27 +203,25 @@ export const ToolDisplay = memo(function ToolDisplay({
             {outputText && (
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-muted">
-                    Output
-                  </span>
+                  <span className="text-[11px] font-medium text-muted">Output</span>
                   {isLongOutput && (
                     <button
                       type="button"
                       onClick={() => setShowFullOutput((p) => !p)}
-                      className="text-[10px] font-mono text-accent hover:underline"
+                      className="text-[11px] text-accent hover:underline"
                     >
                       {showFullOutput ? "Truncate" : `Show all (${outputText.length} chars)`}
                     </button>
                   )}
                 </div>
-                <pre className="p-2 border border-border bg-surface-secondary text-[11px] font-mono overflow-x-auto max-h-60 whitespace-pre-wrap break-all text-foreground-secondary">
+                <pre className="p-2 rounded-lg bg-sunken text-[11px] font-mono overflow-x-auto max-h-60 whitespace-pre-wrap break-all text-foreground">
                   {displayedOutput}
                 </pre>
               </div>
             )}
 
             {part.error && (
-              <div className="p-2 border border-error/50 bg-error/10 text-xs font-mono text-error whitespace-pre-wrap">
+              <div className="p-2 rounded-lg bg-error-bg text-[11.5px] font-mono text-error whitespace-pre-wrap">
                 {part.error}
               </div>
             )}

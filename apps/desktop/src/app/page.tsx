@@ -4,7 +4,11 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion, type PanInfo, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import Image from "next/image";
+import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { AgentDraftInjection } from "@/components/agent/agent-composer";
+import { AgentStatusCard } from "@/components/agent/agent-status-card";
+import { flattenFileNodes } from "@/components/agent/utils";
 import {
   type DockviewPanelItem,
   DockviewPanelLayout,
@@ -24,6 +28,7 @@ import {
   SynctexInstallDialog,
 } from "@/components/latex";
 import { RecentProjects } from "@/components/recent-projects";
+import { CommandPalette } from "@/components/ui/command-palette";
 import { InputDialog } from "@/components/ui/input-dialog";
 import {
   TabBar,
@@ -35,6 +40,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
 import { useEditorSettings } from "@/lib/editor";
+import { UI_PALETTES } from "@/lib/editor/types";
 import {
   type BibEntry,
   countLatexWords,
@@ -64,11 +70,17 @@ const LivePdfPreview = dynamic(
 
 import {
   FilePdfIcon,
+  FolderOpenIcon,
   GearIcon,
-  PlayCircleIcon,
+  MagnifyingGlassIcon,
+  MoonIcon,
+  PlayIcon,
   RobotIcon,
   SidebarSimpleIcon,
   SpinnerGapIcon,
+  StopIcon,
+  SunIcon,
+  SwatchesIcon,
   TerminalIcon,
 } from "@phosphor-icons/react";
 
@@ -382,10 +394,10 @@ export default function EditorPage() {
     settings: agentSettings.settings,
     onOpenUsage: handleOpenUsagePopover,
   });
-  const [agentDraftInjection, setAgentDraftInjection] = useState<{
-    id: number;
-    text: string;
-  } | null>(null);
+  const { resolvedTheme, setTheme } = useTheme();
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [agentExpanded, setAgentExpanded] = useState(false);
+  const [agentDraftInjection, setAgentDraftInjection] = useState<AgentDraftInjection | null>(null);
   const [pendingTerminalCommand, setPendingTerminalCommand] = useState<{
     id: number;
     command: string;
@@ -2049,10 +2061,11 @@ export default function EditorPage() {
           ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
           : filePath || "current file";
       const snippet = selectionText.trim();
-      const draft = snippet
-        ? `Regarding \`${loc}\`:\n\`\`\`latex\n${snippet}\n\`\`\`\n`
-        : `Regarding \`${loc}\`: `;
-      setAgentDraftInjection({ id: Date.now(), text: draft });
+      setAgentDraftInjection({
+        id: Date.now(),
+        text: "",
+        contextChip: { label: loc, snippet },
+      });
     },
     [],
   );
@@ -2200,6 +2213,22 @@ export default function EditorPage() {
       if (isMod && !e.shiftKey && key === "l") {
         e.preventDefault();
         setShowRightPanel((prev) => !prev);
+        return;
+      }
+
+      // Command Palette: Cmd/Ctrl+K
+      if (isMod && !e.shiftKey && key === "k") {
+        e.preventDefault();
+        setShowCommandPalette((prev) => !prev);
+        return;
+      }
+
+      // Toggle Sidebar: Cmd/Ctrl+\
+      if (isMod && !e.shiftKey && e.key === "\\") {
+        e.preventDefault();
+        if (daemon.projectPath) {
+          setShowSidebar((prev) => !prev);
+        }
         return;
       }
 
@@ -2493,273 +2522,427 @@ export default function EditorPage() {
     });
   }
 
+  const allRelativeFiles = useMemo(
+    () => flattenFileNodes(daemon.files, daemon.projectPath),
+    [daemon.files, daemon.projectPath],
+  );
+
+  const handleCyclePalette = useCallback(() => {
+    const idx = UI_PALETTES.findIndex((p) => p.id === editorSettings.settings.uiPalette);
+    const next = UI_PALETTES[(idx + 1) % UI_PALETTES.length];
+    if (next) {
+      editorSettings.updateSettings({ uiPalette: next.id });
+      toast(`Theme: ${next.label}`, "info");
+    }
+  }, [editorSettings, toast]);
+
+  const activePaletteMeta =
+    UI_PALETTES.find((p) => p.id === editorSettings.settings.uiPalette) ?? UI_PALETTES[0];
+
+  const effectiveRightPanelWidth = agentExpanded ? Math.max(rightPanelWidth, 520) : rightPanelWidth;
+
   return (
-    <div className="h-dvh flex flex-col">
-      <div className="flex-shrink-0 flex flex-col">
-        <header className="h-12 border-b border-border flex items-center">
-          <div className="w-full px-4 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
+    <div className="h-dvh flex flex-col bg-bg text-foreground">
+      {/* Borderless Top Bar on Warm Paper */}
+      <header className="h-11 shrink-0 px-3 flex items-center justify-between gap-3 select-none">
+        {/* Left: Brand + Breadcrumb */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => {
+              import("@tauri-apps/plugin-shell").then(({ open }) => {
+                open("https://github.com/sdotvenk/OrchestraTeX");
+              });
+            }}
+            className="inline-flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-subtle transition-colors shrink-0"
+            title="OrchestraTeX on GitHub"
+            aria-label="Open OrchestraTeX repository"
+          >
+            <span className="size-6 rounded-md bg-accent text-white font-display italic font-bold text-[13px] inline-flex items-center justify-center shrink-0">
+              O
+            </span>
+            <span className="text-[13.5px] font-semibold tracking-tight text-foreground-strong">
+              OrchestraTeX
+            </span>
+          </button>
+
+          {daemon.projectPath && (
+            <div className="flex items-center gap-1.5 min-w-0 text-[12.5px] text-muted">
+              <span className="text-border-dark select-none">/</span>
               <button
                 type="button"
-                onClick={() => {
-                  import("@tauri-apps/plugin-shell").then(({ open }) => {
-                    open("https://github.com/sdotvenk/OrchestraTeX");
-                  });
-                }}
-                className="hover:opacity-70 transition-opacity flex items-center"
-                title="OrchestraTeX on GitHub"
-                aria-label="Open OrchestraTeX repository"
+                onClick={handleOpenFolder}
+                className="px-1.5 py-0.5 rounded-md font-medium text-foreground-strong hover:bg-subtle transition-colors truncate max-w-[180px]"
+                title={`${daemon.projectPath} — Click to switch folder`}
               >
-                <Image
-                  src="/logo-small-light.svg"
-                  alt="OrchestraTeX"
-                  width={140}
-                  height={28}
-                  className="h-7 w-auto dark:hidden"
-                />
-                <Image
-                  src="/logo-small-dark.svg"
-                  alt="OrchestraTeX"
-                  width={140}
-                  height={28}
-                  className="h-7 w-auto hidden dark:block"
-                />
+                {pathSync.basename(daemon.projectPath)}
               </button>
-              <span className="text-border">/</span>
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="text-sm font-medium px-2 py-1 -ml-2 truncate">
-                  {daemon.projectPath ? pathSync.basename(daemon.projectPath) : "OrchestraTeX"}
-                </div>
-                {isSaving && <span className="text-xs text-muted shrink-0">Saving...</span>}
-              </div>
+              {selectedFile && (
+                <>
+                  <span className="text-border-dark select-none">›</span>
+                  <span className="font-mono text-[12px] text-muted truncate max-w-[180px]">
+                    {pathSync.basename(selectedFile)}
+                  </span>
+                </>
+              )}
+              {isSaving ? (
+                <span className="text-[11px] text-muted-foreground ml-1 shrink-0">Saving...</span>
+              ) : (
+                selectedFile && (
+                  <span className="text-[11px] text-muted-foreground ml-1 shrink-0 hidden lg:inline">
+                    Saved
+                  </span>
+                )
+              )}
             </div>
+          )}
+        </div>
 
-            <div className="flex items-center gap-3 h-8">
-              {daemon.projectPath && (
-                <button
-                  type="button"
-                  onClick={() => setShowSidebar((prev) => !prev)}
-                  className={`h-8 w-8 border border-border transition-colors flex items-center justify-center bg-background text-foreground ${
-                    showSidebar
-                      ? "border-foreground"
-                      : "hover:bg-accent-hover hover:border-border-dark"
-                  }`}
-                  title="Toggle Sidebar"
-                >
-                  <SidebarSimpleIcon className="size-4" weight="bold" />
-                </button>
-              )}
+        {/* Center: Unified Command Palette Pill (⌘K) */}
+        {daemon.projectPath && (
+          <button
+            type="button"
+            onClick={() => setShowCommandPalette(true)}
+            className="hidden md:inline-flex items-center gap-2 h-8 w-[280px] lg:w-[320px] px-3 rounded-full bg-subtle hover:bg-sunken text-muted text-[12.5px] transition-colors shrink-0"
+            title="Find files, sections, citations, or commands (Cmd+K)"
+          >
+            <MagnifyingGlassIcon className="size-3.5 text-muted-foreground shrink-0" />
+            <span className="truncate flex-1 text-left">Find files, \labels, @cites...</span>
+            <kbd className="bg-panel">⌘K</kbd>
+          </button>
+        )}
 
-              {daemon.projectPath && (
-                <button
-                  type="button"
-                  onClick={() => setShowTerminal((prev) => !prev)}
-                  className={`h-8 w-8 border border-border transition-colors flex items-center justify-center bg-background text-foreground ${
-                    showTerminal
-                      ? "border-foreground"
-                      : "hover:bg-accent-hover hover:border-border-dark"
-                  }`}
-                  title="Toggle Terminal"
-                >
-                  <TerminalIcon className="size-4" weight="bold" />
-                </button>
-              )}
+        {/* Right: Quiet Workspace Controls + Single Primary Compile Action */}
+        <div className="flex items-center justify-end gap-1 flex-1 shrink-0">
+          {daemon.projectPath && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowSidebar((prev) => !prev)}
+                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
+                  showSidebar
+                    ? "bg-accent-soft text-accent"
+                    : "text-muted hover:text-foreground hover:bg-subtle"
+                }`}
+                title="Toggle Sidebar (Cmd+\)"
+                aria-label="Toggle Sidebar"
+              >
+                <SidebarSimpleIcon className="size-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowLivePreview((prev) => !prev)}
+                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
+                  showLivePreview
+                    ? "bg-accent-soft text-accent"
+                    : "text-muted hover:text-foreground hover:bg-subtle"
+                }`}
+                title="Toggle Live PDF Preview (Cmd+P)"
+                aria-label="Toggle Live PDF Preview"
+              >
+                <FilePdfIcon className="size-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowTerminal((prev) => !prev)}
+                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
+                  showTerminal
+                    ? "bg-accent-soft text-accent"
+                    : "text-muted hover:text-foreground hover:bg-subtle"
+                }`}
+                title="Toggle Terminal"
+                aria-label="Toggle Terminal"
+              >
+                <TerminalIcon className="size-4" />
+              </button>
 
               <button
                 type="button"
                 onClick={handleToggleRightPanel}
-                className={`h-8 w-8 border border-border transition-colors flex items-center justify-center bg-background text-foreground ${
+                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
                   showRightPanel
-                    ? "border-foreground"
-                    : "hover:bg-accent-hover hover:border-border-dark"
+                    ? "bg-accent-soft text-accent"
+                    : "text-muted hover:text-foreground hover:bg-subtle"
                 }`}
-                title="Toggle Agent Mode"
+                title="Toggle Agent Panel (Cmd+L)"
+                aria-label="Toggle Agent Panel"
               >
-                <RobotIcon className="size-4" weight="bold" />
+                <RobotIcon className="size-4" />
               </button>
+            </>
+          )}
 
-              {daemon.projectPath && (
-                <>
-                  <span className="text-border text-lg select-none">/</span>
-                  <div className="flex items-center gap-2 h-8">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleCompileWithDetection();
-                      }}
-                      disabled={latexSettings.isDetecting || latexCompiler.isCompiling}
-                      className={`h-8 w-8 border border-border transition-colors flex items-center justify-center bg-background text-foreground ${
-                        latexSettings.isDetecting || latexCompiler.isCompiling
-                          ? "opacity-70 cursor-wait"
-                          : "hover:bg-accent-hover hover:border-border-dark"
-                      }`}
-                      title="Compile LaTeX (Cmd/Ctrl+Shift+B)"
-                      aria-label="Compile LaTeX"
-                    >
-                      {latexCompiler.isCompiling ? (
-                        <SpinnerGapIcon className="size-4 animate-spin" />
-                      ) : (
-                        <PlayCircleIcon className="size-4" />
-                      )}
-                    </button>
+          <button
+            type="button"
+            onClick={handleCyclePalette}
+            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+            title={`Switch palette (${activePaletteMeta?.label ?? "Atelier"})`}
+            aria-label="Switch color palette"
+          >
+            <SwatchesIcon className="size-4" />
+          </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setShowLivePreview((prev) => !prev)}
-                      className={`h-8 w-8 border border-border transition-colors flex items-center justify-center bg-background text-foreground ${
-                        showLivePreview
-                          ? "border-foreground"
-                          : "hover:bg-accent-hover hover:border-border-dark"
-                      }`}
-                      title="Toggle Live PDF Preview (Cmd/Ctrl+P)"
-                      aria-label="Toggle Live PDF Preview"
-                    >
-                      <FilePdfIcon className="size-4" />
-                    </button>
+          <button
+            type="button"
+            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+            title="Toggle Light / Dark mode"
+            aria-label="Toggle Light or Dark mode"
+          >
+            {resolvedTheme === "dark" ? (
+              <SunIcon className="size-4" />
+            ) : (
+              <MoonIcon className="size-4" />
+            )}
+          </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSettingsInitialTab("build");
-                        setShowLatexSettings(true);
-                      }}
-                      className="h-8 w-8 border border-border bg-background text-foreground hover:bg-accent-hover hover:border-border-dark transition-colors flex items-center justify-center"
-                      title="Settings"
-                      aria-label="Settings"
-                    >
-                      <GearIcon className="size-4" />
-                    </button>
-                  </div>
-                </>
+          <button
+            type="button"
+            onClick={() => {
+              setSettingsInitialTab("editor");
+              setShowLatexSettings(true);
+            }}
+            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <GearIcon className="size-4" />
+          </button>
+
+          {daemon.projectPath && (
+            <div className="pl-1">
+              {latexCompiler.isCompiling ? (
+                <button
+                  type="button"
+                  onClick={handleStopCompile}
+                  className="h-8 px-3 rounded-lg bg-error-bg text-error hover:brightness-95 text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-all"
+                  title="Stop compilation"
+                >
+                  <StopIcon className="size-3.5" weight="fill" />
+                  <span>Stop</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleCompileWithDetection();
+                  }}
+                  disabled={latexSettings.isDetecting}
+                  className="btn btn-primary btn-sm h-8 px-3 text-[12.5px]"
+                  title="Compile LaTeX (Cmd/Ctrl+Shift+B)"
+                >
+                  {latexSettings.isDetecting ? (
+                    <SpinnerGapIcon className="size-3.5 animate-spin" />
+                  ) : (
+                    <PlayIcon className="size-3.5" weight="fill" />
+                  )}
+                  <span>Compile</span>
+                </button>
               )}
             </div>
-          </div>
-        </header>
-      </div>
+          )}
+        </div>
+      </header>
 
-      <main className="flex-1 min-h-0 flex relative overflow-hidden">
-        <AnimatePresence mode="wait">
-          {showSidebar && (
-            <motion.div
-              key="sidebar-container"
-              initial={prefersReducedMotion ? { opacity: 1 } : { x: -280, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={prefersReducedMotion ? { opacity: 0 } : { x: -280, opacity: 0 }}
-              transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
-              className="flex flex-shrink-0"
-              style={{
-                willChange: prefersReducedMotion ? undefined : "transform, opacity",
-              }}
-            >
-              <aside
-                style={{
-                  width: resizing === "sidebar" ? "var(--sidebar-width)" : sidebarWidth,
-                  willChange: resizing === "sidebar" ? "width" : undefined,
-                }}
-                className="border-r border-border flex flex-col flex-shrink-0 overflow-hidden"
+      {/* Main Workspace Area: Rail on Warm Paper + White Inset Frames */}
+      <main className="flex-1 min-h-0 flex relative overflow-hidden px-2 pb-2 gap-2">
+        {/* Overleaf-style Project Sidebar (or Home Rail when no project is open) */}
+        {!daemon.projectPath ? (
+          <aside className="hidden md:flex w-[224px] flex-col shrink-0 justify-between px-1 pb-1">
+            <div className="space-y-4 pt-1">
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={handleOpenFolder}
+                  className="w-full h-9 px-3 rounded-lg bg-accent-soft text-accent font-medium text-[13px] flex items-center gap-2.5 text-left transition-colors"
+                >
+                  <FolderOpenIcon className="size-4 shrink-0" />
+                  <span>Open folder</span>
+                </button>
+              </div>
+
+              <div className="space-y-1.5 px-1">
+                <div className="text-[11px] font-medium text-muted px-2">Theme palette</div>
+                <div className="space-y-1">
+                  {UI_PALETTES.map((p) => {
+                    const active = editorSettings.settings.uiPalette === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => editorSettings.updateSettings({ uiPalette: p.id })}
+                        className={`w-full h-8 px-2.5 rounded-lg flex items-center gap-2.5 text-[12.5px] transition-colors ${
+                          active
+                            ? "bg-panel text-foreground-strong font-medium border border-border shadow-xs"
+                            : "text-muted hover:text-foreground hover:bg-subtle"
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1 shrink-0">
+                          <span
+                            className="size-2.5 rounded-full border border-black/15"
+                            style={{ backgroundColor: p.swatches[1] }}
+                          />
+                          <span
+                            className="size-2.5 rounded-full border border-black/15"
+                            style={{ backgroundColor: p.swatches[2] }}
+                          />
+                        </span>
+                        <span>{p.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <AgentStatusCard
+              providers={agent.providers}
+              loading={agent.loadingProviders}
+              onRefreshProviders={agent.refreshProviders}
+              onRefreshRateLimits={agent.refreshRateLimits}
+              onOpenSettings={handleOpenAgentSettings}
+            />
+          </aside>
+        ) : (
+          <AnimatePresence mode="wait">
+            {showSidebar && (
+              <motion.div
+                key="sidebar-container"
+                initial={prefersReducedMotion ? { opacity: 1 } : { x: -24, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={prefersReducedMotion ? { opacity: 0 } : { x: -24, opacity: 0 }}
+                transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
+                className="flex flex-shrink-0"
               >
-                <TabBar
-                  tabs={sidebarTabs}
-                  activeTab={sidebarTab}
-                  onTabSelect={(id) => setSidebarTab(id as "files" | "outline" | "git")}
-                  variant="sidebar"
-                />
-
-                {sidebarTab === "files" && (
-                  <FileSidebarPanel
-                    projectPath={daemon.projectPath}
-                    files={daemon.files}
-                    selectedFile={selectedFile}
-                    highlightedFile={highlightedFile}
-                    onFileSelect={handleFileSelect}
-                    onCreateFile={() => setCreateDialog({ type: "file" })}
-                    onCreateDirectory={() => setCreateDialog({ type: "directory" })}
-                    onRefreshFiles={daemon.refreshFiles}
-                    fileOperations={{
-                      createFile: daemon.createFile,
-                      createDirectory: daemon.createDirectory,
-                      renamePath: daemon.renamePath,
-                      deletePath: daemon.deletePath,
-                    }}
+                <aside
+                  style={{
+                    width: resizing === "sidebar" ? "var(--sidebar-width)" : sidebarWidth,
+                    willChange: resizing === "sidebar" ? "width" : undefined,
+                  }}
+                  className="flex flex-col flex-shrink-0 overflow-hidden bg-bg pr-1"
+                >
+                  <TabBar
+                    tabs={sidebarTabs}
+                    activeTab={sidebarTab}
+                    onTabSelect={(id) => setSidebarTab(id as "files" | "outline" | "git")}
+                    variant="sidebar"
                   />
-                )}
 
-                {sidebarTab === "outline" && (
-                  <SidebarOutlinePanel
-                    activeFile={selectedFile ?? null}
-                    content={outlineContent}
-                    onJumpToLine={handleOutlineJumpToLine}
-                    onOpenInputFile={handleOutlineOpenInputFile}
-                  />
-                )}
+                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                    {sidebarTab === "files" && (
+                      <FileSidebarPanel
+                        projectPath={daemon.projectPath}
+                        files={daemon.files}
+                        selectedFile={selectedFile}
+                        highlightedFile={highlightedFile}
+                        onFileSelect={handleFileSelect}
+                        onCreateFile={() => setCreateDialog({ type: "file" })}
+                        onCreateDirectory={() => setCreateDialog({ type: "directory" })}
+                        onRefreshFiles={daemon.refreshFiles}
+                        fileOperations={{
+                          createFile: daemon.createFile,
+                          createDirectory: daemon.createDirectory,
+                          renamePath: daemon.renamePath,
+                          deletePath: daemon.deletePath,
+                        }}
+                      />
+                    )}
 
-                {sidebarTab === "git" && (
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    <GitSidebarPanel
-                      projectPath={daemon.projectPath}
-                      gitStatus={gitStatus}
-                      gitGraph={daemon.gitGraph}
-                      gitLogEntries={daemon.gitLogEntries}
-                      stagedChanges={stagedChanges}
-                      unstagedChanges={unstagedChanges}
-                      showRemoteInput={showRemoteInput}
-                      remoteUrl={remoteUrl}
-                      onRemoteUrlChange={(value) => setRemoteUrl(value)}
-                      onShowRemoteInput={() => setShowRemoteInput(true)}
-                      onHideRemoteInput={() => setShowRemoteInput(false)}
-                      onSubmitRemote={handleRemoteSubmit}
-                      onInitGit={daemon.gitInit}
-                      isInitializingGit={daemon.isInitializingGit}
-                      onRefreshStatus={handleRefreshGitStatus}
-                      onStageAll={handleStageAll}
-                      onDiscardAll={handleDiscardAll}
-                      onDiscardFile={handleDiscardFile}
-                      onStageFile={handleStageFile}
-                      onUnstageFile={handleUnstageFile}
-                      onUnstageAll={handleUnstageAll}
-                      showCommitInput={showCommitInput}
-                      commitMessage={commitMessage}
-                      onCommitMessageChange={(value) => setCommitMessage(value)}
-                      onShowCommitInput={() => setShowCommitInput(true)}
-                      onHideCommitInput={() => setShowCommitInput(false)}
-                      onCommit={handleCommit}
-                      onPush={handleGitPush}
-                      onPull={handleGitPull}
-                      onPreviewDiff={handlePreviewGitDiff}
-                      onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
-                      onOpenFile={(path) => {
-                        void handleFileSelect(path);
-                      }}
-                      onPublishToGitHub={handlePublishToGitHub}
-                      isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
-                      isPushing={daemon.isPushing}
-                      isPulling={daemon.isPulling}
-                      isAuthenticatingGh={daemon.isAuthenticatingGh}
+                    {sidebarTab === "outline" && (
+                      <SidebarOutlinePanel
+                        activeFile={selectedFile ?? null}
+                        content={outlineContent}
+                        onJumpToLine={handleOutlineJumpToLine}
+                        onOpenInputFile={handleOutlineOpenInputFile}
+                      />
+                    )}
+
+                    {sidebarTab === "git" && (
+                      <div className="flex-1 flex flex-col overflow-hidden">
+                        <GitSidebarPanel
+                          projectPath={daemon.projectPath}
+                          gitStatus={gitStatus}
+                          gitGraph={daemon.gitGraph}
+                          gitLogEntries={daemon.gitLogEntries}
+                          stagedChanges={stagedChanges}
+                          unstagedChanges={unstagedChanges}
+                          showRemoteInput={showRemoteInput}
+                          remoteUrl={remoteUrl}
+                          onRemoteUrlChange={(value) => setRemoteUrl(value)}
+                          onShowRemoteInput={() => setShowRemoteInput(true)}
+                          onHideRemoteInput={() => setShowRemoteInput(false)}
+                          onSubmitRemote={handleRemoteSubmit}
+                          onInitGit={daemon.gitInit}
+                          isInitializingGit={daemon.isInitializingGit}
+                          onRefreshStatus={handleRefreshGitStatus}
+                          onStageAll={handleStageAll}
+                          onDiscardAll={handleDiscardAll}
+                          onDiscardFile={handleDiscardFile}
+                          onStageFile={handleStageFile}
+                          onUnstageFile={handleUnstageFile}
+                          onUnstageAll={handleUnstageAll}
+                          showCommitInput={showCommitInput}
+                          commitMessage={commitMessage}
+                          onCommitMessageChange={(value) => setCommitMessage(value)}
+                          onShowCommitInput={() => setShowCommitInput(true)}
+                          onHideCommitInput={() => setShowCommitInput(false)}
+                          onCommit={handleCommit}
+                          onPush={handleGitPush}
+                          onPull={handleGitPull}
+                          onPreviewDiff={handlePreviewGitDiff}
+                          onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
+                          onOpenFile={(path) => {
+                            void handleFileSelect(path);
+                          }}
+                          onPublishToGitHub={handlePublishToGitHub}
+                          isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
+                          isPushing={daemon.isPushing}
+                          isPulling={daemon.isPulling}
+                          isAuthenticatingGh={daemon.isAuthenticatingGh}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Silkscreen-style Agent Tools status card pinned to rail footer */}
+                  <div className="pt-2 px-1 shrink-0">
+                    <AgentStatusCard
+                      providers={agent.providers}
+                      loading={agent.loadingProviders}
+                      onRefreshProviders={agent.refreshProviders}
+                      onRefreshRateLimits={agent.refreshRateLimits}
+                      onOpenSettings={handleOpenAgentSettings}
                     />
                   </div>
-                )}
-              </aside>
-              <div className="relative group w-1 flex-shrink-0">
-                <motion.div
-                  drag="x"
-                  dragConstraints={{ left: 0, right: 0 }}
-                  dragElastic={0}
-                  dragMomentum={false}
-                  onDragStart={() => startResize("sidebar")}
-                  onDrag={(_event, info) => handleResizeDrag("sidebar", info)}
-                  onDragEnd={endResize}
-                  className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                  style={{ x: 0 }}
-                />
-                <div
-                  className={`w-full h-full transition-colors ${resizing === "sidebar" ? "bg-foreground/20" : "group-hover:bg-foreground/20"}`}
-                />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                </aside>
 
-        <div className="flex-1 min-w-0 w-0 flex flex-col overflow-hidden">
+                <div className="relative group w-1.5 flex-shrink-0 -mx-0.5">
+                  <motion.div
+                    drag="x"
+                    dragConstraints={{ left: 0, right: 0 }}
+                    dragElastic={0}
+                    dragMomentum={false}
+                    onDragStart={() => startResize("sidebar")}
+                    onDrag={(_event, info) => handleResizeDrag("sidebar", info)}
+                    onDragEnd={endResize}
+                    className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                    style={{ x: 0 }}
+                  />
+                  <div
+                    className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
+                      resizing === "sidebar" ? "bg-accent" : "group-hover:bg-border-dark"
+                    }`}
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        )}
+
+        {/* Primary Inset Frame: Home OR Unified Editor + Live PDF */}
+        <div className="flex-1 min-w-0 w-0 flex flex-col ox-frame">
           <div className="flex-1 min-h-0 flex overflow-hidden">
             <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
               {daemon.projectPath && editorPanelItems.length > 0 ? (
@@ -2769,8 +2952,8 @@ export default function EditorPage() {
                       <div
                         className={`absolute inset-y-0 w-1/2 transition-opacity duration-100 ${
                           splitDropHint === "left"
-                            ? "left-0 border-r border-accent/40 bg-gradient-to-r from-foreground/15 to-transparent shadow-[inset_-20px_0_24px_-20px_rgba(0,0,0,0.45)]"
-                            : "right-0 border-l border-accent/40 bg-gradient-to-l from-foreground/15 to-transparent shadow-[inset_20px_0_24px_-20px_rgba(0,0,0,0.45)]"
+                            ? "left-0 border-r border-accent/40 bg-accent-soft/40"
+                            : "right-0 border-l border-accent/40 bg-accent-soft/40"
                         }`}
                       />
                     </div>
@@ -2782,46 +2965,48 @@ export default function EditorPage() {
                   />
                 </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center">
+                <div className="flex-1 min-h-0 overflow-y-auto relative ox-home-grid">
                   {daemon.projectPath ? (
-                    <div className="text-center space-y-2 px-6">
-                      <div className="text-xs font-mono uppercase tracking-wider text-muted">
-                        No File Open
+                    <div className="h-full flex flex-col items-center justify-center text-center px-6 space-y-2 relative z-10">
+                      <div className="text-[15px] font-semibold text-foreground-strong">
+                        No file open
                       </div>
-                      <p className="text-xs text-muted">
-                        Select a .tex file from the sidebar or ask the Agent to create one.
+                      <p className="text-[13px] text-muted max-w-sm">
+                        Select a <code className="font-mono">.tex</code> file from the sidebar,
+                        press <kbd>⌘K</kbd> to jump anywhere, or ask the Agent.
                       </p>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center justify-center text-center px-6">
-                      <div className="flex items-center gap-4 mb-3">
-                        <Image
-                          src="/logo-small-light.svg"
-                          alt="OrchestraTeX"
-                          width={56}
-                          height={67}
-                          className="h-14 w-auto dark:hidden"
-                        />
-                        <Image
-                          src="/logo-small-dark.svg"
-                          alt="OrchestraTeX"
-                          width={56}
-                          height={67}
-                          className="h-14 w-auto hidden dark:block"
-                        />
-                        <div className="text-left">
-                          <h1 className="font-mono text-3xl font-bold tracking-tight uppercase text-foreground">
-                            Orchestra<span className="text-accent">TeX</span>
-                          </h1>
-                          <p className="font-mono text-[11px] uppercase tracking-widest text-muted">
-                            Multi-Provider Agent &amp; Live LaTeX Workspace
-                          </p>
+                    <div className="min-h-full flex flex-col items-center justify-center px-6 py-12 relative z-10 space-y-10">
+                      <div className="flex flex-col items-center text-center space-y-5 max-w-xl w-full">
+                        <h1 className="font-display text-3xl sm:text-[36px] font-semibold tracking-tight text-foreground-strong leading-tight">
+                          What are we writing today?
+                        </h1>
+
+                        <div className="flex flex-wrap items-center justify-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={handleOpenFolder}
+                            className="btn btn-primary h-10 px-5 rounded-full text-[13.5px]"
+                          >
+                            <FolderOpenIcon className="size-4" />
+                            <span>Open paper folder</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSettingsInitialTab("agents");
+                              setShowLatexSettings(true);
+                            }}
+                            className="btn btn-secondary h-10 px-4 rounded-full text-[13px]"
+                          >
+                            <GearIcon className="size-4 text-muted" />
+                            <span>Configure LaTeX &amp; Agents</span>
+                          </button>
                         </div>
                       </div>
-                      <div className="w-64 border-b border-border mb-8" />
-                      <button type="button" onClick={handleOpenFolder} className="btn btn-primary">
-                        Open Folder
-                      </button>
+
                       <RecentProjects
                         projects={recentProjects.projects}
                         onSelect={handleOpenRecentProject}
@@ -2849,7 +3034,9 @@ export default function EditorPage() {
                     style={{ x: 0 }}
                   />
                   <div
-                    className={`w-full h-full transition-colors ${resizing === "preview" ? "bg-foreground/20" : "group-hover:bg-foreground/20"}`}
+                    className={`w-full h-full transition-colors ${
+                      resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
+                    }`}
                   />
                 </div>
                 <div
@@ -2885,9 +3072,9 @@ export default function EditorPage() {
             )}
           </div>
 
-          {/* OverLeaf-style Editor Bottom Status Bar */}
+          {/* Quiet Hairline Footer inside the Workspace Inset Frame */}
           {daemon.projectPath && (
-            <div className="h-6 px-3 border-t border-border bg-surface-secondary flex items-center justify-between gap-3 text-[11px] font-mono text-muted shrink-0">
+            <div className="h-7 px-3 border-t border-border bg-panel flex items-center justify-between gap-3 text-[11.5px] text-muted shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <button
                   type="button"
@@ -2899,15 +3086,17 @@ export default function EditorPage() {
                       setShowMainFileDialog(true);
                     }
                   }}
-                  className="hover:text-foreground truncate"
+                  className="hover:text-foreground transition-colors truncate font-mono text-[11px]"
                   title="Select main .tex file"
                 >
-                  Main: {latexSettings.settings.mainFile ?? "unset"}
+                  main: {latexSettings.settings.mainFile ?? "unset"}
                 </button>
                 {selectedFile && /\.tex$/i.test(selectedFile) && (
                   <>
-                    <span className="tabular-nums">Words: {wordCount.words}</span>
-                    <span className="tabular-nums">
+                    <span className="text-border-dark">·</span>
+                    <span className="tabular-nums">{wordCount.words.toLocaleString()} words</span>
+                    <span className="text-border-dark">·</span>
+                    <span className="font-mono text-[11px] tabular-nums">
                       Ln {cursorPosition.line}, Col {cursorPosition.column}
                     </span>
                   </>
@@ -2921,30 +3110,30 @@ export default function EditorPage() {
                     onClick={() => {
                       void handleForwardSync();
                     }}
-                    className="hover:text-foreground"
+                    className="text-accent hover:underline font-medium"
                     title="Jump from current line to PDF"
                   >
-                    Sync -&gt; PDF
+                    Sync → PDF
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => setShowLivePreview((p) => !p)}
-                  className="hover:text-foreground"
+                  className="hover:text-foreground transition-colors tabular-nums"
                 >
                   {latexCompiler.isCompiling
                     ? "Compiling..."
                     : latexCompiler.compileStatus === "success"
-                      ? `PDF Ready${latexCompiler.lastCompileDurationMs != null ? ` (${(latexCompiler.lastCompileDurationMs / 1000).toFixed(1)}s)` : ""}`
+                      ? `PDF ready${latexCompiler.lastCompileDurationMs != null ? ` (${(latexCompiler.lastCompileDurationMs / 1000).toFixed(1)}s)` : ""}`
                       : latexCompiler.compileStatus === "error"
-                        ? "Build Error"
-                        : "PDF Preview"}
+                        ? "Build error"
+                        : "PDF preview"}
                 </button>
               </div>
             </div>
           )}
 
-          {/* LaTeX Install Prompt - shown when no compiler is detected */}
+          {/* LaTeX Install Prompt */}
           {daemon.projectPath &&
             latexCompiler.compilersStatus &&
             !hasAnyCompiler &&
@@ -2969,6 +3158,7 @@ export default function EditorPage() {
           />
         </div>
 
+        {/* Adjacent White Inset Frame: Agent Pane */}
         <AnimatePresence>
           {showRightPanel && (
             <motion.div
@@ -2978,17 +3168,17 @@ export default function EditorPage() {
                 opacity: 1,
                 width:
                   resizing === "right"
-                    ? `calc(var(--right-panel-width) + 4px)`
-                    : rightPanelWidth + 4,
+                    ? `calc(var(--right-panel-width) + 6px)`
+                    : effectiveRightPanelWidth + 6,
               }}
               exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
               transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
-              className="flex flex-shrink-0 bg-background overflow-hidden"
+              className="flex flex-shrink-0 overflow-hidden"
               style={{
                 willChange: prefersReducedMotion ? undefined : "width, opacity",
               }}
             >
-              <div className="relative group w-1 flex-shrink-0">
+              <div className="relative group w-1.5 flex-shrink-0 mr-0.5">
                 <motion.div
                   drag="x"
                   dragConstraints={{ left: 0, right: 0 }}
@@ -3001,15 +3191,18 @@ export default function EditorPage() {
                   style={{ x: 0 }}
                 />
                 <div
-                  className={`w-full h-full transition-colors ${resizing === "right" ? "bg-foreground/20" : "group-hover:bg-foreground/20"}`}
+                  className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
+                    resizing === "right" ? "bg-accent" : "group-hover:bg-border-dark"
+                  }`}
                 />
               </div>
               <aside
                 style={{
-                  width: resizing === "right" ? "var(--right-panel-width)" : rightPanelWidth,
+                  width:
+                    resizing === "right" ? "var(--right-panel-width)" : effectiveRightPanelWidth,
                   willChange: resizing === "right" ? "width" : undefined,
                 }}
-                className="border-l border-border flex flex-col flex-shrink-0 overflow-hidden"
+                className="ox-frame flex flex-col flex-shrink-0"
               >
                 <AgentErrorBoundary onReset={handleResetAgentBoundary}>
                   <AgentPanel
@@ -3028,6 +3221,8 @@ export default function EditorPage() {
                     onFileClick={handleAgentFileClick}
                     onRunTerminalCommand={handleAgentRunTerminalCommand}
                     onOpenAgentSettings={handleOpenAgentSettings}
+                    isExpanded={agentExpanded}
+                    onToggleExpand={() => setAgentExpanded((p) => !p)}
                     onClose={handleCloseRightPanel}
                   />
                 </AgentErrorBoundary>
@@ -3036,6 +3231,30 @@ export default function EditorPage() {
           )}
         </AnimatePresence>
       </main>
+
+      <CommandPalette
+        open={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        files={allRelativeFiles}
+        labels={texLabels}
+        bibEntries={bibEntries}
+        diagnostics={latexCompiler.diagnostics}
+        onOpenFile={(filePath, line) => {
+          void handleFileSelect(filePath).then(() => {
+            if (line && line > 0) setPendingGoToLine(line);
+          });
+        }}
+        onCompile={handleCompileShortcut}
+        onToggleSidebar={() => setShowSidebar((p) => !p)}
+        onTogglePdf={() => setShowLivePreview((p) => !p)}
+        onToggleAgent={handleToggleRightPanel}
+        onToggleTerminal={() => setShowTerminal((p) => !p)}
+        onOpenSettings={() => {
+          setSettingsInitialTab("editor");
+          setShowLatexSettings(true);
+        }}
+        onCyclePalette={handleCyclePalette}
+      />
 
       {createDialog && (
         <InputDialog
@@ -3111,30 +3330,30 @@ export default function EditorPage() {
 
 function AgentPanelSkeleton() {
   return (
-    <div className="flex flex-col bg-background h-full">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+    <div className="flex flex-col bg-panel h-full">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border">
         <div className="flex items-center gap-2">
-          <div className="size-2 bg-surface-tertiary animate-pulse" />
-          <div className="h-4 w-24 bg-surface-tertiary animate-pulse" />
+          <div className="size-2 rounded-full bg-sunken animate-pulse" />
+          <div className="h-4 w-24 rounded-md bg-sunken animate-pulse" />
         </div>
-        <div className="h-6 w-12 bg-surface-tertiary animate-pulse" />
+        <div className="h-6 w-12 rounded-md bg-sunken animate-pulse" />
       </div>
-      <div className="flex-1 p-3 space-y-4">
+      <div className="flex-1 p-4 space-y-4">
         {[1, 2, 3].map((i) => (
           <div key={i} className="space-y-2">
             <div
-              className="h-4 bg-surface-secondary animate-pulse"
+              className="h-3.5 rounded-md bg-subtle animate-pulse"
               style={{ width: `${60 + i * 10}%` }}
             />
             <div
-              className="h-4 bg-surface-secondary animate-pulse"
+              className="h-3.5 rounded-md bg-subtle animate-pulse"
               style={{ width: `${40 + i * 10}%` }}
             />
           </div>
         ))}
       </div>
-      <div className="border-t border-border p-3">
-        <div className="h-16 bg-accent-hover border border-border animate-pulse" />
+      <div className="p-3">
+        <div className="h-20 rounded-[14px] bg-subtle border border-border animate-pulse" />
       </div>
     </div>
   );

@@ -76,47 +76,46 @@ export function FileSidebarPanel({
 
   return (
     <>
-      <div
-        className="px-3 py-2 border-b border-border flex items-center justify-between gap-2"
-        title={projectPath}
-      >
-        <span className="text-xs text-muted truncate">{pathSync.basename(projectPath)}</span>
-        <div className="flex items-center gap-1 flex-shrink-0">
+      <div className="px-2.5 py-1.5 flex items-center justify-between gap-2" title={projectPath}>
+        <span className="text-[11.5px] font-medium text-muted truncate">
+          {pathSync.basename(projectPath)}
+        </span>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
           <button
             type="button"
             onClick={() => void handleImportFiles()}
-            className="p-1 text-muted hover:text-foreground hover:bg-foreground/5 transition-colors"
+            className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
             title="Import / Upload Files"
             aria-label="Import Files"
           >
-            <UploadSimpleIcon className="w-4 h-4" />
+            <UploadSimpleIcon className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
             onClick={onCreateFile}
-            className="p-1 text-muted hover:text-foreground hover:bg-foreground/5 transition-colors"
+            className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
             title="New File"
             aria-label="New File"
           >
-            <FilePlusIcon className="w-4 h-4" />
+            <FilePlusIcon className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
             onClick={onCreateDirectory}
-            className="p-1 text-muted hover:text-foreground hover:bg-foreground/5 transition-colors"
+            className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
             title="New Folder"
             aria-label="New Folder"
           >
-            <FolderPlusIcon className="w-4 h-4" />
+            <FolderPlusIcon className="w-3.5 h-3.5" />
           </button>
           <button
             type="button"
             onClick={onRefreshFiles}
-            className="p-1 text-muted hover:text-foreground hover:bg-foreground/5 transition-colors"
+            className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
             title="Refresh Files"
             aria-label="Refresh Files"
           >
-            <ArrowClockwiseIcon className="w-4 h-4" />
+            <ArrowClockwiseIcon className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

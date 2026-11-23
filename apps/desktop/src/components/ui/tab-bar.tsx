@@ -384,29 +384,35 @@ export function TabBar<T extends TabItem>({
 
   if (variant === "sidebar") {
     return (
-      <div className={`flex items-center border-b border-border ${className}`}>
-        {tabs.map((tab) => {
-          const isActive = tab.id === activeTab;
-          return (
-            <button
-              type="button"
-              key={tab.id}
-              onClick={() => onTabSelect(tab.id)}
-              className={`flex-1 px-3 py-2 text-xs font-medium uppercase tracking-wider transition-colors ${
-                isActive
-                  ? "text-foreground border-b-2 border-foreground -mb-px"
-                  : "text-muted hover:text-foreground"
-              }`}
-            >
-              {tab.label}
-              {tab.badge !== undefined && (
-                <span className="ml-1 text-xs bg-surface-tertiary px-1 tabular-nums">
-                  {tab.badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
+      <div className={`px-2 pt-1.5 pb-1 ${className}`}>
+        <div className="flex items-center p-0.5 rounded-lg bg-sunken gap-0.5">
+          {tabs.map((tab) => {
+            const isActive = tab.id === activeTab;
+            return (
+              <button
+                type="button"
+                key={tab.id}
+                onClick={() => onTabSelect(tab.id)}
+                className={`flex-1 h-7 px-2 rounded-md text-[12px] font-medium transition-all flex items-center justify-center gap-1.5 ${
+                  isActive
+                    ? "bg-panel text-foreground-strong shadow-xs"
+                    : "text-muted hover:text-foreground"
+                }`}
+              >
+                <span>{tab.label}</span>
+                {tab.badge !== undefined && (
+                  <span
+                    className={`text-[10.5px] px-1.5 py-0.2 rounded-full font-mono tabular-nums ${
+                      isActive ? "bg-accent-soft text-accent" : "bg-subtle text-muted"
+                    }`}
+                  >
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -419,7 +425,7 @@ export function TabBar<T extends TabItem>({
     <>
       <div
         ref={containerRef}
-        className={`flex items-center border-b border-border bg-accent-hover overflow-x-auto min-h-[34px] ${className}`}
+        className={`flex items-center gap-0.5 px-2 border-b border-border bg-panel overflow-x-auto min-h-[36px] ${className}`}
         style={{
           cursor: onTabReorder && dragState.isDragging ? "grabbing" : undefined,
         }}
@@ -439,15 +445,15 @@ export function TabBar<T extends TabItem>({
               key={tab.id}
               ref={(node) => setTabRef(tab.id, node)}
               data-tab-id={tab.id}
-              className={`group relative flex items-center border-r border-border transition-colors select-none ${
+              className={`group relative flex items-center h-[36px] transition-colors select-none border-b-2 -mb-px ${
                 isActive
-                  ? "bg-background text-foreground"
-                  : "text-muted hover:text-foreground hover:bg-background/50"
+                  ? "border-accent text-accent"
+                  : "border-transparent text-muted hover:text-foreground"
               } ${onTabReorder ? "cursor-grab" : ""} ${isDragged ? "opacity-40" : ""}`}
               title={tab.title ?? tab.label}
             >
               {showDropBefore && (
-                <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-0.5 bg-accent z-10" />
+                <div className="pointer-events-none absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-accent z-10" />
               )}
               <button
                 type="button"
@@ -457,7 +463,9 @@ export function TabBar<T extends TabItem>({
                 }}
                 onContextMenu={(e) => handleContextMenu(e, tab.id)}
                 onClick={() => handleTabClick(tab.id)}
-                className="px-3 py-1.5 text-sm truncate max-w-[120px]"
+                className={`pl-2.5 pr-1.5 py-1 text-[12px] font-mono truncate max-w-[156px] ${
+                  isActive ? "font-medium" : "font-normal"
+                }`}
               >
                 {tab.label}
               </button>
@@ -470,8 +478,8 @@ export function TabBar<T extends TabItem>({
                     onTabClose(tab.id);
                   }}
                   data-tab-close="true"
-                  className={`w-6 h-full flex items-center justify-center hover:bg-surface-tertiary ${
-                    isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                  className={`size-5 mr-1 rounded-md flex items-center justify-center hover:bg-subtle transition-opacity ${
+                    isActive ? "opacity-75 hover:opacity-100" : "opacity-0 group-hover:opacity-100"
                   }`}
                   aria-label="Close tab"
                 >
@@ -479,7 +487,7 @@ export function TabBar<T extends TabItem>({
                 </button>
               )}
               {showDropAfter && (
-                <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-0.5 bg-accent z-10" />
+                <div className="pointer-events-none absolute right-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-accent z-10" />
               )}
             </div>
           );
@@ -490,7 +498,7 @@ export function TabBar<T extends TabItem>({
         dragState.draggedTabLabel &&
         createPortal(
           <div
-            className="fixed pointer-events-none z-[9999] flex items-center gap-2 px-3 py-1 border border-border bg-background text-xs"
+            className="fixed pointer-events-none z-[9999] flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-dark bg-panel text-xs font-mono shadow-md"
             style={{
               left: dragState.mouseX + 14,
               top: dragState.mouseY + 14,

@@ -11,6 +11,7 @@ interface UsagePopoverProps {
   provider: ProviderStatus | null;
   usage: TokenUsageSnapshot | null | undefined;
   threadStatus?: string;
+  compactRing?: boolean;
   onRefreshLimits: () => Promise<unknown>;
   onCompact?: () => Promise<unknown>;
 }
@@ -21,6 +22,7 @@ export function UsagePopover({
   provider,
   usage,
   threadStatus,
+  compactRing = false,
   onRefreshLimits,
   onCompact,
 }: UsagePopoverProps) {
@@ -76,144 +78,167 @@ export function UsagePopover({
     }
   };
 
+  const ringRadius = 6;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringOffset =
+    contextPct != null ? ringCircumference * (1 - contextPct / 100) : ringCircumference;
+
   return (
     <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => onOpenChange(!open)}
-        className="inline-flex items-center gap-1.5 px-2 py-1 text-[11px] font-mono border border-border bg-surface-secondary hover:bg-surface-tertiary text-foreground transition-colors"
-        title="Context usage & provider limits"
-      >
-        <Gauge className="size-3.5 text-muted shrink-0" aria-hidden="true" />
-        <span className="tabular-nums">
-          {contextWindow
-            ? `${formatTokenCount(contextUsed)}/${formatTokenCount(contextWindow)}`
-            : contextUsed > 0
-              ? `${formatTokenCount(contextUsed)} tok`
-              : "Usage"}
-        </span>
-        {primaryWindow?.usedPercent != null && (
-          <span className="text-[10px] text-muted tabular-nums">
-            · {Math.round(primaryWindow.usedPercent)}%
+      {compactRing ? (
+        <button
+          type="button"
+          onClick={() => onOpenChange(!open)}
+          className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+          title={
+            contextWindow
+              ? `Context: ${formatTokenCount(contextUsed)} / ${formatTokenCount(contextWindow)} (${contextPct}%)`
+              : "Context usage & provider limits"
+          }
+          aria-label="Context usage and rate limits"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle
+              cx="8"
+              cy="8"
+              r={ringRadius}
+              fill="none"
+              stroke="currentColor"
+              strokeOpacity="0.22"
+              strokeWidth="2"
+            />
+            {contextPct != null && contextPct > 0 && (
+              <circle
+                cx="8"
+                cy="8"
+                r={ringRadius}
+                fill="none"
+                stroke={contextPct >= 85 ? "var(--danger)" : "var(--accent)"}
+                strokeWidth="2"
+                strokeDasharray={ringCircumference}
+                strokeDashoffset={ringOffset}
+                strokeLinecap="round"
+                transform="rotate(-90 8 8)"
+              />
+            )}
+          </svg>
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onOpenChange(!open)}
+          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-lg text-[11.5px] font-mono text-muted hover:text-foreground hover:bg-subtle transition-colors"
+          title="Context usage & provider limits"
+        >
+          <Gauge className="size-3.5 shrink-0" aria-hidden="true" />
+          <span className="tabular-nums">
+            {contextWindow
+              ? `${formatTokenCount(contextUsed)}/${formatTokenCount(contextWindow)}`
+              : contextUsed > 0
+                ? `${formatTokenCount(contextUsed)}`
+                : "Usage"}
           </span>
-        )}
-      </button>
+          {primaryWindow?.usedPercent != null && (
+            <span className="text-[10.5px] text-muted-foreground tabular-nums">
+              · {Math.round(primaryWindow.usedPercent)}%
+            </span>
+          )}
+        </button>
+      )}
 
       {open && (
-        <div className="fixed sm:absolute right-2 sm:right-0 top-10 sm:top-full mt-1 w-[min(340px,calc(100vw-1rem))] z-50 border border-foreground bg-background shadow-[4px_4px_0_0_var(--foreground)] p-3 space-y-3">
+        <div
+          className={`fixed sm:absolute ${
+            compactRing ? "left-0 bottom-full mb-2" : "right-0 top-full mt-1.5"
+          } w-[min(320px,calc(100vw-1rem))] z-50 rounded-xl border border-border bg-panel p-3.5 space-y-3`}
+          style={{ boxShadow: "var(--shadow-2)" }}
+        >
           <div className="flex items-center justify-between gap-2 pb-2 border-b border-border">
-            <div className="flex items-center gap-2">
-              <Gauge className="size-3.5 text-foreground" aria-hidden="true" />
-              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">
-                Usage & Rate Limits
-              </span>
-            </div>
+            <span className="text-[13px] font-semibold text-foreground-strong">
+              Context & limits
+            </span>
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="text-muted hover:text-foreground p-0.5"
+              className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle"
               aria-label="Close usage popover"
             >
               <X className="size-3.5" aria-hidden="true" />
             </button>
           </div>
 
-          {/* Section 1: Session Context & Tokens */}
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-muted">
-                Session Context
-              </span>
+            <div className="flex items-center justify-between text-[11.5px]">
+              <span className="font-medium text-muted">Session context</span>
               {usage?.totalCostUsd != null && (
-                <span className="text-[11px] font-mono font-medium tabular-nums text-foreground">
+                <span className="font-mono font-medium tabular-nums text-foreground-strong">
                   {formatCostUsd(usage.totalCostUsd)}
                 </span>
               )}
             </div>
 
             {contextWindow != null && contextWindow > 0 ? (
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11.5px] font-mono tabular-nums text-foreground">
                   <span>
-                    {formatTokenCount(contextUsed)} / {formatTokenCount(contextWindow)} tokens
+                    {formatTokenCount(contextUsed)} / {formatTokenCount(contextWindow)}
                   </span>
-                  <span>{contextPct}%</span>
+                  <span className="text-muted">{contextPct}%</span>
                 </div>
-                <div className="w-full h-2 bg-surface-tertiary border border-border overflow-hidden">
+                <div className="w-full h-1.5 rounded-full bg-sunken overflow-hidden">
                   <div
-                    className={`h-full transition-all ${
-                      (contextPct ?? 0) >= 85 ? "bg-error" : "bg-foreground"
+                    className={`h-full rounded-full transition-all ${
+                      (contextPct ?? 0) >= 85 ? "bg-error" : "bg-accent"
                     }`}
                     style={{ width: `${contextPct ?? 0}%` }}
                   />
                 </div>
               </div>
             ) : (
-              <div className="text-[11px] font-mono text-muted tabular-nums">
+              <div className="text-[11.5px] font-mono text-muted tabular-nums">
                 Context used: {formatTokenCount(contextUsed)} tokens
               </div>
             )}
 
             <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono">
-              <div className="border border-border bg-surface-secondary px-2 py-1 flex justify-between">
-                <span className="text-muted">Input</span>
-                <span className="tabular-nums">{formatTokenCount(usage?.inputTokens)}</span>
+              <div className="rounded-lg bg-subtle px-2.5 py-1.5 flex justify-between">
+                <span className="text-muted">In</span>
+                <span className="tabular-nums text-foreground-strong">
+                  {formatTokenCount(usage?.inputTokens)}
+                </span>
               </div>
-              <div className="border border-border bg-surface-secondary px-2 py-1 flex justify-between">
-                <span className="text-muted">Output</span>
-                <span className="tabular-nums">{formatTokenCount(usage?.outputTokens)}</span>
+              <div className="rounded-lg bg-subtle px-2.5 py-1.5 flex justify-between">
+                <span className="text-muted">Out</span>
+                <span className="tabular-nums text-foreground-strong">
+                  {formatTokenCount(usage?.outputTokens)}
+                </span>
               </div>
-              <div className="border border-border bg-surface-secondary px-2 py-1 flex justify-between">
-                <span className="text-muted">Cache R</span>
-                <span className="tabular-nums">{formatTokenCount(usage?.cacheReadTokens)}</span>
+              <div className="rounded-lg bg-subtle px-2.5 py-1.5 flex justify-between">
+                <span className="text-muted">Cache</span>
+                <span className="tabular-nums text-foreground-strong">
+                  {formatTokenCount(usage?.cacheReadTokens)}
+                </span>
               </div>
-              <div className="border border-border bg-surface-secondary px-2 py-1 flex justify-between">
+              <div className="rounded-lg bg-subtle px-2.5 py-1.5 flex justify-between">
                 <span className="text-muted">Reason</span>
-                <span className="tabular-nums">{formatTokenCount(usage?.reasoningTokens)}</span>
+                <span className="tabular-nums text-foreground-strong">
+                  {formatTokenCount(usage?.reasoningTokens)}
+                </span>
               </div>
             </div>
-
-            {usage && usage.modelUsage.length > 0 && (
-              <div className="space-y-1 pt-1">
-                <div className="text-[10px] font-mono uppercase tracking-wider text-muted">
-                  Models Used
-                </div>
-                {usage.modelUsage.map((mu) => (
-                  <div
-                    key={mu.model}
-                    className="flex items-center justify-between text-[11px] font-mono border border-border/60 px-2 py-1"
-                  >
-                    <span className="truncate max-w-[145px]" title={mu.model}>
-                      {mu.model}
-                    </span>
-                    <span className="tabular-nums text-muted">
-                      {formatTokenCount(mu.inputTokens + mu.outputTokens)}
-                      {mu.costUsd != null ? ` · ${formatCostUsd(mu.costUsd)}` : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* Section 2: Provider Rate Limits & Quotas */}
           <div className="space-y-2 pt-2 border-t border-border">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-muted">
-                {provider?.name ?? "Provider"} Limits
+              <span className="text-[11.5px] font-medium text-muted">
+                {provider?.name ?? "Provider"} limits
               </span>
               {(rateLimits?.planType ?? provider?.account?.planType) && (
-                <span className="px-1.5 py-0.5 text-[10px] font-mono uppercase bg-foreground text-background">
+                <span className="px-1.5 py-0.5 rounded-md border border-border bg-subtle text-[10.5px] font-medium text-foreground">
                   {rateLimits?.planType ?? provider?.account?.planType}
                 </span>
               )}
             </div>
-
-            {provider?.account?.email && (
-              <div className="text-[11px] font-mono text-muted truncate">
-                {provider.account.email}
-              </div>
-            )}
 
             {rateLimits && rateLimits.windows.length > 0 ? (
               <div className="space-y-2">
@@ -223,18 +248,18 @@ export function UsagePopover({
                   const resetStr = formatResetCountdown(w.resetsAt);
                   return (
                     <div key={w.id} className="space-y-1">
-                      <div className="flex items-center justify-between text-[11px] font-mono gap-2">
+                      <div className="flex items-center justify-between text-[11px] gap-2">
                         <span className="truncate text-foreground">{w.label}</span>
-                        <span className="tabular-nums text-muted shrink-0">
-                          {pct != null ? `${Math.round(pct)}% used` : (w.status ?? "active")}
-                          {resetStr ? ` · resets ${resetStr}` : ""}
+                        <span className="tabular-nums text-muted font-mono shrink-0">
+                          {pct != null ? `${Math.round(pct)}%` : (w.status ?? "active")}
+                          {resetStr ? ` · ${resetStr}` : ""}
                         </span>
                       </div>
                       {pct != null && (
-                        <div className="w-full h-1.5 bg-surface-tertiary border border-border overflow-hidden">
+                        <div className="w-full h-1.5 rounded-full bg-sunken overflow-hidden">
                           <div
-                            className={`h-full transition-all ${
-                              pct >= 90 ? "bg-error" : "bg-foreground"
+                            className={`h-full rounded-full transition-all ${
+                              pct >= 90 ? "bg-error" : pct >= 70 ? "bg-warn" : "bg-success"
                             }`}
                             style={{ width: `${pct}%` }}
                           />
@@ -245,30 +270,22 @@ export function UsagePopover({
                 })}
               </div>
             ) : (
-              <div className="text-[11px] text-muted border border-border bg-surface-secondary p-2">
-                {rateLimits?.note ??
-                  "Run a turn or click Refresh to fetch provider quota windows if exposed by this CLI."}
-              </div>
-            )}
-
-            {rateLimits?.creditsBalance && (
-              <div className="text-[11px] font-mono text-foreground">
-                Credits: <span className="font-semibold">{rateLimits.creditsBalance}</span>
+              <div className="text-[11px] text-muted rounded-lg bg-subtle p-2.5 leading-snug">
+                {rateLimits?.note ?? "Click Refresh to check quota windows exposed by this CLI."}
               </div>
             )}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
             {provider?.supportsCompact && onCompact ? (
               <button
                 type="button"
                 disabled={compacting || threadStatus === "running"}
                 onClick={() => void handleCompact()}
-                className="btn btn-outline btn-sm inline-flex items-center gap-1 disabled:opacity-40"
+                className="btn btn-secondary btn-sm"
                 title="Compact conversation context"
               >
-                <ArrowsInSimple className="size-3" aria-hidden="true" />
+                <ArrowsInSimple className="size-3.5" aria-hidden="true" />
                 <span>{compacting ? "Compacting..." : "Compact"}</span>
               </button>
             ) : (
@@ -279,10 +296,10 @@ export function UsagePopover({
               type="button"
               disabled={refreshing || !provider}
               onClick={() => void handleRefresh()}
-              className="btn btn-outline btn-sm inline-flex items-center gap-1 disabled:opacity-40"
+              className="btn btn-secondary btn-sm"
             >
               <ArrowsClockwise
-                className={`size-3 ${refreshing ? "animate-spin" : ""}`}
+                className={`size-3.5 ${refreshing ? "animate-spin" : ""}`}
                 aria-hidden="true"
               />
               <span>{refreshing ? "Refreshing..." : "Refresh"}</span>

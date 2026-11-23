@@ -33,6 +33,8 @@ import {
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
   type MinimapSettings,
+  UI_PALETTES,
+  type UiPalette,
 } from "@/lib/editor/types";
 import {
   COMPILER_DISPLAY_NAMES,
@@ -141,34 +143,83 @@ function SelectField({
   );
 }
 
-function AppearanceToggle() {
+function AppearanceToggle({
+  palette,
+  onChangePalette,
+}: {
+  palette: UiPalette;
+  onChangePalette: (next: UiPalette) => void;
+}) {
   const { theme, setTheme } = useTheme();
 
   return (
-    <div className="py-2">
-      <span className="text-sm font-medium block mb-2 text-foreground-secondary">Color Mode</span>
-      <div className="flex">
-        {(
-          [
-            { value: "light", label: "Light" },
-            { value: "dark", label: "Dark" },
-          ] as const
-        ).map((mode, index) => (
-          <button
-            type="button"
-            key={mode.value}
-            onClick={() => setTheme(mode.value)}
-            className={`flex-1 px-4 py-2.5 text-sm font-medium border transition-all ${
-              theme === mode.value
-                ? "bg-foreground text-background border-foreground"
-                : "bg-background text-muted border-border hover:border-border-dark"
-            } ${index === 0 ? "" : "-ml-px"}`}
-          >
-            {mode.label}
-          </button>
-        ))}
+    <div className="py-2 space-y-4">
+      <div>
+        <span className="text-[13px] font-medium block mb-2 text-foreground-strong">
+          Color mode
+        </span>
+        <div className="inline-flex w-full p-0.5 rounded-lg bg-sunken gap-0.5">
+          {(
+            [
+              { value: "light", label: "Light" },
+              { value: "dark", label: "Dark" },
+              { value: "system", label: "System" },
+            ] as const
+          ).map((mode) => (
+            <button
+              type="button"
+              key={mode.value}
+              onClick={() => setTheme(mode.value)}
+              className={`flex-1 h-8 px-3 rounded-md text-[12.5px] font-medium transition-all ${
+                theme === mode.value
+                  ? "bg-panel text-foreground-strong shadow-xs"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="text-xs text-muted mt-1.5">Controls the app and editor theme</p>
+
+      <div>
+        <span className="text-[13px] font-medium block mb-2 text-foreground-strong">
+          Theme palette
+        </span>
+        <div className="grid grid-cols-3 gap-2">
+          {UI_PALETTES.map((item) => {
+            const active = palette === item.id;
+            return (
+              <button
+                type="button"
+                key={item.id}
+                onClick={() => onChangePalette(item.id)}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  active
+                    ? "border-accent bg-accent-soft/60"
+                    : "border-border bg-panel hover:border-border-dark hover:bg-subtle/60"
+                }`}
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  {item.swatches.map((hex) => (
+                    <span
+                      key={hex}
+                      className="size-3.5 rounded-full border border-black/15"
+                      style={{ backgroundColor: hex }}
+                    />
+                  ))}
+                </div>
+                <div className="text-[12.5px] font-semibold text-foreground-strong">
+                  {item.label}
+                </div>
+                <div className="text-[11px] text-muted leading-snug mt-0.5 line-clamp-2">
+                  {item.description}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -211,21 +262,22 @@ export function LaTeXSettingsDialog({
   return (
     <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-foreground/50 z-[9999]" />
+        <Dialog.Overlay className="fixed inset-0 bg-black/35 backdrop-blur-[2px] z-[9999]" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] bg-background border-2 border-foreground shadow-[4px_4px_0_0_var(--foreground)] w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
+          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] bg-panel rounded-2xl border border-border w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
+          style={{ boxShadow: "var(--shadow-3)" }}
           onPointerDownOutside={(e) => e.preventDefault()}
         >
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-            <div className="flex items-center gap-3">
-              <Dialog.Title className="text-lg font-bold tracking-tight">Settings</Dialog.Title>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                Auto-saved
-              </span>
+            <div className="flex items-center gap-2.5">
+              <Dialog.Title className="text-[16px] font-semibold tracking-tight text-foreground-strong">
+                Settings
+              </Dialog.Title>
+              <span className="text-[11px] text-muted-foreground">Auto-saved</span>
             </div>
             <Dialog.Close
-              className="p-1.5 hover:bg-accent-hover transition-colors border border-transparent hover:border-border"
+              className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
               aria-label="Close"
             >
               <XIcon className="size-4" />
@@ -238,27 +290,24 @@ export function LaTeXSettingsDialog({
             className="flex-1 flex flex-col overflow-hidden"
           >
             {/* Tabs */}
-            <Tabs.List className="flex border-b border-border shrink-0">
+            <Tabs.List className="flex px-4 gap-1 border-b border-border shrink-0">
               <Tabs.Trigger
                 value="build"
-                className="flex-1 px-4 py-3 text-sm font-medium transition-colors relative text-muted-foreground hover:text-foreground data-[state=active]:text-foreground"
+                className="px-3 py-2.5 text-[13px] font-medium transition-colors relative text-muted hover:text-foreground data-[state=active]:text-accent border-b-2 border-transparent data-[state=active]:border-accent -mb-px"
               >
                 Build
-                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-foreground transition-opacity opacity-0 data-[state=active]:opacity-100" />
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="editor"
-                className="flex-1 px-4 py-3 text-sm font-medium transition-colors relative text-muted-foreground hover:text-foreground data-[state=active]:text-foreground"
+                className="px-3 py-2.5 text-[13px] font-medium transition-colors relative text-muted hover:text-foreground data-[state=active]:text-accent border-b-2 border-transparent data-[state=active]:border-accent -mb-px"
               >
                 Editor
-                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-foreground transition-opacity opacity-0 data-[state=active]:opacity-100" />
               </Tabs.Trigger>
               <Tabs.Trigger
                 value="agents"
-                className="flex-1 px-4 py-3 text-sm font-medium transition-colors relative text-muted-foreground hover:text-foreground data-[state=active]:text-foreground"
+                className="px-3 py-2.5 text-[13px] font-medium transition-colors relative text-muted hover:text-foreground data-[state=active]:text-accent border-b-2 border-transparent data-[state=active]:border-accent -mb-px"
               >
                 Agents
-                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-foreground transition-opacity opacity-0 data-[state=active]:opacity-100" />
               </Tabs.Trigger>
             </Tabs.List>
 
@@ -266,8 +315,11 @@ export function LaTeXSettingsDialog({
             <Tabs.Content value="editor" className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
               <SectionHeader>Appearance</SectionHeader>
 
-              {/* Light/Dark Mode Toggle */}
-              <AppearanceToggle />
+              {/* Light/Dark & Palette Switcher */}
+              <AppearanceToggle
+                palette={editorSettings.uiPalette}
+                onChangePalette={(uiPalette) => onUpdateEditorSettings({ uiPalette })}
+              />
 
               <SectionHeader>Keybindings</SectionHeader>
 
@@ -1378,9 +1430,7 @@ export function LaTeXSettingsDialog({
                 Agent CLI settings auto-save locally.
               </div>
             )}
-            <Dialog.Close className="px-6 py-2 text-sm font-medium bg-background text-foreground border-2 border-foreground shadow-[3px_3px_0_0_var(--foreground)] hover:shadow-[1px_1px_0_0_var(--foreground)] hover:translate-x-[2px] hover:translate-y-[2px] transition-all">
-              Done
-            </Dialog.Close>
+            <Dialog.Close className="btn btn-primary">Done</Dialog.Close>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
