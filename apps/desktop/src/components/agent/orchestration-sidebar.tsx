@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ProviderIcon } from "./icons";
 import {
   type BranchPullRequest,
   getProjectName,
@@ -214,7 +215,10 @@ export function OrchestrationSidebar({
             </span>
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
-            <span>{provider.label}</span>
+            <span className="inline-flex items-center gap-1">
+              <ProviderIcon providerId={thread.providerId} className="size-3 shrink-0" />
+              {provider.label}
+            </span>
             {thread.parentThreadId && <span>· delegated</span>}
             {thread.workspaceBranch && (
               <span className="rounded border border-[var(--border)] px-1 font-mono text-[10px] text-[var(--foreground-secondary)]">

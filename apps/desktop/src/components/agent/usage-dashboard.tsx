@@ -14,6 +14,7 @@ import {
   type UsageProjectOption,
   VOICE_TOKENS,
 } from "@/lib/agent/usage-dashboard";
+import { ProviderIcon } from "./icons";
 import { formatResetCountdown, formatTokenCount } from "./utils";
 
 interface UsageDashboardProps {
@@ -263,11 +264,7 @@ export function UsageDashboard({
               style={{ borderTopWidth: "3px", borderTopColor: voice.ink }}
             >
               <div className="flex items-center gap-2 text-[13px] font-semibold">
-                <span
-                  className="size-2 rounded-full shrink-0"
-                  style={{ backgroundColor: voice.ink }}
-                  aria-hidden="true"
-                />
+                <ProviderIcon providerId={provider.id} className="size-3.5 shrink-0" />
                 <span className="truncate">{provider.name || voice.label}</span>
                 <span className="ml-auto text-[11px] font-normal text-[var(--muted)] truncate">
                   {provider.account?.planType ??
@@ -501,10 +498,9 @@ function ProviderGroupRows({
     <>
       <tr className="bg-[var(--sunken)] font-sans font-semibold text-[12.5px] border-b border-[var(--line)]">
         <td className="py-1.5 pr-2 text-left">
-          <span
-            className="inline-block size-2 rounded-full mr-2"
-            style={{ backgroundColor: voice.ink }}
-            aria-hidden="true"
+          <ProviderIcon
+            providerId={group.provider}
+            className="mr-2 inline-block size-3 align-text-bottom"
           />
           {voice.label}
         </td>

@@ -9,6 +9,7 @@ import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDraftInjection } from "@/components/agent/agent-composer";
 import { AgentStatusCard } from "@/components/agent/agent-status-card";
+import { ProviderIcon } from "@/components/agent/icons";
 import { OrchestrationSidebar } from "@/components/agent/orchestration-sidebar";
 import {
   type DelegateTaskInput,
@@ -48,6 +49,7 @@ import {
 } from "@/components/latex";
 import { CommandPalette } from "@/components/ui/command-palette";
 import { InputDialog } from "@/components/ui/input-dialog";
+import { OrchestraTeXWordmark } from "@/components/ui/orchestratex-wordmark";
 import {
   TabBar,
   type TabDragEndPayload,
@@ -3349,9 +3351,7 @@ export default function EditorPage() {
             title="OrchestraTeX on GitHub"
             aria-label="Open OrchestraTeX repository"
           >
-            <span className="font-display text-[19px] tracking-tight text-foreground-strong">
-              OrchestraTeX
-            </span>
+            <OrchestraTeXWordmark />
           </button>
 
           {daemon.projectPath && (
@@ -3553,12 +3553,15 @@ export default function EditorPage() {
                     style={{ backgroundColor: voice.tint, color: voice.text }}
                     className="h-6 px-2 rounded-full inline-flex items-center gap-1.5 text-[11px] font-medium transition-opacity hover:opacity-85"
                   >
-                    <span
-                      className={`size-1.5 rounded-full shrink-0 ${entry.active ? "animate-pulse" : ""}`}
-                      style={{ backgroundColor: voice.ink }}
-                      aria-hidden="true"
-                    />
+                    <ProviderIcon providerId={entry.provider} className="size-3 shrink-0" />
                     <span>{name}</span>
+                    {entry.active && (
+                      <span
+                        className="size-1.5 shrink-0 animate-pulse rounded-full"
+                        style={{ backgroundColor: voice.ink }}
+                        aria-hidden="true"
+                      />
+                    )}
                   </button>
                 );
               })}
@@ -3873,8 +3876,14 @@ export default function EditorPage() {
                                     <span className="text-[12.5px] font-medium truncate">
                                       {thread.title || "Untitled thread"}
                                     </span>
-                                    <span className="text-[11px] text-muted truncate">
-                                      {thread.providerId} · {thread.messageCount} msgs
+                                    <span className="flex min-w-0 items-center gap-1 text-[11px] text-muted">
+                                      <ProviderIcon
+                                        providerId={thread.providerId}
+                                        className="size-3 shrink-0"
+                                      />
+                                      <span className="truncate">
+                                        {thread.providerId} · {thread.messageCount} msgs
+                                      </span>
                                     </span>
                                   </button>
                                 );

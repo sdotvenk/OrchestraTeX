@@ -3,6 +3,7 @@
 import type { GitStatus } from "@orchestratex/shared";
 import { type FormEvent, type ReactNode, useMemo, useState } from "react";
 import type { AgentProviderId } from "@/lib/agent/types";
+import { ProviderIcon } from "./icons";
 import {
   type BranchPullRequest,
   formatShortPath,
@@ -447,7 +448,8 @@ export function ProjectInspector({
             <div className="flex items-center">
               <span className="text-[12.5px] font-medium">Orchestration</span>
               {activeThread && (
-                <span className="ml-auto text-[11px] text-[var(--muted-foreground)]">
+                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-[var(--muted-foreground)]">
+                  <ProviderIcon providerId={activeThread.providerId} className="size-3 shrink-0" />
                   {getProviderMeta(activeThread.providerId).label}
                 </span>
               )}

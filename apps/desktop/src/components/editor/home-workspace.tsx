@@ -5,6 +5,7 @@ import { useState } from "react";
 import { AgentStatusCard } from "@/components/agent/agent-status-card";
 import { LaTeXInstallPrompt } from "@/components/latex/latex-install-prompt";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { OrchestraTeXWordmark } from "@/components/ui/orchestratex-wordmark";
 import type { ProviderStatus } from "@/lib/agent/types";
 import type { LaTeXCompilersStatus } from "@/lib/latex/types";
 import type { RecentProject } from "@/lib/recent-projects";
@@ -62,8 +63,8 @@ export function HomeWorkspace({
   return (
     <section aria-label="Home" className="h-full overflow-auto bg-bg p-6">
       <div className="mx-auto max-w-5xl space-y-6">
-        <h1 className="font-display text-5xl tracking-tight text-foreground-strong">
-          OrchestraTeX
+        <h1>
+          <OrchestraTeXWordmark prominent />
         </h1>
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
           <section

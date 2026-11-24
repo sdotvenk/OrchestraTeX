@@ -11,6 +11,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useId, useState } from "react";
+import { ProviderIcon } from "@/components/agent/icons";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -1280,6 +1281,7 @@ export function LaTeXSettingsDialog({
                   >
                     <div className="min-w-0">
                       <div className="font-medium text-foreground flex items-center gap-2">
+                        <ProviderIcon providerId={p.id} className="size-3.5 shrink-0" />
                         <span>{p.name}</span>
                         <span className="text-[10px] font-mono uppercase text-muted">
                           {p.transport}
