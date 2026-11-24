@@ -232,7 +232,7 @@ export function ProjectInspector({
   return (
     <aside
       aria-label="Project inspector"
-      className={`flex h-full w-[308px] shrink-0 flex-col gap-2 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
+      className={`flex h-full w-full min-w-0 flex-col gap-2 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
     >
       <div
         role="tablist"
@@ -330,7 +330,7 @@ export function ProjectInspector({
                 <svg
                   aria-hidden="true"
                   viewBox="0 0 16 16"
-                  className="h-3.5 w-3.5 text-[var(--muted-foreground)]"
+                  className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="1.6"
@@ -340,14 +340,19 @@ export function ProjectInspector({
                   <circle cx="5" cy="12" r="1.5" />
                   <path d="M5 5.5v5M11 5.5c0 2.5-6 2-6 5" />
                 </svg>
-                <span className="font-mono font-medium">{displayBranch}</span>
+                <span
+                  className="min-w-0 truncate whitespace-nowrap font-mono font-medium"
+                  title={displayBranch}
+                >
+                  {displayBranch}
+                </span>
                 {gitStatus && (gitStatus.ahead > 0 || gitStatus.behind > 0) && (
-                  <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
+                  <span className="shrink-0 whitespace-nowrap font-mono text-[11px] text-[var(--muted-foreground)]">
                     {gitStatus.ahead > 0 ? `↑${gitStatus.ahead}` : ""}
                     {gitStatus.behind > 0 ? `↓${gitStatus.behind}` : ""}
                   </span>
                 )}
-                <div className="ml-auto flex items-center gap-2 text-[11.5px] text-[var(--muted-foreground)]">
+                <div className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap text-[11.5px] text-[var(--muted-foreground)]">
                   {onPull && (
                     <button
                       type="button"

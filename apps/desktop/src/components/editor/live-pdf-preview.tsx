@@ -490,23 +490,32 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-1 shrink-0">
+        <div className="ml-auto flex items-center gap-0.5 shrink-0">
           {pdfData && (
-            <div ref={fitMenuRef} className="relative hidden @[440px]:block">
+            <div ref={fitMenuRef} className="relative">
               <button
                 type="button"
                 onClick={() => setFitMenuOpen((p) => !p)}
-                className="h-7 px-2 rounded-md text-[12px] text-foreground hover:bg-subtle transition-colors"
+                className="h-7 px-1.5 @[440px]:px-2 rounded-md text-[11.5px] @[440px]:text-[12px] text-foreground hover:bg-subtle transition-colors whitespace-nowrap"
                 aria-expanded={fitMenuOpen}
+                aria-label="PDF zoom and page controls"
+                title="PDF zoom and page controls"
               >
-                {pdfState.fitMode === "width"
-                  ? "Fit width"
-                  : pdfState.fitMode === "page"
-                    ? "Fit page"
+                <span className="hidden @[440px]:inline">
+                  {pdfState.fitMode === "width"
+                    ? "Fit width"
+                    : pdfState.fitMode === "page"
+                      ? "Fit page"
+                      : `${Math.round(pdfState.scale * 100)}%`}
+                </span>
+                <span className="@[440px]:hidden">
+                  {pdfState.fitMode === "width" || pdfState.fitMode === "page"
+                    ? "Fit"
                     : `${Math.round(pdfState.scale * 100)}%`}
+                </span>
               </button>
               {fitMenuOpen && (
-                <div className="ox-popover absolute right-0 top-full mt-1 w-32 p-1 z-50 text-[12px] flex flex-col gap-0.5">
+                <div className="ox-popover absolute right-0 top-full mt-1 w-36 p-1 z-50 text-[12px] flex flex-col gap-0.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -547,6 +556,33 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                   >
                     Zoom out
                   </button>
+                  {pdfState.numPages > 1 && (
+                    <>
+                      <div className="my-0.5 border-t border-border" />
+                      <button
+                        type="button"
+                        disabled={pdfState.currentPage <= 1}
+                        onClick={() => {
+                          pdfControlRef.current?.prevPage();
+                          setFitMenuOpen(false);
+                        }}
+                        className="w-full px-2 py-1 rounded text-left hover:bg-subtle text-foreground disabled:opacity-40"
+                      >
+                        Previous page
+                      </button>
+                      <button
+                        type="button"
+                        disabled={pdfState.currentPage >= pdfState.numPages}
+                        onClick={() => {
+                          pdfControlRef.current?.nextPage();
+                          setFitMenuOpen(false);
+                        }}
+                        className="w-full px-2 py-1 rounded text-left hover:bg-subtle text-foreground disabled:opacity-40"
+                      >
+                        Next page
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>

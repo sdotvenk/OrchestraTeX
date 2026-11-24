@@ -105,9 +105,13 @@ export function HomeWorkspace({
     compilersStatus && Object.values(compilersStatus).some((compiler) => compiler.available);
 
   const installedCompilers = compilersStatus
-    ? Object.values(compilersStatus)
-        .filter((compiler) => compiler.available)
-        .map((compiler) => COMPILER_DISPLAY_NAMES[compiler.name as keyof LaTeXCompilersStatus])
+    ? Object.entries(compilersStatus)
+        .filter(([, compiler]) => compiler.available)
+        .map(
+          ([key, compiler]) =>
+            COMPILER_DISPLAY_NAMES[key as keyof LaTeXCompilersStatus] ?? compiler.name ?? key,
+        )
+        .filter(Boolean)
         .join(", ")
     : "";
 
@@ -162,7 +166,7 @@ export function HomeWorkspace({
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search ⌘P"
-                  className="w-40 rounded-md border border-transparent bg-transparent px-2.5 py-1 text-[12px] placeholder:text-muted focus:outline-none focus:border-[var(--line-strong)] focus:bg-panel transition-colors"
+                  className="w-28 focus:w-44 text-right focus:text-left rounded-md border border-transparent bg-transparent px-1.5 focus:px-2.5 py-1 text-[12px] placeholder:text-muted focus:outline-none focus:border-[var(--line-strong)] focus:bg-panel transition-all"
                 />
                 {query.trim().length > 0 && recentProjects.length > 0 && (
                   <button
@@ -194,7 +198,7 @@ export function HomeWorkspace({
                   return (
                     <li
                       key={project.path}
-                      className="group flex items-center gap-3.5 px-4 py-3 hover:bg-subtle/60 transition-colors"
+                      className="group flex items-center gap-0 group-hover:gap-2 px-4 py-3 hover:bg-subtle/60 transition-colors"
                     >
                       <button
                         type="button"
@@ -235,7 +239,7 @@ export function HomeWorkspace({
                           </span>
                         )}
 
-                        <span className="shrink-0 text-[12px] text-muted w-20 text-right tabular-nums">
+                        <span className="shrink-0 text-[12px] text-muted text-right tabular-nums whitespace-nowrap">
                           {formatRelativeTime(project.lastOpened)}
                         </span>
                       </button>
@@ -290,7 +294,9 @@ export function HomeWorkspace({
                   ✓
                 </span>
                 <span className="font-medium text-foreground">Ready</span>
-                <span className="text-muted truncate">· {installedCompilers}</span>
+                {installedCompilers && (
+                  <span className="text-muted truncate">· {installedCompilers}</span>
+                )}
                 <button
                   type="button"
                   onClick={onRefreshCompilers}

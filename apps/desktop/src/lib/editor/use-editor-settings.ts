@@ -53,10 +53,14 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
 
   settings.fontFamily = sanitizeString(settings.fontFamily);
   settings.fontSize = clampInteger(settings.fontSize, DEFAULT_EDITOR_SETTINGS.fontSize, 8, 32);
+  const rawLineHeight =
+    typeof settings.lineHeight === "number" && Number.isFinite(settings.lineHeight)
+      ? settings.lineHeight > 3
+        ? settings.lineHeight / settings.fontSize
+        : settings.lineHeight
+      : DEFAULT_EDITOR_SETTINGS.lineHeight;
   settings.lineHeight =
-    Math.round(
-      clampNumber(settings.lineHeight, DEFAULT_EDITOR_SETTINGS.lineHeight, 1.0, 3.0) * 10,
-    ) / 10;
+    Math.round(clampNumber(rawLineHeight, DEFAULT_EDITOR_SETTINGS.lineHeight, 1.0, 3.0) * 10) / 10;
 
   if (settings.terminalShellMode !== "auto" && settings.terminalShellMode !== "custom") {
     settings.terminalShellMode = DEFAULT_EDITOR_SETTINGS.terminalShellMode;

@@ -115,7 +115,7 @@ export function ApprovalCard({
       {showReason && <div className="text-xs text-foreground">{reason}</div>}
 
       {interaction.command && (
-        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap break-words">
+        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap break-keep">
           {interaction.command}
         </pre>
       )}

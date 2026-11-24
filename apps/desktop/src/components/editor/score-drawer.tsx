@@ -111,6 +111,10 @@ export function ScoreDrawer({
                 )}
               </div>
               <div className="relative h-[26px] flex-1">
+                <div
+                  className="pointer-events-none absolute inset-x-0 top-[13px] h-px bg-border/60"
+                  aria-hidden="true"
+                />
                 {positions.length > 1 && (
                   <div
                     className="absolute top-[12px] h-[2px]"

@@ -250,7 +250,7 @@ export function OrchestrationSidebar({
   return (
     <aside
       aria-label="Orchestration threads"
-      className={`flex h-full w-[284px] shrink-0 flex-col gap-1.5 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
+      className={`flex h-full w-full min-w-0 flex-col gap-1.5 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
     >
       <div className="flex items-center gap-1.5">
         <div className="relative flex flex-1 min-w-0 items-center rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1">
@@ -353,8 +353,12 @@ export function OrchestrationSidebar({
           onClick={() => setFilter("needs_you")}
           className={`rounded-full px-2.5 py-0.5 font-medium transition-colors ${
             filter === "needs_you"
-              ? "bg-[var(--warn)] text-[var(--panel)]"
-              : "border border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]"
+              ? counts.needsYou > 0
+                ? "bg-[var(--warn)] text-[var(--panel)]"
+                : "bg-[var(--foreground)] text-[var(--panel)]"
+              : counts.needsYou > 0
+                ? "border border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]"
+                : "border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
           }`}
         >
           Needs you {counts.needsYou}
