@@ -52,6 +52,7 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
   }
 
   if (
+    settings.uiPalette !== "score" &&
     settings.uiPalette !== "atelier" &&
     settings.uiPalette !== "conductor" &&
     settings.uiPalette !== "monograph"

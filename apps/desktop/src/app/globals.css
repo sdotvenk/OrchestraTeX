@@ -43,19 +43,18 @@
   --color-shadow: var(--shadow);
 
   --font-family-sans:
-    var(--font-plex-sans), "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Segoe UI", sans-serif;
-  --font-family-display: var(--font-display-serif), "Newsreader", "IBM Plex Sans", Georgia, serif;
+    var(--font-geist), -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --font-family-display: var(--font-display-serif), Georgia, serif;
   --font-family-mono:
-    var(--font-plex-mono), "IBM Plex Mono", "SF Mono", SFMono-Regular, ui-monospace, Menlo,
-    Consolas, monospace;
+    var(--font-geist-mono), "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, monospace;
 }
 
-/* ============================================================================
-   UNIFIED TOKENIZED BASE + 3 SWITCHABLE PALETTES (Atelier, Conductor, Monograph)
-   ============================================================================ */
+@theme inline {
+  --font-sans: var(--font-family-sans);
+  --font-mono: var(--font-family-mono);
+}
 
-/* Palette A (Default): Atelier — Warm Cotton · Prussian Ink · Vermilion */
+/* Shared tokens and the Atelier palette. */
 :root,
 :root[data-palette="atelier"] {
   color-scheme: light;
@@ -84,6 +83,26 @@
   --warn-bg: #fbf3e2;
   --danger: #b43c2c;
   --danger-bg: #fbeae7;
+  --stale: var(--text);
+  --stale-bg: var(--panel);
+  --stale-line: var(--line-strong);
+  --score-frame: #ece7dc;
+  --score-ink: #1b1f33;
+  --score-tangerine: #e2622a;
+  --voice-claude-ink: #d9541a;
+  --voice-claude-tint: #fce5d8;
+  --voice-claude-text: #9f3b0d;
+  --voice-codex-ink: #2f5bd3;
+  --voice-codex-tint: #dfe7fb;
+  --voice-codex-text: #2449af;
+  --voice-antigravity-ink: #0e8597;
+  --voice-antigravity-tint: #d7eef1;
+  --voice-antigravity-text: #086170;
+  --voice-custom-ink: #8e4cc4;
+  --voice-custom-tint: #eee0f7;
+  --voice-custom-text: #773ca9;
+  --voice-you-ink: var(--text);
+  --voice-you-tint: var(--sunken);
   --toast-bg: #17212b;
   --toast-fg: #f6f5f0;
   --shadow-1: 0 1px 2px rgb(19 23 29 / 0.05);
@@ -135,12 +154,80 @@
   --warn-bg: #312716;
   --danger: #eb8a7c;
   --danger-bg: #381d1a;
+  --voice-claude-ink: #ff8a4c;
+  --voice-claude-tint: #3a2418;
+  --voice-codex-ink: #7fa0ff;
+  --voice-codex-tint: #252e4b;
+  --voice-antigravity-ink: #3fc3d3;
+  --voice-antigravity-tint: #17383d;
+  --voice-custom-ink: #c99aef;
+  --voice-custom-tint: #35243f;
+  --voice-claude-text: var(--voice-claude-ink);
+  --voice-codex-text: var(--voice-codex-ink);
+  --voice-antigravity-text: var(--voice-antigravity-ink);
+  --voice-custom-text: var(--voice-custom-ink);
   --toast-bg: #222a34;
   --toast-fg: #f2f5f9;
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.35);
   --shadow-2: 0 8px 24px rgb(0 0 0 / 0.45);
   --shadow-3: 0 24px 64px rgb(0 0 0 / 0.6);
   --shadow: #010409;
+}
+
+/* Score and its dark counterpart, Nocturne. */
+:root[data-palette="score"],
+:root:not([data-palette]) {
+  --bg: var(--score-frame);
+  --panel: #fcfaf5;
+  --subtle: #f1ede4;
+  --sunken: #e3ddd0;
+  --stage: #e3ddd0;
+  --line: #dcd4c4;
+  --line-strong: #bfb5a3;
+  --text: var(--score-ink);
+  --text-strong: var(--score-ink);
+  --muted: #5a5e70;
+  --faint: #616575;
+  --accent: #435670;
+  --accent-hover: #e9e6de;
+  --accent-soft: #e6ebef;
+  --accent-muted: #526685;
+  --accent-dark: #303f56;
+  --primary-bg: var(--score-ink);
+  --primary-bg-hover: #30364e;
+  --primary-text: #fcfaf5;
+  --primary-offset: var(--score-tangerine);
+  --warn: #4d3500;
+  --warn-bg: #f8e3a6;
+  --danger: #7a1f14;
+  --danger-bg: #f6dad5;
+  --ok: #1f5233;
+  --ok-bg: #dcebdd;
+}
+.dark[data-palette="score"],
+.dark:not([data-palette]) {
+  --bg: #14161f;
+  --panel: #1b1e2a;
+  --subtle: #1e2130;
+  --sunken: #10121a;
+  --stage: #10121a;
+  --line: #2e3242;
+  --line-strong: #4a4f66;
+  --text: #e7e4da;
+  --text-strong: #f2ede2;
+  --muted: #a4a7b6;
+  --faint: #9a9dad;
+  --accent: #a3b3ca;
+  --accent-hover: #2b2f42;
+  --accent-soft: #303747;
+  --accent-muted: #b2bfd4;
+  --accent-dark: #c7d1e2;
+  --primary-bg: #f2ede2;
+  --primary-bg-hover: #fffaf0;
+  --primary-text: #14161f;
+  --primary-offset: #ff7a3d;
+  --warn: #f5d98a;
+  --warn-bg: #3a3016;
 }
 
 /* Palette B: Conductor — Cool Alabaster · Cobalt Slate · Brass */
@@ -486,6 +573,7 @@ kbd {
   border-color: var(--primary-bg);
   color: var(--primary-text);
   font-weight: 600;
+  box-shadow: 2px 2px 0 var(--primary-offset, transparent);
 }
 
 .btn-primary:hover:not(:disabled) {

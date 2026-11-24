@@ -1,29 +1,28 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans, Newsreader } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { ExternalLinkHandler } from "@/components/external-link-handler";
 import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
-const plexSans = IBM_Plex_Sans({
-  variable: "--font-plex-sans",
+const geist = Geist({
+  variable: "--font-geist",
   subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600", "700"],
 });
 
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
   subsets: ["latin"],
   display: "swap",
-  weight: ["400", "500", "600"],
 });
 
-const displaySerif = Newsreader({
+const displaySerif = Instrument_Serif({
   variable: "--font-display-serif",
   subsets: ["latin"],
   display: "swap",
-  weight: ["500", "600", "700"],
+  weight: "400",
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
@@ -33,10 +32,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${plexSans.variable} ${plexMono.variable} ${displaySerif.variable} antialiased`}
-      >
+    <html
+      lang="en"
+      className={`${geist.variable} ${geistMono.variable} ${displaySerif.variable}`}
+      suppressHydrationWarning
+    >
+      <body className="antialiased">
         <ThemeProvider attribute="class" defaultTheme="light" disableTransitionOnChange>
           <ToastProvider>
             <ExternalLinkHandler />

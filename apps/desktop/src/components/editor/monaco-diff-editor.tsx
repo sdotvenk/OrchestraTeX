@@ -152,6 +152,7 @@ export const MonacoDiffEditor = memo(function MonacoDiffEditor({
     editorRef.current = editor;
     monacoRef.current = monaco;
     isDisposingRef.current = false;
+    void document.fonts.ready.then(() => monaco.editor.remeasureFonts());
   }, []);
 
   // Reactively switch theme when app mode changes

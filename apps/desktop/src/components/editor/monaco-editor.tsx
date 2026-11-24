@@ -162,6 +162,7 @@ export const MonacoEditor = memo(function MonacoEditor({
     editorRef.current = editor;
     monacoRef.current = monaco;
     setEditorReady(true);
+    void document.fonts.ready.then(() => monaco.editor.remeasureFonts());
 
     // Apply any pending goToLine that arrived before the editor was ready
     if (pendingGoToLineRef.current > 0) {

@@ -1,7 +1,7 @@
 // Editor theme options - auto-follows app light/dark mode
 export type EditorTheme = "one-light" | "one-dark";
 export type TerminalShellMode = "auto" | "custom";
-export type UiPalette = "atelier" | "conductor" | "monograph";
+export type UiPalette = "score" | "atelier" | "conductor" | "monograph";
 
 export const UI_PALETTES: readonly {
   id: UiPalette;
@@ -9,6 +9,12 @@ export const UI_PALETTES: readonly {
   description: string;
   swatches: readonly [string, string, string];
 }[] = [
+  {
+    id: "score",
+    label: "Score",
+    description: "Warm paper and ink",
+    swatches: ["var(--score-frame)", "var(--score-ink)", "var(--score-tangerine)"],
+  },
   {
     id: "atelier",
     label: "Atelier",
@@ -93,7 +99,7 @@ export const DEFAULT_MINIMAP_SETTINGS: MinimapSettings = {
 };
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  uiPalette: "atelier",
+  uiPalette: "score",
   vimMode: false,
 
   // Display

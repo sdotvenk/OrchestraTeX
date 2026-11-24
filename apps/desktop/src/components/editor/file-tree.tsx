@@ -462,16 +462,16 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
       tabIndex={-1}
       data-path={node.data.path}
       data-type={node.data.type}
-      className={`w-full flex items-center gap-2 px-2 py-1 text-left text-sm transition-colors select-none ${
+      className={`w-full flex items-center gap-2 px-2 py-1 text-left font-mono text-xs transition-colors select-none ${
         isDragging ? "opacity-50" : ""
       } ${
         isDragOver
-          ? "bg-blue-100 ring-2 ring-blue-400 ring-inset"
+          ? "bg-accent-soft ring-2 ring-accent ring-inset"
           : isSelected
-            ? "bg-foreground text-background"
+            ? "bg-panel text-foreground-strong font-semibold ring-1 ring-border-dark ring-inset"
             : isFocused
-              ? "bg-foreground/10"
-              : "hover:bg-foreground/5"
+              ? "bg-sunken text-foreground-strong"
+              : "text-foreground-strong hover:bg-sunken"
       } ${isHighlighted && !isSelected ? "animate-highlight" : ""}`}
     >
       <div

@@ -186,7 +186,7 @@ function AppearanceToggle({
         <span className="text-[13px] font-medium block mb-2 text-foreground-strong">
           Theme palette
         </span>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {UI_PALETTES.map((item) => {
             const active = palette === item.id;
             return (
