@@ -5,20 +5,21 @@ import { GitBranchIcon } from "@phosphor-icons/react";
 import type { CompilationStatus, LaTeXCompiler } from "@/lib/latex/types";
 
 interface StatusBarProps {
+  workspaceView: "write" | "agents" | "history";
   gitStatus: GitStatus | null;
   compileStatus: CompilationStatus;
   lastCompileDurationMs: number | null;
+  lastBuildAt?: number | null;
   compiler: LaTeXCompiler;
-  mainFile?: string | null;
-  onSelectMainFile?: () => void;
-  canSyncTex?: boolean;
-  onForwardSync?: () => void;
   errorCount: number;
   warningCount: number;
   selectedFile?: string;
   isTextFile?: boolean;
   cursorPosition: { line: number; column: number };
   wordCount: number;
+  activeThreadContext?: { providerLabel: string; percent: number } | null;
+  agentSummary?: { total: number; running: number; waiting: number; scheduled: number };
+  lastFetchLabel?: string | null;
 }
 
 const COMPILER_LABELS: Record<LaTeXCompiler, string> = {
@@ -30,21 +31,29 @@ const COMPILER_LABELS: Record<LaTeXCompiler, string> = {
   tectonic: "Tectonic",
 };
 
+function formatBuildTime(timestamp: number): string {
+  const d = new Date(timestamp);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 export function StatusBar({
+  workspaceView,
   gitStatus,
   compileStatus,
   lastCompileDurationMs,
+  lastBuildAt,
   compiler,
-  mainFile,
-  onSelectMainFile,
-  canSyncTex = false,
-  onForwardSync,
   errorCount,
   warningCount,
   selectedFile,
   isTextFile,
   cursorPosition,
   wordCount,
+  activeThreadContext,
+  agentSummary,
+  lastFetchLabel,
 }: StatusBarProps) {
   const branchLabel = gitStatus?.branch
     ? `${gitStatus.branch}${gitStatus.ahead > 0 ? ` ↑${gitStatus.ahead}` : ""}${
@@ -61,16 +70,15 @@ export function StatusBar({
           ? "bg-success"
           : "bg-muted-foreground";
 
+  const buildTimePart = lastBuildAt != null ? ` ${formatBuildTime(lastBuildAt)}` : "";
   const buildText =
     compileStatus === "compiling"
-      ? "Compiling"
-      : errorCount > 0
-        ? `${errorCount} ${errorCount === 1 ? "error" : "errors"} · ${COMPILER_LABELS[compiler]}`
-        : compileStatus === "error"
-          ? "Build failed"
-          : compileStatus === "success"
-            ? `Built${lastCompileDurationMs != null ? ` · ${lastCompileDurationMs} ms` : ""} · ${COMPILER_LABELS[compiler]}`
-            : COMPILER_LABELS[compiler];
+      ? "Compiling…"
+      : compileStatus === "error" || errorCount > 0
+        ? `Build failed · ${errorCount} ${errorCount === 1 ? "error" : "errors"}, ${warningCount} ${warningCount === 1 ? "warning" : "warnings"}`
+        : compileStatus === "success"
+          ? `Built${buildTimePart}${lastCompileDurationMs != null ? ` · ${lastCompileDurationMs} ms` : ""} · ${COMPILER_LABELS[compiler]}`
+          : COMPILER_LABELS[compiler];
 
   const isLatex = Boolean(selectedFile && /\.tex$/i.test(selectedFile));
 
@@ -83,49 +91,50 @@ export function StatusBar({
         </span>
       )}
 
-      <span className="inline-flex items-center gap-1.5">
-        <span className={`size-2 rounded-full shrink-0 ${statusDotClass}`} aria-hidden="true" />
-        <span>{buildText}</span>
-      </span>
+      {workspaceView === "write" && (
+        <>
+          <span className="inline-flex items-center gap-1.5">
+            <span className={`size-2 rounded-full shrink-0 ${statusDotClass}`} aria-hidden="true" />
+            <span>{buildText}</span>
+          </span>
 
-      {warningCount > 0 && (
+          {compileStatus === "success" && warningCount > 0 && (
+            <span className="tabular-nums">
+              {warningCount} {warningCount === 1 ? "warning" : "warnings"}
+            </span>
+          )}
+
+          <div className="ml-auto flex items-center gap-4">
+            {isTextFile && (
+              <span className="font-mono text-[11px] tabular-nums">
+                Ln {cursorPosition.line}, Col {cursorPosition.column}
+              </span>
+            )}
+            {activeThreadContext && (
+              <span className="tabular-nums">
+                {activeThreadContext.providerLabel} context {activeThreadContext.percent}%
+              </span>
+            )}
+            {isTextFile && <span>UTF-8</span>}
+            {isLatex && <span>LaTeX</span>}
+            {isLatex && <span className="tabular-nums">{wordCount.toLocaleString()} words</span>}
+          </div>
+        </>
+      )}
+
+      {workspaceView === "agents" && agentSummary && (
         <span className="tabular-nums">
-          {warningCount} {warningCount === 1 ? "warning" : "warnings"}
+          {agentSummary.total} {agentSummary.total === 1 ? "thread" : "threads"} ·{" "}
+          {agentSummary.running} running · {agentSummary.waiting} waiting
+          {agentSummary.scheduled > 0 ? ` · ${agentSummary.scheduled} scheduled` : ""}
         </span>
       )}
 
-      {onSelectMainFile && (
-        <button
-          type="button"
-          onClick={onSelectMainFile}
-          className="font-mono text-[11px] hover:text-foreground transition-colors truncate max-w-[180px]"
-          title="Select main .tex file"
-        >
-          main: {mainFile ?? "unset"}
-        </button>
+      {workspaceView === "history" && lastFetchLabel && (
+        <div className="ml-auto flex items-center gap-4">
+          <span>{lastFetchLabel}</span>
+        </div>
       )}
-
-      {canSyncTex && onForwardSync && (
-        <button
-          type="button"
-          onClick={onForwardSync}
-          className="text-accent hover:underline font-medium"
-          title="Jump from current line to PDF"
-        >
-          Sync → PDF
-        </button>
-      )}
-
-      <div className="ml-auto flex items-center gap-4">
-        {isTextFile && (
-          <span className="font-mono text-[11px] tabular-nums">
-            Ln {cursorPosition.line}, Col {cursorPosition.column}
-          </span>
-        )}
-        {isTextFile && <span>UTF-8</span>}
-        {isLatex && <span>LaTeX</span>}
-        {isLatex && <span className="tabular-nums">{wordCount.toLocaleString()} words</span>}
-      </div>
     </footer>
   );
 }

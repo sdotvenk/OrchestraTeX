@@ -127,6 +127,34 @@
   --shadow-3: 0 24px 64px rgb(19 23 29 / 0.18);
   --shadow: #13171d;
   --primary-offset: var(--lux-tangerine);
+  --frame-shadow: 0 1px 2px rgba(27, 31, 51, 0.06);
+  --popover-border: #1b1f33;
+  --popover-shadow: 3px 3px 0 rgba(27, 31, 51, 0.9);
+  --decision-bg: #fbefc9;
+  --decision-border: #1b1f33;
+  --decision-shadow: 3px 3px 0 #e0b847;
+  --decision-code-bg: #fff8e1;
+  --decision-code-border: #ebd38a;
+  --decision-muted: #5c4a1a;
+  --warn-badge-bg: #f2c14e;
+  --warn-badge-text: #1b1f33;
+  --warn-line: #e0b847;
+  --danger-line: #e3a398;
+  --ok-line: #a9cbae;
+  --diff-add-bg: #ddeddf;
+  --diff-add-text: #1f5233;
+  --diff-del-bg: #f8e4de;
+  --diff-del-text: #8a4a3a;
+  --composer-bg: #ffffff;
+  --composer-border: #1b1f33;
+  --composer-shadow: 0 2px 0 rgba(27, 31, 51, 0.9);
+  --tab-strip-bg: #f6f2ea;
+  --hatch-a: #e6dfd1;
+  --hatch-b: #f0eadf;
+  --voice-claude-line: #f1b898;
+  --voice-codex-line: #afc0ee;
+  --voice-antigravity-line: #9bd0d8;
+  --voice-custom-line: #cdaee6;
 }
 
 :root.dark,
@@ -176,6 +204,34 @@
   --shadow-3: 0 24px 64px rgb(0 0 0 / 0.6);
   --shadow: #010409;
   --primary-offset: #ff7a3d;
+  --frame-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 2px 6px rgba(0, 0, 0, 0.3);
+  --popover-border: #3a3f55;
+  --popover-shadow: 3px 3px 0 rgba(0, 0, 0, 0.75);
+  --decision-bg: #3a3016;
+  --decision-border: #e9b949;
+  --decision-shadow: 3px 3px 0 #000000;
+  --decision-code-bg: #2a2210;
+  --decision-code-border: #6e5a22;
+  --decision-muted: #d8c07a;
+  --warn-badge-bg: #e9b949;
+  --warn-badge-text: #14161f;
+  --warn-line: #8a7230;
+  --danger-line: #7a352c;
+  --ok-line: #2c5c3e;
+  --diff-add-bg: #172e21;
+  --diff-add-text: #7fd19e;
+  --diff-del-bg: #3b1f1c;
+  --diff-del-text: #f09a8b;
+  --composer-bg: #10121a;
+  --composer-border: #4a4f66;
+  --composer-shadow: none;
+  --tab-strip-bg: #171a25;
+  --hatch-a: #232738;
+  --hatch-b: #1b1e2a;
+  --voice-claude-line: #6d3a22;
+  --voice-codex-line: #3d4e80;
+  --voice-antigravity-line: #255d66;
+  --voice-custom-line: #5a3b73;
 }
 
 /* ============================================================================
@@ -233,8 +289,24 @@ body {
 .ox-frame {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
+  box-shadow: var(--frame-shadow);
   overflow: hidden;
+}
+
+.ox-sec {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ox-popover {
+  background: var(--panel);
+  border: 1.5px solid var(--popover-border);
+  border-radius: 10px;
+  box-shadow: var(--popover-shadow);
 }
 
 /* Faint dot-grid texture for the Home hero */

@@ -105,11 +105,7 @@ import {
   GearIcon,
   GitBranchIcon,
   MagnifyingGlassIcon,
-  PlayIcon,
-  RobotIcon,
   SidebarSimpleIcon,
-  SpinnerGapIcon,
-  StopIcon,
   TerminalIcon,
 } from "@phosphor-icons/react";
 
@@ -443,10 +439,18 @@ export default function EditorPage() {
     const counts: Record<string, ProjectThreadCounts> = {};
     for (const thread of orchestration.threads) {
       if (thread.archived) continue;
-      const project = counts[thread.projectPath] ?? { total: 0, running: 0, waiting: 0 };
+      const project = counts[thread.projectPath] ?? {
+        total: 0,
+        running: 0,
+        waiting: 0,
+        providerIds: [],
+      };
       project.total++;
       if (thread.status === "running") project.running++;
       if (thread.status === "waiting_input") project.waiting++;
+      if (!project.providerIds.includes(thread.providerId)) {
+        project.providerIds.push(thread.providerId);
+      }
       counts[thread.projectPath] = project;
     }
     return counts;
@@ -525,6 +529,7 @@ export default function EditorPage() {
   const waitingThreads = projectThreads.filter(
     (thread) => thread.status === "waiting_input",
   ).length;
+  const runningThreads = projectThreads.filter((thread) => thread.status === "running").length;
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [agentExpanded, setAgentExpanded] = useState(false);
@@ -3277,9 +3282,9 @@ export default function EditorPage() {
 
   return (
     <div className="h-dvh flex flex-col bg-bg text-foreground">
-      <header className="h-10 shrink-0 px-3 flex items-center justify-between gap-3 border-b border-border select-none">
+      <header className="h-10 shrink-0 px-3.5 flex items-center justify-between gap-3 border-b border-border bg-bg select-none">
         {/* Left: Brand + Project Switcher + Branch */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
           {!isHomeVisible && (
             <button
               type="button"
@@ -3294,34 +3299,45 @@ export default function EditorPage() {
             </button>
           )}
 
-          {daemon.projectPath && (
+          {showUsageDashboard ? (
             <>
               {!isHomeVisible && (
-                <span className="h-4 w-px bg-border-dark shrink-0" aria-hidden="true" />
+                <span className="h-[18px] w-px bg-border-dark shrink-0" aria-hidden="true" />
               )}
-              <ProjectSwitcher
-                projectPath={daemon.projectPath}
-                recentProjects={recentProjects.projects}
-                onSelectProject={(path) => {
-                  void handleOpenRecentProject(path);
-                }}
-                onOpenFolder={handleOpenFolder}
-              />
-              {gitStatus?.branch && (
-                <span
-                  className="hidden sm:inline-flex items-center gap-1 font-mono text-[11px] text-muted border border-border rounded-full px-2 py-0.5 shrink-0"
-                  title={`Branch: ${gitStatus.branch}`}
-                >
-                  <GitBranchIcon className="size-3" aria-hidden="true" />
-                  {gitStatus.branch}
-                  {gitStatus.ahead > 0 ? ` ↑${gitStatus.ahead}` : ""}
-                  {gitStatus.behind > 0 ? ` ↓${gitStatus.behind}` : ""}
-                </span>
-              )}
-              {isSaving && (
-                <span className="text-[11px] text-muted-foreground ml-1 shrink-0">Saving...</span>
-              )}
+              <span className="font-medium text-[13px] text-foreground truncate">
+                Usage &amp; limits
+              </span>
             </>
+          ) : (
+            daemon.projectPath && (
+              <>
+                {!isHomeVisible && (
+                  <span className="h-[18px] w-px bg-border-dark shrink-0" aria-hidden="true" />
+                )}
+                <ProjectSwitcher
+                  projectPath={daemon.projectPath}
+                  recentProjects={recentProjects.projects}
+                  onSelectProject={(path) => {
+                    void handleOpenRecentProject(path);
+                  }}
+                  onOpenFolder={handleOpenFolder}
+                />
+                {gitStatus?.branch && (
+                  <span
+                    className="hidden sm:inline-flex items-center gap-1 font-mono text-[11.5px] text-muted border border-border rounded-full px-2 py-0.5 shrink-0"
+                    title={`Branch: ${gitStatus.branch}`}
+                  >
+                    <GitBranchIcon className="size-3" aria-hidden="true" />
+                    {gitStatus.branch}
+                    {gitStatus.ahead > 0 ? ` ↑${gitStatus.ahead}` : ""}
+                    {gitStatus.behind > 0 ? ` ↓${gitStatus.behind}` : ""}
+                  </span>
+                )}
+                {isSaving && (
+                  <span className="text-[11px] text-muted-foreground ml-1 shrink-0">Saving...</span>
+                )}
+              </>
+            )
           )}
         </div>
 
@@ -3346,7 +3362,7 @@ export default function EditorPage() {
               activateWorkspaceTab(nextView);
               document.getElementById(`workspace-tab-${nextView}`)?.focus();
             }}
-            className="inline-flex items-center bg-sunken rounded-lg p-0.5 gap-0.5 shrink-0"
+            className="inline-flex items-center bg-sunken rounded-[9px] p-[3px] gap-0.5 shrink-0"
           >
             <button
               type="button"
@@ -3356,9 +3372,9 @@ export default function EditorPage() {
               tabIndex={workspaceView === "write" ? 0 : -1}
               aria-selected={isWorkspaceVisible && workspaceView === "write"}
               onClick={() => activateWorkspaceTab("write")}
-              className={`px-3 py-1 rounded-md text-[12.5px] transition-colors ${
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors ${
                 isWorkspaceVisible && workspaceView === "write"
-                  ? "bg-panel text-foreground-strong font-medium shadow-xs"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
                   : "text-muted hover:text-foreground"
               }`}
             >
@@ -3372,15 +3388,15 @@ export default function EditorPage() {
               tabIndex={workspaceView === "agents" ? 0 : -1}
               aria-selected={isWorkspaceVisible && workspaceView === "agents"}
               onClick={() => activateWorkspaceTab("agents")}
-              className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
                 isWorkspaceVisible && workspaceView === "agents"
-                  ? "bg-panel text-foreground-strong font-medium shadow-xs"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
                   : "text-muted hover:text-foreground"
               }`}
             >
               <span>Agents</span>
               {waitingThreads > 0 && (
-                <span className="text-[10.5px] font-semibold bg-warn-bg text-warn rounded-full px-1.5 leading-4 tabular-nums">
+                <span className="text-[10.5px] font-semibold bg-[var(--warn-badge-bg)] text-[var(--warn-badge-text)] rounded-full px-1.5 leading-4 tabular-nums">
                   {waitingThreads}
                 </span>
               )}
@@ -3393,18 +3409,13 @@ export default function EditorPage() {
               tabIndex={workspaceView === "history" ? 0 : -1}
               aria-selected={isWorkspaceVisible && workspaceView === "history"}
               onClick={() => activateWorkspaceTab("history")}
-              className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors ${
                 isWorkspaceVisible && workspaceView === "history"
-                  ? "bg-panel text-foreground-strong font-medium shadow-xs"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
                   : "text-muted hover:text-foreground"
               }`}
             >
-              <span>History</span>
-              {gitStatus && gitStatus.changes.length > 0 && (
-                <span className="text-[10.5px] font-mono text-muted tabular-nums">
-                  {gitStatus.changes.length}
-                </span>
-              )}
+              History
             </button>
           </div>
         ) : (
@@ -3412,169 +3423,182 @@ export default function EditorPage() {
         )}
 
         {/* Right: Live Voice/Status + Panel Toggles */}
-        <div className="flex items-center justify-end gap-1.5 flex-1 shrink-0">
-          <button
-            type="button"
-            className={`btn btn-sm ${showUsageDashboard ? "btn-secondary" : "btn-ghost"}`}
-            aria-pressed={showUsageDashboard}
-            onClick={() => setShowUsageDashboard((open) => !open)}
-          >
-            Usage
-          </button>
-          {daemon.projectPath && projectThreads.length > 0 && (
-            <div className="hidden lg:flex items-center gap-1.5 mr-1 text-[12px] text-muted">
-              {Array.from(
-                projectThreads
-                  .reduce(
-                    (map, thread) => {
-                      const existing = map.get(thread.providerId);
-                      const isActive = thread.status === "running";
-                      const isWaiting = thread.status === "waiting_input";
-                      if (!existing) {
-                        map.set(thread.providerId, {
-                          provider: thread.providerId,
-                          count: 1,
-                          active: isActive,
-                          waiting: isWaiting,
-                          threadId: thread.id,
-                        });
-                      } else {
-                        existing.count += 1;
-                        existing.active = existing.active || isActive;
-                        existing.waiting = existing.waiting || isWaiting;
-                        if (isWaiting) existing.threadId = thread.id;
-                      }
-                      return map;
-                    },
-                    new Map<
-                      (typeof agent.threads)[number]["providerId"],
-                      {
-                        provider: (typeof agent.threads)[number]["providerId"];
-                        count: number;
-                        active: boolean;
-                        waiting: boolean;
-                        threadId: string;
-                      }
-                    >(),
-                  )
-                  .values(),
-              ).map((entry) => {
-                const voice = VOICE_COLORS[entry.provider] ?? VOICE_COLORS["custom-acp"];
-                const statusLabel = entry.waiting ? "waiting" : entry.active ? "running" : "idle";
-                const name =
-                  agent.providers.find((provider) => provider.id === entry.provider)?.name ??
-                  {
-                    claude: "Claude Code",
-                    codex: "Codex",
-                    antigravity: "Antigravity",
-                    "custom-acp": "Custom ACP",
-                  }[entry.provider];
-                return (
-                  <button
-                    key={entry.provider}
-                    type="button"
-                    onClick={() => {
-                      void agent.loadThread(entry.threadId);
-                      activateWorkspaceTab("agents");
-                    }}
-                    title={`${name} (${entry.count} ${entry.count === 1 ? "thread" : "threads"}) · ${statusLabel}`}
-                    aria-label={`${name} ${statusLabel}`}
-                    style={{ backgroundColor: voice.tint, color: voice.text }}
-                    className="h-6 px-2 rounded-full inline-flex items-center gap-1.5 text-[11px] font-medium transition-opacity hover:opacity-85"
-                  >
-                    <ProviderIcon providerId={entry.provider} className="size-3 shrink-0" />
-                    <span>{name}</span>
-                    {entry.active && (
-                      <span
-                        className="size-1.5 shrink-0 animate-pulse rounded-full"
-                        style={{ backgroundColor: voice.ink }}
-                        aria-hidden="true"
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {daemon.projectPath && (
+        <div className="flex items-center justify-end gap-2 flex-1 shrink-0">
+          {isHomeVisible && !showUsageDashboard && (
             <button
               type="button"
-              onClick={() => setShowCommandPalette(true)}
-              className="size-7 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              title="Find files, sections, citations, or commands (Cmd+K)"
-              aria-label="Command Palette"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowUsageDashboard(true)}
             >
-              <MagnifyingGlassIcon className="size-3.5" aria-hidden="true" />
+              Usage
             </button>
           )}
 
-          {daemon.projectPath && workspaceView === "write" && (
-            <fieldset
-              aria-label="Workspace panels"
-              className="flex items-center rounded-lg border border-border bg-panel p-0.5 gap-px"
-            >
-              <button
-                type="button"
-                onClick={() => setShowSidebar((prev) => !prev)}
-                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
-                  showSidebar
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Sidebar (Cmd+\)"
-                aria-label="Toggle Sidebar"
-                aria-pressed={showSidebar}
-              >
-                <SidebarSimpleIcon className="size-4" />
-              </button>
+          {daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard &&
+            workspaceView === "write" && (
+              <>
+                {projectThreads.length > 0 && (
+                  <div className="hidden lg:flex items-center -space-x-1.5">
+                    {Array.from(
+                      projectThreads
+                        .reduce(
+                          (map, thread) => {
+                            const existing = map.get(thread.providerId);
+                            const isActive = thread.status === "running";
+                            const isWaiting = thread.status === "waiting_input";
+                            if (!existing) {
+                              map.set(thread.providerId, {
+                                provider: thread.providerId,
+                                count: 1,
+                                active: isActive,
+                                waiting: isWaiting,
+                                threadId: thread.id,
+                              });
+                            } else {
+                              existing.count += 1;
+                              existing.active = existing.active || isActive;
+                              existing.waiting = existing.waiting || isWaiting;
+                              if (isWaiting) existing.threadId = thread.id;
+                            }
+                            return map;
+                          },
+                          new Map<
+                            (typeof agent.threads)[number]["providerId"],
+                            {
+                              provider: (typeof agent.threads)[number]["providerId"];
+                              count: number;
+                              active: boolean;
+                              waiting: boolean;
+                              threadId: string;
+                            }
+                          >(),
+                        )
+                        .values(),
+                    ).map((entry) => {
+                      const voice = VOICE_COLORS[entry.provider] ?? VOICE_COLORS["custom-acp"];
+                      const statusLabel = entry.waiting
+                        ? "waiting"
+                        : entry.active
+                          ? "running"
+                          : "idle";
+                      const name =
+                        agent.providers.find((provider) => provider.id === entry.provider)?.name ??
+                        {
+                          claude: "Claude Code",
+                          codex: "Codex",
+                          antigravity: "Antigravity",
+                          "custom-acp": "Custom ACP",
+                        }[entry.provider];
+                      return (
+                        <button
+                          key={entry.provider}
+                          type="button"
+                          onClick={() => {
+                            void agent.loadThread(entry.threadId);
+                            activateWorkspaceTab("agents");
+                          }}
+                          title={`${name} (${entry.count} ${entry.count === 1 ? "thread" : "threads"}) · ${statusLabel}`}
+                          aria-label={`${name} ${statusLabel}`}
+                          style={{
+                            backgroundColor: voice.tint,
+                            color: voice.ink,
+                            borderColor: entry.active || entry.waiting ? voice.ink : "var(--bg)",
+                            borderStyle: entry.waiting ? "dashed" : "solid",
+                          }}
+                          className="size-[22px] rounded-full border-[1.5px] inline-flex items-center justify-center transition-transform hover:scale-105 hover:z-10"
+                        >
+                          <ProviderIcon providerId={entry.provider} className="size-3 shrink-0" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
-              <button
-                type="button"
-                onClick={() => setShowLivePreview((prev) => !prev)}
-                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
-                  showLivePreview
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Live PDF Preview (Cmd+P)"
-                aria-label="Toggle Live PDF Preview"
-                aria-pressed={showLivePreview}
-              >
-                <FilePdfIcon className="size-4" />
-              </button>
+                <span className="hidden xl:inline text-[12px] text-muted tabular-nums">
+                  {runningThreads === 0 && waitingThreads === 0
+                    ? "No agents running"
+                    : [
+                        runningThreads > 0 ? `${runningThreads} editing` : null,
+                        waitingThreads > 0 ? `${waitingThreads} waiting` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                </span>
 
-              <button
-                type="button"
-                onClick={toggleTerminal}
-                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
-                  showTerminal
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Terminal"
-                aria-label="Toggle Terminal"
-                aria-pressed={showTerminal}
-              >
-                <TerminalIcon className="size-4" />
-              </button>
+                <span className="h-[18px] w-px bg-border-dark shrink-0" aria-hidden="true" />
 
-              <button
-                type="button"
-                onClick={handleToggleRightPanel}
-                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
-                  showRightPanel
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Agent Panel (Cmd+L)"
-                aria-label="Toggle Agent Panel"
-                aria-pressed={showRightPanel}
-              >
-                <RobotIcon className="size-4" />
-              </button>
-            </fieldset>
-          )}
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowSidebar((prev) => !prev)}
+                    className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
+                      showSidebar
+                        ? "text-foreground bg-subtle/80"
+                        : "text-muted hover:text-foreground hover:bg-subtle"
+                    }`}
+                    title="Toggle Sidebar (Cmd+\)"
+                    aria-label="Toggle Sidebar"
+                    aria-pressed={showSidebar}
+                  >
+                    <SidebarSimpleIcon className="size-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBuildActivityCollapsed((prev) => !prev)}
+                    className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
+                      !buildActivityCollapsed
+                        ? "text-foreground bg-subtle/80"
+                        : "text-muted hover:text-foreground hover:bg-subtle"
+                    }`}
+                    title="Toggle Bottom Drawer"
+                    aria-label="Toggle Bottom Drawer"
+                    aria-pressed={!buildActivityCollapsed}
+                  >
+                    <TerminalIcon className="size-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowLivePreview((prev) => !prev)}
+                    className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
+                      showLivePreview
+                        ? "text-foreground bg-subtle/80"
+                        : "text-muted hover:text-foreground hover:bg-subtle"
+                    }`}
+                    title="Toggle Preview Pane (Cmd+P)"
+                    aria-label="Toggle Preview Pane"
+                    aria-pressed={showLivePreview}
+                  >
+                    <FilePdfIcon className="size-4" />
+                  </button>
+                </div>
+              </>
+            )}
+
+          {daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard &&
+            workspaceView === "agents" && (
+              <span className="hidden md:inline text-[12px] text-muted tabular-nums">
+                {runningThreads === 0 && waitingThreads === 0
+                  ? "No agents running"
+                  : `${runningThreads} running · ${waitingThreads} waiting`}
+              </span>
+            )}
+
+          {daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard &&
+            workspaceView === "history" && (
+              <span className="hidden md:inline text-[12px] text-muted tabular-nums">
+                {gitStatus && gitStatus.changes.length > 0
+                  ? `${gitStatus.changes.length} ${gitStatus.changes.length === 1 ? "file" : "files"} changed`
+                  : "Working tree clean"}
+              </span>
+            )}
 
           <ThemePicker open={showThemePicker} onOpenChange={setShowThemePicker} />
 
@@ -3584,44 +3608,44 @@ export default function EditorPage() {
               setSettingsInitialTab("editor");
               setShowLatexSettings(true);
             }}
-            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+            className="size-7 rounded-[7px] inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
             title="Settings"
             aria-label="Settings"
           >
             <GearIcon className="size-4" />
           </button>
 
-          {daemon.projectPath && workspaceView === "write" && !showLivePreview && (
-            <div className="pl-1">
-              {latexCompiler.isCompiling ? (
-                <button
-                  type="button"
-                  onClick={handleStopCompile}
-                  className="h-8 px-3 rounded-lg bg-error-bg text-error hover:brightness-95 text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-all"
-                  title="Stop compilation"
-                >
-                  <StopIcon className="size-3.5" weight="fill" />
-                  <span>Stop</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleCompileWithDetection();
-                  }}
-                  disabled={latexSettings.isDetecting}
-                  className="btn btn-primary btn-sm h-8 px-3 text-[12.5px]"
-                  title="Compile LaTeX (Cmd/Ctrl+Shift+B)"
-                >
-                  {latexSettings.isDetecting ? (
-                    <SpinnerGapIcon className="size-3.5 animate-spin" />
-                  ) : (
-                    <PlayIcon className="size-3.5" weight="fill" />
-                  )}
-                  <span>Compile</span>
-                </button>
-              )}
-            </div>
+          {daemon.projectPath && !isHomeVisible && !showUsageDashboard && (
+            <button
+              type="button"
+              onClick={() => {
+                if (!latexCompiler.pdfPath) {
+                  toast("Compile the document before exporting PDF", "info");
+                  return;
+                }
+                void (async () => {
+                  const { save } = await import("@tauri-apps/plugin-dialog");
+                  const dest = await save({
+                    title: "Export PDF",
+                    defaultPath: latexCompiler.pdfPath?.split("/").pop() ?? "document.pdf",
+                    filters: [{ name: "PDF", extensions: ["pdf"] }],
+                  });
+                  if (!dest || !latexCompiler.pdfPath) return;
+                  try {
+                    const bytes = await invoke<number[]>("read_file_bytes", {
+                      path: latexCompiler.pdfPath,
+                    });
+                    await invoke("write_file_bytes", { path: dest, bytes });
+                    toast("Exported PDF", "success");
+                  } catch {
+                    toast("Failed to export PDF", "error");
+                  }
+                })();
+              }}
+              className="btn btn-secondary btn-sm"
+            >
+              Export
+            </button>
           )}
         </div>
       </header>
@@ -4511,6 +4535,7 @@ export default function EditorPage() {
 
       {daemon.projectPath && !showUsageDashboard && !showHomeWorkspace && (
         <StatusBar
+          workspaceView={workspaceView}
           gitStatus={gitStatus}
           compileStatus={latexCompiler.compileStatus}
           lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
@@ -4519,29 +4544,18 @@ export default function EditorPage() {
               ? latexSettings.settings.compiler
               : (latexCompiler.lastResult?.compiler ?? latexSettings.settings.compiler)
           }
-          mainFile={latexSettings.settings.mainFile}
-          onSelectMainFile={() => {
-            if (!daemon.projectPath) return;
-            void latexSettings.detectMainFile(daemon.projectPath).then((res) => {
-              if (res && res.tex_files.length > 0) {
-                setMainFileDetectionResult(res);
-                setShowMainFileDialog(true);
-              }
-            });
-          }}
-          canSyncTex={Boolean(
-            selectedFile && /\.tex$/i.test(selectedFile) && latexCompiler.pdfPath,
-          )}
-          onForwardSync={() => {
-            setWorkspaceView("write");
-            void handleForwardSync();
-          }}
           errorCount={latexCompiler.diagnostics.filter((d) => d.severity === "error").length}
           warningCount={latexCompiler.diagnostics.filter((d) => d.severity !== "error").length}
           selectedFile={selectedFile}
           isTextFile={workspaceView === "write" && Boolean(selectedFile) && !binaryPreviewUrl}
           cursorPosition={cursorPosition}
           wordCount={wordCount.words}
+          agentSummary={{
+            total: projectThreads.length,
+            running: runningThreads,
+            waiting: waitingThreads,
+            scheduled: 0,
+          }}
         />
       )}
 
