@@ -17,9 +17,11 @@ import { EditorErrorBoundary } from "@/components/editor/editor-error-boundary";
 import { EditorSkeleton } from "@/components/editor/editor-skeleton";
 import { GitHubPublishDialog } from "@/components/editor/github-publish-dialog";
 import type { PdfHighlightTarget } from "@/components/editor/pdf-viewer";
+import { ProjectSwitcher } from "@/components/editor/project-switcher";
 import { FileSidebarPanel } from "@/components/editor/sidebar-file-panel";
 import { GitSidebarPanel } from "@/components/editor/sidebar-git-panel";
 import { SidebarOutlinePanel } from "@/components/editor/sidebar-outline-panel";
+import { StatusBar } from "@/components/editor/status-bar";
 import { TerminalPanel } from "@/components/editor/terminal-panel";
 import {
   LaTeXInstallPrompt,
@@ -41,6 +43,7 @@ import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
 import { useEditorSettings } from "@/lib/editor";
 import { UI_PALETTES } from "@/lib/editor/types";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import {
   type BibEntry,
   countLatexWords,
@@ -72,6 +75,7 @@ import {
   FilePdfIcon,
   FolderOpenIcon,
   GearIcon,
+  GitBranchIcon,
   MagnifyingGlassIcon,
   MoonIcon,
   PlayIcon,
@@ -85,6 +89,7 @@ import {
 } from "@phosphor-icons/react";
 
 type EditorViewMode = "file" | "git-diff";
+const WORKSPACE_VIEWS = ["write", "agents", "history"] as const;
 type GitDiffPreviewState = {
   path: string;
   staged: boolean;
@@ -312,6 +317,7 @@ export default function EditorPage() {
   const [fileContent, setFileContent] = useState<string>("");
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("file");
   const [gitDiffPreview, setGitDiffPreview] = useState<GitDiffPreviewState | null>(null);
+  const [historyDiffPreview, setHistoryDiffPreview] = useState<GitDiffPreviewState | null>(null);
   const [splitPane, setSplitPane] = useState<SplitPaneState | null>(null);
   const [splitDropHint, setSplitDropHint] = useState<SplitPaneSide | null>(null);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
@@ -336,7 +342,8 @@ export default function EditorPage() {
     return 280;
   });
   const [resizing, setResizing] = useState<"sidebar" | "right" | "preview" | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<"files" | "outline" | "git">("files");
+  const [workspaceView, setWorkspaceView] = useState<"write" | "agents" | "history">("write");
+  const [sidebarTab, setSidebarTab] = useState<"files" | "outline" | "threads" | "git">("files");
   const [highlightedFile, _setHighlightedFile] = useState<string | null>(null);
 
   const [commitMessage, setCommitMessage] = useState("");
@@ -383,6 +390,13 @@ export default function EditorPage() {
     settings: agentSettings.settings,
     onOpenUsage: handleOpenUsagePopover,
   });
+  const projectThreads = useMemo(
+    () => agent.threads.filter((thread) => !thread.archived),
+    [agent.threads],
+  );
+  const waitingThreads = projectThreads.filter(
+    (thread) => thread.status === "waiting_input",
+  ).length;
   const { resolvedTheme, setTheme } = useTheme();
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [agentExpanded, setAgentExpanded] = useState(false);
@@ -986,12 +1000,28 @@ export default function EditorPage() {
     }
   }, [handleLivePreviewSynctexClick, handleSplitSynctexClick, handleSynctexClick]);
 
-  const loadGitDiffPreview = useCallback(
-    async (path: string, staged: boolean) => {
-      const requestId = gitDiffRequestIdRef.current + 1;
-      gitDiffRequestIdRef.current = requestId;
+  const historyDiffRequestIdRef = useRef(0);
 
-      setGitDiffPreview({
+  useEffect(() => {
+    void daemon.projectPath;
+    gitDiffRequestIdRef.current += 1;
+    historyDiffRequestIdRef.current += 1;
+    setGitDiffPreview(null);
+    setHistoryDiffPreview(null);
+    setEditorViewMode("file");
+  }, [daemon.projectPath]);
+
+  const loadDiffPreview = useCallback(
+    async (
+      path: string,
+      staged: boolean,
+      requestIdRef: React.MutableRefObject<number>,
+      setPreview: React.Dispatch<React.SetStateAction<GitDiffPreviewState | null>>,
+    ) => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+
+      setPreview({
         path,
         staged,
         content: "",
@@ -1001,8 +1031,8 @@ export default function EditorPage() {
 
       try {
         const content = await daemon.gitDiff(path, staged);
-        if (gitDiffRequestIdRef.current !== requestId) return;
-        setGitDiffPreview({
+        if (requestIdRef.current !== requestId) return;
+        setPreview({
           path,
           staged,
           content,
@@ -1010,8 +1040,8 @@ export default function EditorPage() {
           error: null,
         });
       } catch (error) {
-        if (gitDiffRequestIdRef.current !== requestId) return;
-        setGitDiffPreview({
+        if (requestIdRef.current !== requestId) return;
+        setPreview({
           path,
           staged,
           content: "",
@@ -1021,6 +1051,19 @@ export default function EditorPage() {
       }
     },
     [daemon],
+  );
+
+  const loadGitDiffPreview = useCallback(
+    (path: string, staged: boolean) =>
+      loadDiffPreview(path, staged, gitDiffRequestIdRef, setGitDiffPreview),
+    [loadDiffPreview],
+  );
+
+  const handlePreviewHistoryDiff = useCallback(
+    async (path: string, staged: boolean) => {
+      await loadDiffPreview(path, staged, historyDiffRequestIdRef, setHistoryDiffPreview);
+    },
+    [loadDiffPreview],
   );
 
   const handlePreviewGitDiff = useCallback(
@@ -1809,12 +1852,17 @@ export default function EditorPage() {
       { id: "files", label: "Files" },
       { id: "outline", label: "Outline" },
       {
+        id: "threads",
+        label: "Threads",
+        badge: projectThreads.length || undefined,
+      },
+      {
         id: "git",
         label: "Git",
         badge: gitStatus && gitStatus.changes.length > 0 ? gitStatus.changes.length : undefined,
       },
     ],
-    [gitStatus],
+    [gitStatus, projectThreads.length],
   );
 
   const handleContentChange = useCallback(
@@ -2313,6 +2361,64 @@ export default function EditorPage() {
     return parseUnifiedDiffContent(gitDiffContent);
   }, [gitDiffContent]);
 
+  const historyDiffContent = historyDiffPreview?.content;
+  const parsedHistoryDiff = useMemo(() => {
+    if (!historyDiffContent) return null;
+    return parseUnifiedDiffContent(historyDiffContent);
+  }, [historyDiffContent]);
+
+  const renderGitDiffContent = (
+    preview: GitDiffPreviewState,
+    parsed: ReturnType<typeof parseUnifiedDiffContent> | null,
+  ) => {
+    if (preview.isLoading) {
+      return <EditorSkeleton className="h-full" />;
+    }
+    if (preview.error) {
+      return (
+        <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
+          Failed to load diff: {preview.error}
+        </div>
+      );
+    }
+    if (parsed?.isBinary) {
+      return (
+        <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
+          Binary file diff is not previewable in editor.
+        </div>
+      );
+    }
+    if (!preview.content.trim()) {
+      return (
+        <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
+          No textual diff available for this file.
+        </div>
+      );
+    }
+    if (parsed?.hasRenderableHunks) {
+      return (
+        <GitMonacoDiffEditor
+          original={parsed.original}
+          modified={parsed.modified}
+          filePath={preview.path}
+          editorSettings={editorSettings.settings}
+          className="h-full"
+        />
+      );
+    }
+    return (
+      <MonacoEditor
+        content={preview.content}
+        readOnly
+        onContentChange={() => {}}
+        language="diff"
+        editorSettings={editorSettings.settings}
+        editorTheme={editorSettings.editorTheme}
+        className="h-full"
+      />
+    );
+  };
+
   const primaryEditorPaneContent = (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       {selectedFile && (
@@ -2370,39 +2476,7 @@ export default function EditorPage() {
             </div>
 
             <div className="flex-1 min-h-0">
-              {gitDiffPreview.isLoading ? (
-                <EditorSkeleton className="h-full" />
-              ) : gitDiffPreview.error ? (
-                <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
-                  Failed to load diff: {gitDiffPreview.error}
-                </div>
-              ) : parsedGitDiff?.isBinary ? (
-                <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
-                  Binary file diff is not previewable in editor.
-                </div>
-              ) : !gitDiffPreview.content.trim() ? (
-                <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
-                  No textual diff available for this file.
-                </div>
-              ) : parsedGitDiff?.hasRenderableHunks ? (
-                <GitMonacoDiffEditor
-                  original={parsedGitDiff.original}
-                  modified={parsedGitDiff.modified}
-                  filePath={gitDiffPreview.path}
-                  editorSettings={editorSettings.settings}
-                  className="h-full"
-                />
-              ) : (
-                <MonacoEditor
-                  content={gitDiffPreview.content}
-                  readOnly
-                  onContentChange={() => {}}
-                  language="diff"
-                  editorSettings={editorSettings.settings}
-                  editorTheme={editorSettings.editorTheme}
-                  className="h-full"
-                />
-              )}
+              {renderGitDiffContent(gitDiffPreview, parsedGitDiff)}
             </div>
           </div>
         ) : binaryPreviewUrl ? (
@@ -2518,9 +2592,9 @@ export default function EditorPage() {
 
   return (
     <div className="h-dvh flex flex-col bg-bg text-foreground">
-      {/* Borderless Top Bar on Warm Paper */}
-      <header className="h-11 shrink-0 px-3 flex items-center justify-between gap-3 select-none">
-        {/* Left: Brand + Breadcrumb */}
+      {/* Score Top Bar on Warm Paper */}
+      <header className="h-10 shrink-0 px-3 flex items-center justify-between gap-3 border-b border-border select-none">
+        {/* Left: Brand + Project Switcher + Branch */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <button
             type="button"
@@ -2533,65 +2607,217 @@ export default function EditorPage() {
             title="OrchestraTeX on GitHub"
             aria-label="Open OrchestraTeX repository"
           >
-            <span className="size-6 rounded-md bg-accent text-white font-display italic font-bold text-[13px] inline-flex items-center justify-center shrink-0">
+            <span className="size-6 rounded-md bg-primary text-primary-text font-display italic text-[17px] inline-flex items-center justify-center shrink-0">
               O
             </span>
-            <span className="text-[13.5px] font-semibold tracking-tight text-foreground-strong">
+            <span className="font-display text-[19px] tracking-tight text-foreground-strong">
               OrchestraTeX
             </span>
           </button>
 
           {daemon.projectPath && (
-            <div className="flex items-center gap-1.5 min-w-0 text-[12.5px] text-muted">
-              <span className="text-border-dark select-none">/</span>
-              <button
-                type="button"
-                onClick={handleOpenFolder}
-                className="px-1.5 py-0.5 rounded-md font-medium text-foreground-strong hover:bg-subtle transition-colors truncate max-w-[180px]"
-                title={`${daemon.projectPath} — Click to switch folder`}
-              >
-                {pathSync.basename(daemon.projectPath)}
-              </button>
-              {selectedFile && (
-                <>
-                  <span className="text-border-dark select-none">›</span>
-                  <span className="font-mono text-[12px] text-muted truncate max-w-[180px]">
-                    {pathSync.basename(selectedFile)}
-                  </span>
-                </>
+            <>
+              <span className="h-4 w-px bg-border-dark shrink-0" aria-hidden="true" />
+              <ProjectSwitcher
+                projectPath={daemon.projectPath}
+                recentProjects={recentProjects.projects}
+                onSelectProject={(path) => {
+                  void handleOpenRecentProject(path);
+                }}
+                onOpenFolder={handleOpenFolder}
+              />
+              {gitStatus?.branch && (
+                <span
+                  className="hidden sm:inline-flex items-center gap-1 font-mono text-[11px] text-muted border border-border rounded-full px-2 py-0.5 shrink-0"
+                  title={`Branch: ${gitStatus.branch}`}
+                >
+                  <GitBranchIcon className="size-3" aria-hidden="true" />
+                  {gitStatus.branch}
+                  {gitStatus.ahead > 0 ? ` ↑${gitStatus.ahead}` : ""}
+                  {gitStatus.behind > 0 ? ` ↓${gitStatus.behind}` : ""}
+                </span>
               )}
-              {isSaving ? (
+              {isSaving && (
                 <span className="text-[11px] text-muted-foreground ml-1 shrink-0">Saving...</span>
-              ) : (
-                selectedFile && (
-                  <span className="text-[11px] text-muted-foreground ml-1 shrink-0 hidden lg:inline">
-                    Saved
-                  </span>
-                )
               )}
-            </div>
+            </>
           )}
         </div>
 
-        {/* Center: Unified Command Palette Pill (⌘K) */}
-        {daemon.projectPath && (
-          <button
-            type="button"
-            onClick={() => setShowCommandPalette(true)}
-            className="inline-flex items-center gap-2 h-8 md:w-[clamp(8rem,18vw,20rem)] px-3 rounded-full bg-subtle hover:bg-sunken text-muted text-[12.5px] transition-colors shrink-0"
-            title="Find files, sections, citations, or commands (Cmd+K)"
+        {/* Center: Write / Agents / History Navigation */}
+        {daemon.projectPath ? (
+          <div
+            aria-label="Workspace"
+            role="tablist"
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+              const index = WORKSPACE_VIEWS.indexOf(workspaceView);
+              const nextIndex =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? WORKSPACE_VIEWS.length - 1
+                    : (index + (event.key === "ArrowLeft" ? -1 : 1) + WORKSPACE_VIEWS.length) %
+                      WORKSPACE_VIEWS.length;
+              const nextView = WORKSPACE_VIEWS[nextIndex];
+              if (!nextView) return;
+              event.preventDefault();
+              setWorkspaceView(nextView);
+              document.getElementById(`workspace-tab-${nextView}`)?.focus();
+            }}
+            className="inline-flex items-center bg-sunken rounded-lg p-0.5 gap-0.5 shrink-0"
           >
-            <MagnifyingGlassIcon className="size-3.5 text-muted-foreground shrink-0" />
-            <span className="hidden md:block truncate flex-1 text-left">
-              Find files, \labels, @cites...
-            </span>
-            <kbd className="hidden lg:block bg-panel">⌘K</kbd>
-          </button>
+            <button
+              type="button"
+              role="tab"
+              id="workspace-tab-write"
+              aria-controls="workspace-panel-write"
+              tabIndex={workspaceView === "write" ? 0 : -1}
+              aria-selected={workspaceView === "write"}
+              onClick={() => setWorkspaceView("write")}
+              className={`px-3 py-1 rounded-md text-[12.5px] transition-colors ${
+                workspaceView === "write"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              Write
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="workspace-tab-agents"
+              aria-controls={workspaceView === "agents" ? "workspace-panel-agents" : undefined}
+              tabIndex={workspaceView === "agents" ? 0 : -1}
+              aria-selected={workspaceView === "agents"}
+              onClick={() => setWorkspaceView("agents")}
+              className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
+                workspaceView === "agents"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              <span>Agents</span>
+              {waitingThreads > 0 && (
+                <span className="text-[10.5px] font-semibold bg-warn-bg text-warn rounded-full px-1.5 leading-4 tabular-nums">
+                  {waitingThreads}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="workspace-tab-history"
+              aria-controls={workspaceView === "history" ? "workspace-panel-history" : undefined}
+              tabIndex={workspaceView === "history" ? 0 : -1}
+              aria-selected={workspaceView === "history"}
+              onClick={() => setWorkspaceView("history")}
+              className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
+                workspaceView === "history"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              <span>History</span>
+              {gitStatus && gitStatus.changes.length > 0 && (
+                <span className="text-[10.5px] font-mono text-muted tabular-nums">
+                  {gitStatus.changes.length}
+                </span>
+              )}
+            </button>
+          </div>
+        ) : (
+          <div className="flex-1" />
         )}
 
-        {/* Right: Quiet Workspace Controls + Single Primary Compile Action */}
-        <div className="flex items-center justify-end gap-1 flex-1 shrink-0">
+        {/* Right: Live Voice/Status + Panel Toggles */}
+        <div className="flex items-center justify-end gap-1.5 flex-1 shrink-0">
+          {daemon.projectPath && projectThreads.length > 0 && (
+            <div className="hidden lg:flex items-center gap-1.5 mr-1 text-[12px] text-muted">
+              {Array.from(
+                projectThreads
+                  .reduce(
+                    (map, thread) => {
+                      const existing = map.get(thread.providerId);
+                      const isActive = thread.status === "running";
+                      const isWaiting = thread.status === "waiting_input";
+                      if (!existing) {
+                        map.set(thread.providerId, {
+                          provider: thread.providerId,
+                          count: 1,
+                          active: isActive,
+                          waiting: isWaiting,
+                          threadId: thread.id,
+                        });
+                      } else {
+                        existing.count += 1;
+                        existing.active = existing.active || isActive;
+                        existing.waiting = existing.waiting || isWaiting;
+                        if (isWaiting) existing.threadId = thread.id;
+                      }
+                      return map;
+                    },
+                    new Map<
+                      (typeof agent.threads)[number]["providerId"],
+                      {
+                        provider: (typeof agent.threads)[number]["providerId"];
+                        count: number;
+                        active: boolean;
+                        waiting: boolean;
+                        threadId: string;
+                      }
+                    >(),
+                  )
+                  .values(),
+              ).map((entry) => {
+                const voice = VOICE_COLORS[entry.provider] ?? VOICE_COLORS["custom-acp"];
+                const statusLabel = entry.waiting ? "waiting" : entry.active ? "running" : "idle";
+                const name =
+                  agent.providers.find((provider) => provider.id === entry.provider)?.name ??
+                  {
+                    claude: "Claude Code",
+                    codex: "Codex",
+                    antigravity: "Antigravity",
+                    "custom-acp": "Custom ACP",
+                  }[entry.provider];
+                return (
+                  <button
+                    key={entry.provider}
+                    type="button"
+                    onClick={() => {
+                      void agent.loadThread(entry.threadId);
+                      setWorkspaceView("agents");
+                    }}
+                    title={`${name} (${entry.count} ${entry.count === 1 ? "thread" : "threads"}) · ${statusLabel}`}
+                    aria-label={`${name} ${statusLabel}`}
+                    style={{ backgroundColor: voice.tint, color: voice.text }}
+                    className="h-6 px-2 rounded-full inline-flex items-center gap-1.5 text-[11px] font-medium transition-opacity hover:opacity-85"
+                  >
+                    <span
+                      className={`size-1.5 rounded-full shrink-0 ${entry.active ? "animate-pulse" : ""}`}
+                      style={{ backgroundColor: voice.ink }}
+                      aria-hidden="true"
+                    />
+                    <span>{name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {daemon.projectPath && (
+            <button
+              type="button"
+              onClick={() => setShowCommandPalette(true)}
+              className="size-7 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+              title="Find files, sections, citations, or commands (Cmd+K)"
+              aria-label="Command Palette"
+            >
+              <MagnifyingGlassIcon className="size-3.5" aria-hidden="true" />
+            </button>
+          )}
+
+          {daemon.projectPath && workspaceView === "write" && (
             <fieldset
               aria-label="Workspace panels"
               className="flex items-center rounded-lg border border-border bg-panel p-0.5 gap-px"
@@ -2695,7 +2921,7 @@ export default function EditorPage() {
             <GearIcon className="size-4" />
           </button>
 
-          {daemon.projectPath && (
+          {daemon.projectPath && workspaceView === "write" && !showLivePreview && (
             <div className="pl-1">
               {latexCompiler.isCompiling ? (
                 <button
@@ -2732,441 +2958,485 @@ export default function EditorPage() {
 
       {/* Main Workspace Area: Rail on Warm Paper + White Inset Frames */}
       <main className="flex-1 min-h-0 flex relative overflow-hidden px-2 pb-2 gap-2">
-        {/* Overleaf-style Project Sidebar (or Home Rail when no project is open) */}
-        {!daemon.projectPath ? (
-          <aside className="hidden md:flex w-[224px] flex-col shrink-0 justify-between px-1 pb-1">
-            <div className="space-y-4 pt-1 min-h-0 overflow-y-auto mb-3">
-              <div className="space-y-1">
-                <button
-                  type="button"
-                  onClick={handleOpenFolder}
-                  className="w-full h-9 px-3 rounded-lg bg-accent-soft text-accent font-medium text-[13px] flex items-center gap-2.5 text-left transition-colors"
-                >
-                  <FolderOpenIcon className="size-4 shrink-0" />
-                  <span>Open folder</span>
-                </button>
+        <div
+          id="workspace-panel-write"
+          {...(daemon.projectPath && {
+            role: "tabpanel",
+            "aria-labelledby": "workspace-tab-write",
+          })}
+          className={
+            workspaceView === "write"
+              ? "flex-1 min-w-0 min-h-0 flex relative overflow-hidden gap-2"
+              : "hidden"
+          }
+        >
+          {/* Overleaf-style Project Sidebar (or Home Rail when no project is open) */}
+          {!daemon.projectPath ? (
+            <aside className="hidden md:flex w-[224px] flex-col shrink-0 justify-between px-1 pb-1">
+              <div className="space-y-4 pt-1 min-h-0 overflow-y-auto mb-3">
+                <div className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={handleOpenFolder}
+                    className="w-full h-9 px-3 rounded-lg bg-accent-soft text-accent font-medium text-[13px] flex items-center gap-2.5 text-left transition-colors"
+                  >
+                    <FolderOpenIcon className="size-4 shrink-0" />
+                    <span>Open folder</span>
+                  </button>
+                </div>
+
+                <RecentProjects
+                  projects={recentProjects.projects}
+                  onSelect={handleOpenRecentProject}
+                  onRemove={recentProjects.removeProject}
+                  onClearAll={recentProjects.clearAll}
+                />
               </div>
 
-              <RecentProjects
-                projects={recentProjects.projects}
-                onSelect={handleOpenRecentProject}
-                onRemove={recentProjects.removeProject}
-                onClearAll={recentProjects.clearAll}
+              <AgentStatusCard
+                providers={agent.providers}
+                loading={agent.loadingProviders}
+                onRefreshProviders={agent.refreshProviders}
+                onRefreshRateLimits={agent.refreshRateLimits}
+                onOpenSettings={handleOpenAgentSettings}
               />
-            </div>
-
-            <AgentStatusCard
-              providers={agent.providers}
-              loading={agent.loadingProviders}
-              onRefreshProviders={agent.refreshProviders}
-              onRefreshRateLimits={agent.refreshRateLimits}
-              onOpenSettings={handleOpenAgentSettings}
-            />
-          </aside>
-        ) : (
-          <AnimatePresence mode="wait">
-            {showSidebar && (
-              <motion.div
-                key="sidebar-container"
-                initial={prefersReducedMotion ? { opacity: 1 } : { x: -24, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={prefersReducedMotion ? { opacity: 0 } : { x: -24, opacity: 0 }}
-                transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
-                className="flex flex-shrink-0"
-              >
-                <aside
-                  style={{
-                    width: resizing === "sidebar" ? "var(--sidebar-width)" : sidebarWidth,
-                    willChange: resizing === "sidebar" ? "width" : undefined,
-                  }}
-                  className="flex flex-col flex-shrink-0 overflow-hidden bg-bg pr-1"
+            </aside>
+          ) : (
+            <AnimatePresence mode="wait">
+              {showSidebar && (
+                <motion.div
+                  key="sidebar-container"
+                  initial={prefersReducedMotion ? { opacity: 1 } : { x: -24, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={prefersReducedMotion ? { opacity: 0 } : { x: -24, opacity: 0 }}
+                  transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
+                  className="flex flex-shrink-0"
                 >
-                  <TabBar
-                    tabs={sidebarTabs}
-                    activeTab={sidebarTab}
-                    onTabSelect={(id) => setSidebarTab(id as "files" | "outline" | "git")}
-                    variant="sidebar"
-                  />
+                  <aside
+                    style={{
+                      width: resizing === "sidebar" ? "var(--sidebar-width)" : sidebarWidth,
+                      willChange: resizing === "sidebar" ? "width" : undefined,
+                    }}
+                    className="flex flex-col flex-shrink-0 overflow-hidden bg-bg pr-1"
+                  >
+                    <TabBar
+                      tabs={sidebarTabs}
+                      activeTab={sidebarTab}
+                      onTabSelect={(id) =>
+                        setSidebarTab(id as "files" | "outline" | "threads" | "git")
+                      }
+                      variant="sidebar"
+                    />
 
-                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {sidebarTab === "files" && (
-                      <FileSidebarPanel
-                        projectPath={daemon.projectPath}
-                        files={daemon.files}
-                        selectedFile={selectedFile}
-                        highlightedFile={highlightedFile}
-                        onFileSelect={handleFileSelect}
-                        onCreateFile={() => setCreateDialog({ type: "file" })}
-                        onCreateDirectory={() => setCreateDialog({ type: "directory" })}
-                        onRefreshFiles={daemon.refreshFiles}
-                        fileOperations={{
-                          createFile: daemon.createFile,
-                          createDirectory: daemon.createDirectory,
-                          renamePath: daemon.renamePath,
-                          deletePath: daemon.deletePath,
-                        }}
-                      />
-                    )}
-
-                    {sidebarTab === "outline" && (
-                      <SidebarOutlinePanel
-                        activeFile={selectedFile ?? null}
-                        content={outlineContent}
-                        onJumpToLine={handleOutlineJumpToLine}
-                        onOpenInputFile={handleOutlineOpenInputFile}
-                      />
-                    )}
-
-                    {sidebarTab === "git" && (
-                      <div className="flex-1 flex flex-col overflow-hidden">
-                        <GitSidebarPanel
+                    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                      {sidebarTab === "files" && (
+                        <FileSidebarPanel
                           projectPath={daemon.projectPath}
-                          gitStatus={gitStatus}
-                          gitGraph={daemon.gitGraph}
-                          gitLogEntries={daemon.gitLogEntries}
-                          stagedChanges={stagedChanges}
-                          unstagedChanges={unstagedChanges}
-                          showRemoteInput={showRemoteInput}
-                          remoteUrl={remoteUrl}
-                          onRemoteUrlChange={(value) => setRemoteUrl(value)}
-                          onShowRemoteInput={() => setShowRemoteInput(true)}
-                          onHideRemoteInput={() => setShowRemoteInput(false)}
-                          onSubmitRemote={handleRemoteSubmit}
-                          onInitGit={daemon.gitInit}
-                          isInitializingGit={daemon.isInitializingGit}
-                          onRefreshStatus={handleRefreshGitStatus}
-                          onStageAll={handleStageAll}
-                          onDiscardAll={handleDiscardAll}
-                          onDiscardFile={handleDiscardFile}
-                          onStageFile={handleStageFile}
-                          onUnstageFile={handleUnstageFile}
-                          onUnstageAll={handleUnstageAll}
-                          showCommitInput={showCommitInput}
-                          commitMessage={commitMessage}
-                          onCommitMessageChange={(value) => setCommitMessage(value)}
-                          onShowCommitInput={() => setShowCommitInput(true)}
-                          onHideCommitInput={() => setShowCommitInput(false)}
-                          onCommit={handleCommit}
-                          onPush={handleGitPush}
-                          onPull={handleGitPull}
-                          onPreviewDiff={handlePreviewGitDiff}
-                          onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
-                          onOpenFile={(path) => {
-                            void handleFileSelect(path);
+                          files={daemon.files}
+                          selectedFile={selectedFile}
+                          highlightedFile={highlightedFile}
+                          onFileSelect={handleFileSelect}
+                          onCreateFile={() => setCreateDialog({ type: "file" })}
+                          onCreateDirectory={() => setCreateDialog({ type: "directory" })}
+                          onRefreshFiles={daemon.refreshFiles}
+                          fileOperations={{
+                            createFile: daemon.createFile,
+                            createDirectory: daemon.createDirectory,
+                            renamePath: daemon.renamePath,
+                            deletePath: daemon.deletePath,
                           }}
-                          onPublishToGitHub={handlePublishToGitHub}
-                          isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
-                          isPushing={daemon.isPushing}
-                          isPulling={daemon.isPulling}
-                          isAuthenticatingGh={daemon.isAuthenticatingGh}
+                        />
+                      )}
+
+                      {sidebarTab === "outline" && (
+                        <SidebarOutlinePanel
+                          activeFile={selectedFile ?? null}
+                          content={outlineContent}
+                          onJumpToLine={handleOutlineJumpToLine}
+                          onOpenInputFile={handleOutlineOpenInputFile}
+                        />
+                      )}
+
+                      {sidebarTab === "threads" && (
+                        <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-2 gap-2">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                              Threads
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                agent.createThread();
+                                setShowRightPanel(true);
+                              }}
+                              className="text-[12px] text-foreground hover:bg-subtle px-2 py-0.5 rounded-md transition-colors"
+                            >
+                              + New
+                            </button>
+                          </div>
+                          <div className="flex-1 overflow-y-auto space-y-1">
+                            {projectThreads.length === 0 ? (
+                              <div className="text-[12px] text-muted px-2 py-4 text-center">
+                                No threads yet
+                              </div>
+                            ) : (
+                              projectThreads.map((thread) => {
+                                const isActive = thread.id === agent.activeThread?.summary.id;
+                                return (
+                                  <button
+                                    key={thread.id}
+                                    type="button"
+                                    onClick={() => {
+                                      void agent.loadThread(thread.id);
+                                      setShowRightPanel(true);
+                                    }}
+                                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors flex flex-col gap-0.5 ${
+                                      isActive
+                                        ? "bg-panel border border-border text-foreground-strong shadow-xs"
+                                        : "hover:bg-subtle text-foreground"
+                                    }`}
+                                  >
+                                    <span className="text-[12.5px] font-medium truncate">
+                                      {thread.title || "Untitled thread"}
+                                    </span>
+                                    <span className="text-[11px] text-muted truncate">
+                                      {thread.providerId} · {thread.messageCount} msgs
+                                    </span>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {sidebarTab === "git" && (
+                        <div className="flex-1 flex flex-col overflow-hidden">
+                          <GitSidebarPanel
+                            projectPath={daemon.projectPath}
+                            gitStatus={gitStatus}
+                            gitGraph={daemon.gitGraph}
+                            gitLogEntries={daemon.gitLogEntries}
+                            stagedChanges={stagedChanges}
+                            unstagedChanges={unstagedChanges}
+                            showRemoteInput={showRemoteInput}
+                            remoteUrl={remoteUrl}
+                            onRemoteUrlChange={(value) => setRemoteUrl(value)}
+                            onShowRemoteInput={() => setShowRemoteInput(true)}
+                            onHideRemoteInput={() => setShowRemoteInput(false)}
+                            onSubmitRemote={handleRemoteSubmit}
+                            onInitGit={daemon.gitInit}
+                            isInitializingGit={daemon.isInitializingGit}
+                            onRefreshStatus={handleRefreshGitStatus}
+                            onStageAll={handleStageAll}
+                            onDiscardAll={handleDiscardAll}
+                            onDiscardFile={handleDiscardFile}
+                            onStageFile={handleStageFile}
+                            onUnstageFile={handleUnstageFile}
+                            onUnstageAll={handleUnstageAll}
+                            showCommitInput={showCommitInput}
+                            commitMessage={commitMessage}
+                            onCommitMessageChange={(value) => setCommitMessage(value)}
+                            onShowCommitInput={() => setShowCommitInput(true)}
+                            onHideCommitInput={() => setShowCommitInput(false)}
+                            onCommit={handleCommit}
+                            onPush={handleGitPush}
+                            onPull={handleGitPull}
+                            onPreviewDiff={handlePreviewGitDiff}
+                            onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
+                            onOpenFile={(path) => {
+                              void handleFileSelect(path);
+                            }}
+                            onPublishToGitHub={handlePublishToGitHub}
+                            isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
+                            isPushing={daemon.isPushing}
+                            isPulling={daemon.isPulling}
+                            isAuthenticatingGh={daemon.isAuthenticatingGh}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Silkscreen-style Agent Tools status card pinned to rail footer */}
+                    <div className="pt-2 px-1 shrink-0">
+                      <AgentStatusCard
+                        providers={agent.providers}
+                        loading={agent.loadingProviders}
+                        onRefreshProviders={agent.refreshProviders}
+                        onRefreshRateLimits={agent.refreshRateLimits}
+                        onOpenSettings={handleOpenAgentSettings}
+                      />
+                    </div>
+                  </aside>
+
+                  <div className="relative group w-1.5 flex-shrink-0 -mx-0.5">
+                    <motion.div
+                      drag="x"
+                      dragConstraints={{ left: 0, right: 0 }}
+                      dragElastic={0}
+                      dragMomentum={false}
+                      onDragStart={() => startResize("sidebar")}
+                      onDrag={(_event, info) => handleResizeDrag("sidebar", info)}
+                      onDragEnd={endResize}
+                      className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                      style={{ x: 0 }}
+                    />
+                    <div
+                      className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
+                        resizing === "sidebar" ? "bg-accent" : "group-hover:bg-border-dark"
+                      }`}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
+
+          {/* Primary Inset Frame: Home OR Unified Editor + Live PDF */}
+          <div className="flex-1 min-w-0 w-0 flex flex-col ox-frame">
+            <div className="flex-1 min-h-0 flex overflow-hidden">
+              <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                {daemon.projectPath && editorPanelItems.length > 0 ? (
+                  <div ref={editorWorkspaceRef} className="relative flex-1 min-h-0">
+                    {splitDropHint && (
+                      <div className="pointer-events-none absolute inset-0 z-10">
+                        <div
+                          className={`absolute inset-y-0 w-1/2 transition-opacity duration-100 ${
+                            splitDropHint === "left"
+                              ? "left-0 border-r border-accent/40 bg-accent-soft/40"
+                              : "right-0 border-l border-accent/40 bg-accent-soft/40"
+                          }`}
                         />
                       </div>
                     )}
-                  </div>
 
-                  {/* Silkscreen-style Agent Tools status card pinned to rail footer */}
-                  <div className="pt-2 px-1 shrink-0">
-                    <AgentStatusCard
-                      providers={agent.providers}
-                      loading={agent.loadingProviders}
-                      onRefreshProviders={agent.refreshProviders}
-                      onRefreshRateLimits={agent.refreshRateLimits}
-                      onOpenSettings={handleOpenAgentSettings}
+                    <DockviewPanelLayout
+                      panels={editorPanelItems}
+                      className="dockview-editor-layout"
                     />
                   </div>
-                </aside>
+                ) : (
+                  <div className="flex-1 min-h-0 overflow-y-auto relative ox-home-grid">
+                    {daemon.projectPath ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center px-6 space-y-2 relative z-10">
+                        <div className="text-[15px] font-semibold text-foreground-strong">
+                          No file open
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setShowCommandPalette(true)}
+                        >
+                          <MagnifyingGlassIcon className="size-4" />
+                          Find a file
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="min-h-full flex flex-col items-center justify-center px-6 py-12 relative z-10 space-y-10">
+                        <div className="flex flex-col items-center text-center space-y-5 max-w-xl w-full">
+                          <h1 className="font-display text-3xl sm:text-[36px] font-semibold tracking-tight text-foreground-strong leading-tight">
+                            What are we writing today?
+                          </h1>
 
-                <div className="relative group w-1.5 flex-shrink-0 -mx-0.5">
+                          <div className="flex flex-wrap items-center justify-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={handleOpenFolder}
+                              className="btn btn-primary h-10 px-5 rounded-full text-[13.5px]"
+                            >
+                              <FolderOpenIcon className="size-4" />
+                              <span>Open paper folder</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSettingsInitialTab("agents");
+                                setShowLatexSettings(true);
+                              }}
+                              className="btn btn-secondary h-10 px-4 rounded-full text-[13px]"
+                            >
+                              <GearIcon className="size-4 text-muted" />
+                              <span>Agent settings</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="w-full max-w-md md:hidden">
+                          <RecentProjects
+                            projects={recentProjects.projects}
+                            onSelect={handleOpenRecentProject}
+                            onRemove={recentProjects.removeProject}
+                            onClearAll={recentProjects.clearAll}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {daemon.projectPath && showLivePreview && (
+                <>
+                  <div className="relative group w-1 flex-shrink-0">
+                    <motion.div
+                      drag="x"
+                      dragConstraints={{ left: 0, right: 0 }}
+                      dragElastic={0}
+                      dragMomentum={false}
+                      onDragStart={() => startResize("preview")}
+                      onDrag={(_event, info) => handleResizeDrag("preview", info)}
+                      onDragEnd={endResize}
+                      className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                      style={{ x: 0 }}
+                    />
+                    <div
+                      className={`w-full h-full transition-colors ${
+                        resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
+                      }`}
+                    />
+                  </div>
+                  <div
+                    style={{
+                      width:
+                        resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
+                    }}
+                    className="flex-shrink-0 min-w-0 max-w-[60%] h-full overflow-hidden"
+                  >
+                    <LivePdfPreview
+                      projectPath={daemon.projectPath}
+                      mainFile={latexSettings.settings.mainFile}
+                      pdfPath={latexCompiler.pdfPath}
+                      pdfVersion={latexCompiler.pdfVersion}
+                      compileStatus={latexCompiler.compileStatus}
+                      compileLog={latexCompiler.compileLog}
+                      diagnostics={latexCompiler.diagnostics}
+                      lastResult={latexCompiler.lastResult}
+                      lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
+                      autoCompile={latexSettings.settings.autoCompile}
+                      compiler={latexSettings.settings.compiler}
+                      compilersStatus={latexCompiler.compilersStatus}
+                      shellEscape={latexSettings.settings.shellEscape}
+                      highlightTarget={pdfHighlightTarget}
+                      onCompile={handleCompileShortcut}
+                      onStopCompile={handleStopCompile}
+                      onToggleAutoCompile={handleToggleAutoCompile}
+                      onChangeCompiler={(nextCompiler) => {
+                        void latexSettings.updateSettings({ compiler: nextCompiler });
+                      }}
+                      onToggleShellEscape={() => {
+                        void latexSettings.updateSettings({
+                          shellEscape: !latexSettings.settings.shellEscape,
+                        });
+                      }}
+                      onOpenBuildSettings={() => {
+                        setSettingsInitialTab("build");
+                        setShowLatexSettings(true);
+                      }}
+                      onCleanAuxFiles={handleCleanAuxFiles}
+                      onForwardSync={handleLivePreviewForwardSync}
+                      onSynctexClick={handleLivePreviewSynctexClick}
+                      onJumpToDiagnostic={handleJumpToDiagnostic}
+                      onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
+                      onClose={handleCloseLivePreview}
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* LaTeX Install Prompt */}
+            {daemon.projectPath &&
+              latexCompiler.compilersStatus &&
+              !hasAnyCompiler &&
+              !latexCompiler.isDetecting && (
+                <div className="border-t border-border">
+                  <LaTeXInstallPrompt onRefreshCompilers={latexCompiler.detectCompilers} />
+                </div>
+              )}
+
+            <TerminalPanel
+              projectPath={daemon.projectPath}
+              open={showTerminal}
+              shellMode={editorSettings.settings.terminalShellMode}
+              customShell={editorSettings.settings.terminalShellPath}
+              fontFamily={editorSettings.settings.terminalFontFamily}
+              fontSize={editorSettings.settings.terminalFontSize}
+              lineHeight={editorSettings.settings.terminalLineHeight}
+              prefersReducedMotion={Boolean(prefersReducedMotion)}
+              onClose={() => setShowTerminal(false)}
+              pendingCommand={pendingTerminalCommand}
+              onPendingCommandSent={() => setPendingTerminalCommand(null)}
+            />
+          </div>
+        </div>
+
+        {/* Single persistent AgentPanel across Write (docked), Agents (full), and History (hidden) */}
+        {(() => {
+          const isAgentsView = Boolean(daemon.projectPath && workspaceView === "agents");
+          const isDockedVisible = workspaceView === "write" && showRightPanel;
+          const isVisible = isAgentsView || isDockedVisible;
+
+          return (
+            <div
+              id={isAgentsView ? "workspace-panel-agents" : undefined}
+              {...(isAgentsView && { role: "tabpanel", "aria-labelledby": "workspace-tab-agents" })}
+              aria-hidden={!isVisible}
+              className={
+                isAgentsView
+                  ? "ox-frame flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+                  : isDockedVisible
+                    ? "flex flex-shrink-0 overflow-hidden max-[1100px]:absolute max-[1100px]:inset-y-0 max-[1100px]:right-2 max-[1100px]:bottom-2 max-[1100px]:z-20"
+                    : "hidden"
+              }
+              style={
+                isDockedVisible
+                  ? {
+                      width:
+                        resizing === "right"
+                          ? `calc(var(--right-panel-width) + 6px)`
+                          : effectiveRightPanelWidth + 6,
+                    }
+                  : undefined
+              }
+            >
+              {isDockedVisible && (
+                <div className="relative group w-1.5 flex-shrink-0 mr-0.5">
                   <motion.div
                     drag="x"
                     dragConstraints={{ left: 0, right: 0 }}
                     dragElastic={0}
                     dragMomentum={false}
-                    onDragStart={() => startResize("sidebar")}
-                    onDrag={(_event, info) => handleResizeDrag("sidebar", info)}
+                    onDragStart={() => startResize("right")}
+                    onDrag={(_event, info) => handleResizeDrag("right", info)}
                     onDragEnd={endResize}
                     className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
                     style={{ x: 0 }}
                   />
                   <div
                     className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
-                      resizing === "sidebar" ? "bg-accent" : "group-hover:bg-border-dark"
+                      resizing === "right" ? "bg-accent" : "group-hover:bg-border-dark"
                     }`}
                   />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
-
-        {/* Primary Inset Frame: Home OR Unified Editor + Live PDF */}
-        <div className="flex-1 min-w-0 w-0 flex flex-col ox-frame">
-          <div className="flex-1 min-h-0 flex overflow-hidden">
-            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-              {daemon.projectPath && editorPanelItems.length > 0 ? (
-                <div ref={editorWorkspaceRef} className="relative flex-1 min-h-0">
-                  {splitDropHint && (
-                    <div className="pointer-events-none absolute inset-0 z-10">
-                      <div
-                        className={`absolute inset-y-0 w-1/2 transition-opacity duration-100 ${
-                          splitDropHint === "left"
-                            ? "left-0 border-r border-accent/40 bg-accent-soft/40"
-                            : "right-0 border-l border-accent/40 bg-accent-soft/40"
-                        }`}
-                      />
-                    </div>
-                  )}
-
-                  <DockviewPanelLayout
-                    panels={editorPanelItems}
-                    className="dockview-editor-layout"
-                  />
-                </div>
-              ) : (
-                <div className="flex-1 min-h-0 overflow-y-auto relative ox-home-grid">
-                  {daemon.projectPath ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center px-6 space-y-2 relative z-10">
-                      <div className="text-[15px] font-semibold text-foreground-strong">
-                        No file open
-                      </div>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setShowCommandPalette(true)}
-                      >
-                        <MagnifyingGlassIcon className="size-4" />
-                        Find a file
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="min-h-full flex flex-col items-center justify-center px-6 py-12 relative z-10 space-y-10">
-                      <div className="flex flex-col items-center text-center space-y-5 max-w-xl w-full">
-                        <h1 className="font-display text-3xl sm:text-[36px] font-semibold tracking-tight text-foreground-strong leading-tight">
-                          What are we writing today?
-                        </h1>
-
-                        <div className="flex flex-wrap items-center justify-center gap-2.5">
-                          <button
-                            type="button"
-                            onClick={handleOpenFolder}
-                            className="btn btn-primary h-10 px-5 rounded-full text-[13.5px]"
-                          >
-                            <FolderOpenIcon className="size-4" />
-                            <span>Open paper folder</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSettingsInitialTab("agents");
-                              setShowLatexSettings(true);
-                            }}
-                            className="btn btn-secondary h-10 px-4 rounded-full text-[13px]"
-                          >
-                            <GearIcon className="size-4 text-muted" />
-                            <span>Agent settings</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="w-full max-w-md md:hidden">
-                        <RecentProjects
-                          projects={recentProjects.projects}
-                          onSelect={handleOpenRecentProject}
-                          onRemove={recentProjects.removeProject}
-                          onClearAll={recentProjects.clearAll}
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
-            </div>
-
-            {daemon.projectPath && showLivePreview && (
-              <>
-                <div className="relative group w-1 flex-shrink-0">
-                  <motion.div
-                    drag="x"
-                    dragConstraints={{ left: 0, right: 0 }}
-                    dragElastic={0}
-                    dragMomentum={false}
-                    onDragStart={() => startResize("preview")}
-                    onDrag={(_event, info) => handleResizeDrag("preview", info)}
-                    onDragEnd={endResize}
-                    className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                    style={{ x: 0 }}
-                  />
-                  <div
-                    className={`w-full h-full transition-colors ${
-                      resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
-                    }`}
-                  />
-                </div>
-                <div
-                  style={{
-                    width: resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
-                  }}
-                  className="flex-shrink-0 min-w-0 max-w-[60%] h-full overflow-hidden"
-                >
-                  <LivePdfPreview
-                    projectPath={daemon.projectPath}
-                    mainFile={latexSettings.settings.mainFile}
-                    pdfPath={latexCompiler.pdfPath}
-                    pdfVersion={latexCompiler.pdfVersion}
-                    compileStatus={latexCompiler.compileStatus}
-                    compileLog={latexCompiler.compileLog}
-                    diagnostics={latexCompiler.diagnostics}
-                    lastResult={latexCompiler.lastResult}
-                    lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
-                    autoCompile={latexSettings.settings.autoCompile}
-                    highlightTarget={pdfHighlightTarget}
-                    onCompile={handleCompileShortcut}
-                    onStopCompile={handleStopCompile}
-                    onToggleAutoCompile={handleToggleAutoCompile}
-                    onCleanAuxFiles={handleCleanAuxFiles}
-                    onForwardSync={handleLivePreviewForwardSync}
-                    onSynctexClick={handleLivePreviewSynctexClick}
-                    onJumpToDiagnostic={handleJumpToDiagnostic}
-                    onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
-                    onClose={handleCloseLivePreview}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Quiet Hairline Footer inside the Workspace Inset Frame */}
-          {daemon.projectPath && (
-            <div className="h-7 px-3 border-t border-border bg-panel flex items-center justify-between gap-3 text-[11.5px] text-muted shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!daemon.projectPath) return;
-                    const res = await latexSettings.detectMainFile(daemon.projectPath);
-                    if (res && res.tex_files.length > 0) {
-                      setMainFileDetectionResult(res);
-                      setShowMainFileDialog(true);
-                    }
-                  }}
-                  className="hover:text-foreground transition-colors truncate font-mono text-[11px]"
-                  title="Select main .tex file"
-                >
-                  main: {latexSettings.settings.mainFile ?? "unset"}
-                </button>
-                {selectedFile && /\.tex$/i.test(selectedFile) && (
-                  <>
-                    <span className="text-border-dark">·</span>
-                    <span className="tabular-nums">{wordCount.words.toLocaleString()} words</span>
-                    <span className="text-border-dark">·</span>
-                    <span className="font-mono text-[11px] tabular-nums">
-                      Ln {cursorPosition.line}, Col {cursorPosition.column}
-                    </span>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                {selectedFile && /\.tex$/i.test(selectedFile) && latexCompiler.pdfPath && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleForwardSync();
-                    }}
-                    className="text-accent hover:underline font-medium"
-                    title="Jump from current line to PDF"
-                  >
-                    Sync → PDF
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowLivePreview((p) => !p)}
-                  className="hover:text-foreground transition-colors tabular-nums"
-                >
-                  {latexCompiler.isCompiling
-                    ? "Compiling..."
-                    : latexCompiler.compileStatus === "success"
-                      ? `PDF ready${latexCompiler.lastCompileDurationMs != null ? ` (${(latexCompiler.lastCompileDurationMs / 1000).toFixed(1)}s)` : ""}`
-                      : latexCompiler.compileStatus === "error"
-                        ? "Build error"
-                        : "PDF preview"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* LaTeX Install Prompt */}
-          {daemon.projectPath &&
-            latexCompiler.compilersStatus &&
-            !hasAnyCompiler &&
-            !latexCompiler.isDetecting && (
-              <div className="border-t border-border">
-                <LaTeXInstallPrompt onRefreshCompilers={latexCompiler.detectCompilers} />
-              </div>
-            )}
-
-          <TerminalPanel
-            projectPath={daemon.projectPath}
-            open={showTerminal}
-            shellMode={editorSettings.settings.terminalShellMode}
-            customShell={editorSettings.settings.terminalShellPath}
-            fontFamily={editorSettings.settings.terminalFontFamily}
-            fontSize={editorSettings.settings.terminalFontSize}
-            lineHeight={editorSettings.settings.terminalLineHeight}
-            prefersReducedMotion={Boolean(prefersReducedMotion)}
-            onClose={() => setShowTerminal(false)}
-            pendingCommand={pendingTerminalCommand}
-            onPendingCommandSent={() => setPendingTerminalCommand(null)}
-          />
-        </div>
-
-        {/* Adjacent White Inset Frame: Agent Pane */}
-        <AnimatePresence>
-          {showRightPanel && (
-            <motion.div
-              key="right-panel-container"
-              initial={prefersReducedMotion ? { opacity: 1, width: 0 } : { opacity: 0, width: 0 }}
-              animate={{
-                opacity: 1,
-                width:
-                  resizing === "right"
-                    ? `calc(var(--right-panel-width) + 6px)`
-                    : effectiveRightPanelWidth + 6,
-              }}
-              exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
-              transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
-              className="flex flex-shrink-0 overflow-hidden max-[1100px]:absolute max-[1100px]:inset-y-0 max-[1100px]:right-2 max-[1100px]:bottom-2 max-[1100px]:z-20"
-              style={{
-                willChange: prefersReducedMotion ? undefined : "width, opacity",
-              }}
-            >
-              <div className="relative group w-1.5 flex-shrink-0 mr-0.5">
-                <motion.div
-                  drag="x"
-                  dragConstraints={{ left: 0, right: 0 }}
-                  dragElastic={0}
-                  dragMomentum={false}
-                  onDragStart={() => startResize("right")}
-                  onDrag={(_event, info) => handleResizeDrag("right", info)}
-                  onDragEnd={endResize}
-                  className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                  style={{ x: 0 }}
-                />
-                <div
-                  className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
-                    resizing === "right" ? "bg-accent" : "group-hover:bg-border-dark"
-                  }`}
-                />
-              </div>
               <aside
-                style={{
-                  width:
-                    resizing === "right" ? "var(--right-panel-width)" : effectiveRightPanelWidth,
-                  willChange: resizing === "right" ? "width" : undefined,
-                }}
-                className="ox-frame flex flex-col flex-shrink-0 max-[1100px]:shadow-md"
+                style={
+                  isDockedVisible
+                    ? {
+                        width:
+                          resizing === "right"
+                            ? "var(--right-panel-width)"
+                            : effectiveRightPanelWidth,
+                        willChange: resizing === "right" ? "width" : undefined,
+                      }
+                    : undefined
+                }
+                className={
+                  isAgentsView
+                    ? "flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+                    : "ox-frame flex flex-col flex-shrink-0 max-[1100px]:shadow-md"
+                }
               >
                 <AgentErrorBoundary onReset={handleResetAgentBoundary}>
                   <AgentPanel
@@ -3182,19 +3452,150 @@ export default function EditorPage() {
                     onUsageOpenChange={setAgentUsageOpen}
                     draftInjection={agentDraftInjection}
                     onDraftConsumed={handleAgentDraftConsumed}
-                    onFileClick={handleAgentFileClick}
+                    onFileClick={
+                      isAgentsView
+                        ? (path) => {
+                            setWorkspaceView("write");
+                            handleAgentFileClick(path);
+                          }
+                        : handleAgentFileClick
+                    }
                     onRunTerminalCommand={handleAgentRunTerminalCommand}
                     onOpenAgentSettings={handleOpenAgentSettings}
-                    isExpanded={agentExpanded}
-                    onToggleExpand={() => setAgentExpanded((p) => !p)}
-                    onClose={handleCloseRightPanel}
+                    isExpanded={isAgentsView ? true : agentExpanded}
+                    onToggleExpand={
+                      isAgentsView
+                        ? () => setWorkspaceView("write")
+                        : () => setAgentExpanded((p) => !p)
+                    }
+                    onClose={isAgentsView ? () => setWorkspaceView("write") : handleCloseRightPanel}
                   />
                 </AgentErrorBoundary>
               </aside>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
+          );
+        })()}
+
+        {daemon.projectPath && workspaceView === "history" && (
+          <div
+            id="workspace-panel-history"
+            aria-labelledby="workspace-tab-history"
+            role="tabpanel"
+            className="ox-frame flex-1 min-w-0 min-h-0 flex overflow-hidden"
+          >
+            <div className="w-80 shrink-0 border-r border-border flex flex-col min-h-0 overflow-hidden">
+              <GitSidebarPanel
+                projectPath={daemon.projectPath}
+                gitStatus={gitStatus}
+                gitGraph={daemon.gitGraph}
+                gitLogEntries={daemon.gitLogEntries}
+                stagedChanges={stagedChanges}
+                unstagedChanges={unstagedChanges}
+                showRemoteInput={showRemoteInput}
+                remoteUrl={remoteUrl}
+                onRemoteUrlChange={(value) => setRemoteUrl(value)}
+                onShowRemoteInput={() => setShowRemoteInput(true)}
+                onHideRemoteInput={() => setShowRemoteInput(false)}
+                onSubmitRemote={handleRemoteSubmit}
+                onInitGit={daemon.gitInit}
+                isInitializingGit={daemon.isInitializingGit}
+                onRefreshStatus={handleRefreshGitStatus}
+                onStageAll={handleStageAll}
+                onDiscardAll={handleDiscardAll}
+                onDiscardFile={handleDiscardFile}
+                onStageFile={handleStageFile}
+                onUnstageFile={handleUnstageFile}
+                onUnstageAll={handleUnstageAll}
+                showCommitInput={showCommitInput}
+                commitMessage={commitMessage}
+                onCommitMessageChange={(value) => setCommitMessage(value)}
+                onShowCommitInput={() => setShowCommitInput(true)}
+                onHideCommitInput={() => setShowCommitInput(false)}
+                onCommit={handleCommit}
+                onPush={handleGitPush}
+                onPull={handleGitPull}
+                onPreviewDiff={handlePreviewHistoryDiff}
+                onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
+                onOpenFile={(path) => {
+                  setWorkspaceView("write");
+                  void handleFileSelect(path);
+                }}
+                onPublishToGitHub={handlePublishToGitHub}
+                isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
+                isPushing={daemon.isPushing}
+                isPulling={daemon.isPulling}
+                isAuthenticatingGh={daemon.isAuthenticatingGh}
+              />
+            </div>
+
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-panel">
+              {historyDiffPreview ? (
+                <>
+                  <div className="h-10 px-4 border-b border-border flex items-center justify-between gap-2 shrink-0">
+                    <div className="min-w-0 flex items-center gap-2">
+                      <span className="text-[12.5px] font-mono font-medium truncate">
+                        {historyDiffPreview.path}
+                      </span>
+                      <span className="text-[11px] text-muted">
+                        {historyDiffPreview.staged ? "Staged" : "Working tree"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWorkspaceView("write");
+                        void handleFileSelect(historyDiffPreview.path);
+                      }}
+                      className="btn btn-secondary btn-sm h-7 px-2.5 text-[11.5px]"
+                    >
+                      Open in Write
+                    </button>
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    {renderGitDiffContent(historyDiffPreview, parsedHistoryDiff)}
+                  </div>
+                </>
+              ) : (
+                <div className="h-full flex items-center justify-center text-xs text-muted">
+                  Select a changed file to inspect its diff.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
+
+      {daemon.projectPath && (
+        <StatusBar
+          gitStatus={gitStatus}
+          compileStatus={latexCompiler.compileStatus}
+          lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
+          compiler={latexSettings.settings.compiler}
+          mainFile={latexSettings.settings.mainFile}
+          onSelectMainFile={() => {
+            if (!daemon.projectPath) return;
+            void latexSettings.detectMainFile(daemon.projectPath).then((res) => {
+              if (res && res.tex_files.length > 0) {
+                setMainFileDetectionResult(res);
+                setShowMainFileDialog(true);
+              }
+            });
+          }}
+          canSyncTex={Boolean(
+            selectedFile && /\.tex$/i.test(selectedFile) && latexCompiler.pdfPath,
+          )}
+          onForwardSync={() => {
+            setWorkspaceView("write");
+            void handleForwardSync();
+          }}
+          errorCount={latexCompiler.diagnostics.filter((d) => d.severity === "error").length}
+          warningCount={latexCompiler.diagnostics.filter((d) => d.severity !== "error").length}
+          selectedFile={selectedFile}
+          isTextFile={workspaceView === "write" && Boolean(selectedFile) && !binaryPreviewUrl}
+          cursorPosition={cursorPosition}
+          wordCount={wordCount.words}
+        />
+      )}
 
       <CommandPalette
         open={showCommandPalette}
@@ -3204,6 +3605,7 @@ export default function EditorPage() {
         bibEntries={bibEntries}
         diagnostics={latexCompiler.diagnostics}
         onOpenFile={(filePath, line) => {
+          setWorkspaceView("write");
           void handleFileSelect(filePath).then(() => {
             if (line && line > 0) setPendingGoToLine(line);
           });
