@@ -208,6 +208,53 @@ pub async fn git_merge_thread_worktree(
     }
 }
 
+/// Parse `git status --porcelain=v1 -z` output into `GitFileChange` entries.
+/// Preserves literal paths (spaces, tabs, Unicode, trailing spaces, arrows)
+/// and consumes the second NUL-terminated original path record for renames/copies.
+fn parse_porcelain_v1_z(output: &str) -> Vec<GitFileChange> {
+    let mut changes = Vec::new();
+    let mut parts = output.split('\0');
+
+    while let Some(record) = parts.next() {
+        if record.len() < 4 {
+            continue;
+        }
+        let bytes = record.as_bytes();
+        if bytes[2] != b' ' {
+            continue;
+        }
+
+        let x = bytes[0] as char;
+        let y = bytes[1] as char;
+        let staged = x != ' ' && x != '?';
+        let status_char = if staged { x } else { y };
+
+        if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
+            // Porcelain v1 -z emits `XY <new_path>\0<orig_path>\0`; consume <orig_path>.
+            let _ = parts.next();
+        }
+
+        let status = match status_char {
+            'M' => "modified",
+            'A' => "added",
+            'D' => "deleted",
+            'R' => "renamed",
+            '?' => "untracked",
+            _ => "modified",
+        }
+        .to_string();
+
+        let path = record[3..].to_string();
+        changes.push(GitFileChange {
+            path,
+            status,
+            staged,
+        });
+    }
+
+    changes
+}
+
 #[tauri::command]
 pub async fn git_status(dir: String) -> Result<GitStatus, String> {
     let git_dir = std::path::Path::new(&dir).join(".git");
@@ -240,7 +287,7 @@ pub async fn git_status(dir: String) -> Result<GitStatus, String> {
                     .or_else(|_| Ok("main".to_string()))
             }
         },
-        run_git(dir_ref, &["status", "--porcelain"]),
+        run_git(dir_ref, &["status", "--porcelain=v1", "-z"]),
         run_git(dir_ref, &["remote"]),
         async {
             if has_commits {
@@ -273,36 +320,7 @@ pub async fn git_status(dir: String) -> Result<GitStatus, String> {
     let status_output = status_result.unwrap_or_default();
     let has_upstream = upstream_result.is_ok();
 
-    let mut changes = Vec::new();
-    for line in status_output.lines() {
-        if line.len() < 3 {
-            continue;
-        }
-        let staged =
-            line.chars().next().unwrap_or(' ') != ' ' && line.chars().next().unwrap_or(' ') != '?';
-        let status_char = if staged {
-            line.chars().next().unwrap_or(' ')
-        } else {
-            line.chars().nth(1).unwrap_or(' ')
-        };
-
-        let status = match status_char {
-            'M' => "modified",
-            'A' => "added",
-            'D' => "deleted",
-            'R' => "renamed",
-            '?' => "untracked",
-            _ => "modified",
-        }
-        .to_string();
-
-        let path = line[3..].trim().to_string();
-        changes.push(GitFileChange {
-            path,
-            status,
-            staged,
-        });
-    }
+    let changes = parse_porcelain_v1_z(&status_output);
 
     let remote = remote_result
         .ok()
@@ -344,7 +362,7 @@ pub async fn git_status(dir: String) -> Result<GitStatus, String> {
 #[tauri::command]
 pub async fn git_log(dir: String, limit: Option<i32>) -> Result<Vec<GitLogEntry>, String> {
     let limit = limit.unwrap_or(20);
-    let format = "%H%n%h%n%s%n%an%n%ci%n---";
+    let format = "%H%n%h%n%s%n%an%n%cI%n---";
 
     let output = match run_git(
         &dir,
@@ -1144,5 +1162,49 @@ mod tests {
             GH_AUTH_LOGIN_COMMAND
         );
         assert!(!plan.hide_outer_window);
+    }
+
+    #[test]
+    fn parse_porcelain_v1_z_handles_special_paths_and_renames() {
+        let input = concat!(
+            "?? sections/methodology copy.tex\0",
+            " M sections/tab\tname.tex\0",
+            "A  sections/résumé — αβγ.tex\0",
+            "?? trailing space.tex \0",
+            " M arrow -> file.tex\0",
+            "R  figures/modes.pdf\0old/modes.pdf\0",
+            " D deleted.tex\0",
+        );
+
+        let changes = parse_porcelain_v1_z(input);
+        assert_eq!(changes.len(), 7);
+
+        assert_eq!(changes[0].path, "sections/methodology copy.tex");
+        assert_eq!(changes[0].status, "untracked");
+        assert!(!changes[0].staged);
+
+        assert_eq!(changes[1].path, "sections/tab\tname.tex");
+        assert_eq!(changes[1].status, "modified");
+        assert!(!changes[1].staged);
+
+        assert_eq!(changes[2].path, "sections/résumé — αβγ.tex");
+        assert_eq!(changes[2].status, "added");
+        assert!(changes[2].staged);
+
+        assert_eq!(changes[3].path, "trailing space.tex ");
+        assert_eq!(changes[3].status, "untracked");
+        assert!(!changes[3].staged);
+
+        assert_eq!(changes[4].path, "arrow -> file.tex");
+        assert_eq!(changes[4].status, "modified");
+        assert!(!changes[4].staged);
+
+        assert_eq!(changes[5].path, "figures/modes.pdf");
+        assert_eq!(changes[5].status, "renamed");
+        assert!(changes[5].staged);
+
+        assert_eq!(changes[6].path, "deleted.tex");
+        assert_eq!(changes[6].status, "deleted");
+        assert!(!changes[6].staged);
     }
 }
