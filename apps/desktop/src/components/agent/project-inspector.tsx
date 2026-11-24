@@ -273,69 +273,6 @@ export function ProjectInspector({
         (tab === "pdf" && pdfPanel == null) ||
         (tab === "terminal" && terminalPanel == null)) && (
         <div className="flex-1 space-y-2 overflow-y-auto pr-0.5">
-          {lastBuild && (
-            <section className="ox-frame flex gap-3 p-3">
-              <div
-                aria-hidden="true"
-                className="flex h-[68px] w-[52px] shrink-0 flex-col gap-[3px] rounded-[2px] bg-background p-1.5 shadow-xs ring-1 ring-border"
-              >
-                <span className="h-[4px] w-[70%] bg-foreground/75" />
-                <span className="h-[2px] w-full bg-muted/40" />
-                <span className="h-[2px] w-full bg-muted/40" />
-                <span className="mt-0.5 h-[13px] w-full bg-gradient-to-r from-[var(--voice-claude-ink)]/60 via-subtle to-[var(--voice-codex-ink)]/60" />
-                <span className="h-[2px] w-full bg-muted/40" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[12.5px] font-medium">Last build</span>
-                  {lastBuild.status === "success" && (
-                    <span className="ml-auto rounded-full border border-[var(--ok-line)] bg-success-bg px-1.5 text-[11px] text-success">
-                      ✓{" "}
-                      {lastBuild.builtAt
-                        ? new Date(lastBuild.builtAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "OK"}
-                    </span>
-                  )}
-                  {lastBuild.status === "error" && (
-                    <span className="ml-auto rounded-full border border-error/40 bg-error-bg px-1.5 text-[11px] text-error">
-                      {lastBuild.errorCount != null
-                        ? `${lastBuild.errorCount} ${lastBuild.errorCount === 1 ? "error" : "errors"}`
-                        : "Failed"}
-                    </span>
-                  )}
-                  {lastBuild.status === "compiling" && (
-                    <span className="ml-auto rounded-full border border-border bg-subtle px-1.5 text-[11px] text-muted">
-                      Compiling
-                    </span>
-                  )}
-                </div>
-                <div className="mt-1 truncate font-mono text-[11.5px] text-muted">
-                  {[
-                    lastBuild.mainFile || "main.tex",
-                    lastBuild.pageCount != null ? `${lastBuild.pageCount} pp` : null,
-                    lastBuild.durationMs != null ? `${lastBuild.durationMs} ms` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-                {lastBuild.staleAgentEdits != null && lastBuild.staleAgentEdits > 0 && (
-                  <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-[var(--voice-claude-text)]">
-                    <span
-                      aria-hidden="true"
-                      className="h-[7px] w-[7px] shrink-0 rounded-full bg-[var(--voice-claude-ink)]"
-                    />
-                    <span>
-                      {lastBuild.staleAgentEdits} agent{" "}
-                      {lastBuild.staleAgentEdits === 1 ? "edit" : "edits"} since
-                    </span>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
           <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
             <div className="flex items-center gap-2">
               <span className="text-[12.5px] font-medium">Checkout</span>
@@ -469,69 +406,6 @@ export function ProjectInspector({
               </p>
             )}
           </section>
-          {lastBuild && (
-            <section className="ox-frame flex gap-3 p-3">
-              <div
-                aria-hidden="true"
-                className="flex h-[68px] w-[52px] shrink-0 flex-col gap-[3px] rounded-[2px] bg-background p-1.5 shadow-xs ring-1 ring-border"
-              >
-                <span className="h-[4px] w-[70%] bg-foreground/75" />
-                <span className="h-[2px] w-full bg-muted/40" />
-                <span className="h-[2px] w-full bg-muted/40" />
-                <span className="mt-0.5 h-[13px] w-full bg-gradient-to-r from-[var(--voice-claude-ink)]/60 via-subtle to-[var(--voice-codex-ink)]/60" />
-                <span className="h-[2px] w-full bg-muted/40" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[12.5px] font-medium">Last build</span>
-                  {lastBuild.status === "success" && (
-                    <span className="ml-auto rounded-full border border-[var(--ok-line)] bg-success-bg px-1.5 text-[11px] text-success">
-                      ✓{" "}
-                      {lastBuild.builtAt
-                        ? new Date(lastBuild.builtAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "OK"}
-                    </span>
-                  )}
-                  {lastBuild.status === "error" && (
-                    <span className="ml-auto rounded-full border border-error/40 bg-error-bg px-1.5 text-[11px] text-error">
-                      {lastBuild.errorCount != null
-                        ? `${lastBuild.errorCount} ${lastBuild.errorCount === 1 ? "error" : "errors"}`
-                        : "Failed"}
-                    </span>
-                  )}
-                  {lastBuild.status === "compiling" && (
-                    <span className="ml-auto rounded-full border border-border bg-subtle px-1.5 text-[11px] text-muted">
-                      Compiling
-                    </span>
-                  )}
-                </div>
-                <div className="mt-1 truncate font-mono text-[11.5px] text-muted">
-                  {[
-                    lastBuild.mainFile || "main.tex",
-                    lastBuild.pageCount != null ? `${lastBuild.pageCount} pp` : null,
-                    lastBuild.durationMs != null ? `${lastBuild.durationMs} ms` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </div>
-                {lastBuild.staleAgentEdits != null && lastBuild.staleAgentEdits > 0 && (
-                  <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-[var(--voice-claude-text)]">
-                    <span
-                      aria-hidden="true"
-                      className="h-[7px] w-[7px] shrink-0 rounded-full bg-[var(--voice-claude-ink)]"
-                    />
-                    <span>
-                      {lastBuild.staleAgentEdits} agent{" "}
-                      {lastBuild.staleAgentEdits === 1 ? "edit" : "edits"} since
-                    </span>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
           <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
             <div className="flex items-center">
               <span className="text-[12.5px] font-medium">Working changes</span>
@@ -629,7 +503,7 @@ export function ProjectInspector({
                 </div>
                 <div className="mt-1 truncate font-mono text-[11.5px] text-muted">
                   {[
-                    lastBuild.mainFile || "main.tex",
+                    lastBuild.mainFile?.split("/").pop() || "main.tex",
                     lastBuild.pageCount != null ? `${lastBuild.pageCount} pp` : null,
                     lastBuild.durationMs != null ? `${lastBuild.durationMs} ms` : null,
                   ]

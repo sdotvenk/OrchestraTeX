@@ -43,7 +43,8 @@ const HARNESS_ORDER: { id: AgentProviderId; name: string; fallbackMeta: string }
   { id: "custom-acp", name: "Custom ACP", fallbackMeta: "any ACP binary" },
 ];
 
-function formatShortPath(fullPath: string): string {
+function formatShortPath(fullPath?: string | null): string {
+  if (!fullPath) return "";
   return fullPath.replace(/^\/Users\/[^/]+/, "~").replace(/^\/home\/[^/]+/, "~");
 }
 
@@ -163,83 +164,83 @@ export function HomeWorkspace({
               </div>
             </div>
 
-            <ul className="flex-1 overflow-auto divide-y divide-border/60">
-              {filtered.map((project) => {
-                const counts = threadCounts?.[project.path];
-                const uniqueProviders = counts?.providerIds ?? [];
-                const threadLabel = counts
-                  ? counts.running > 0
-                    ? `${counts.running} running`
-                    : counts.waiting > 0
-                      ? `${counts.waiting} waiting`
-                      : counts.total > 0
-                        ? `${counts.total} ${counts.total === 1 ? "thread" : "threads"} active`
-                        : null
-                  : null;
+            {filtered.length > 0 ? (
+              <ul className="flex-1 overflow-auto divide-y divide-border/60">
+                {filtered.map((project) => {
+                  const counts = threadCounts?.[project.path];
+                  const uniqueProviders = counts?.providerIds ?? [];
+                  const threadLabel = counts
+                    ? counts.running > 0
+                      ? `${counts.running} running`
+                      : counts.waiting > 0
+                        ? `${counts.waiting} waiting`
+                        : counts.total > 0
+                          ? `${counts.total} ${counts.total === 1 ? "thread" : "threads"} active`
+                          : null
+                    : null;
 
-                return (
-                  <li
-                    key={project.path}
-                    className="group flex items-center gap-3.5 px-4 py-3 hover:bg-subtle/60 transition-colors"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onOpenProject(project.path)}
-                      className="flex flex-1 min-w-0 items-center gap-3.5 text-left"
+                  return (
+                    <li
+                      key={project.path}
+                      className="group flex items-center gap-3.5 px-4 py-3 hover:bg-subtle/60 transition-colors"
                     >
-                      {/* Miniature page thumbnail */}
-                      <span
-                        aria-hidden="true"
-                        className="w-[42px] h-[54px] rounded-[2px] bg-background shadow-xs ring-1 ring-border shrink-0 p-1.5 flex flex-col gap-[3px]"
+                      <button
+                        type="button"
+                        onClick={() => onOpenProject(project.path)}
+                        className="flex flex-1 min-w-0 items-center gap-3.5 text-left"
                       >
-                        <span className="h-[3px] w-[70%] bg-foreground/75 rounded-[0.5px]" />
-                        <span className="h-[2px] w-full bg-muted-foreground/45 rounded-[0.5px]" />
-                        <span className="h-[2px] w-[85%] bg-muted-foreground/45 rounded-[0.5px]" />
-                        <span className="h-[12px] w-full mt-0.5 border border-border rounded-[1px]" />
-                      </span>
-
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-semibold text-[13px] text-foreground">
-                          {project.name}
+                        {/* Miniature page thumbnail */}
+                        <span
+                          aria-hidden="true"
+                          className="w-[42px] h-[54px] rounded-[2px] bg-background shadow-xs ring-1 ring-border shrink-0 p-1.5 flex flex-col gap-[3px]"
+                        >
+                          <span className="h-[3px] w-[70%] bg-foreground/75 rounded-[0.5px]" />
+                          <span className="h-[2px] w-full bg-muted-foreground/45 rounded-[0.5px]" />
+                          <span className="h-[2px] w-[85%] bg-muted-foreground/45 rounded-[0.5px]" />
+                          <span className="h-[12px] w-full mt-0.5 border border-border rounded-[1px]" />
                         </span>
-                        <span className="block truncate font-mono text-[11.5px] text-muted mt-0.5">
-                          {formatShortPath(project.path)}
+
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-semibold text-[13px] text-foreground">
+                            {project.name}
+                          </span>
+                          <span className="block truncate font-mono text-[11.5px] text-muted mt-0.5">
+                            {formatShortPath(project.path)}
+                          </span>
                         </span>
-                      </span>
 
-                      {threadLabel && (
-                        <span className="shrink-0 flex items-center gap-1.5 text-[12px] text-muted">
-                          {uniqueProviders.map((pid) => (
-                            <span
-                              key={pid}
-                              className="size-[7px] rounded-full shrink-0"
-                              style={{ backgroundColor: VOICE_COLORS[pid].ink }}
-                              aria-hidden="true"
-                            />
-                          ))}
-                          <span>{threadLabel}</span>
+                        {threadLabel && (
+                          <span className="shrink-0 flex items-center gap-1.5 text-[12px] text-muted">
+                            {uniqueProviders.map((pid) => (
+                              <span
+                                key={pid}
+                                className="size-[7px] rounded-full shrink-0"
+                                style={{ backgroundColor: VOICE_COLORS[pid].ink }}
+                                aria-hidden="true"
+                              />
+                            ))}
+                            <span>{threadLabel}</span>
+                          </span>
+                        )}
+
+                        <span className="shrink-0 text-[12px] text-muted w-20 text-right tabular-nums">
+                          {formatRelativeTime(project.lastOpened)}
                         </span>
-                      )}
+                      </button>
 
-                      <span className="shrink-0 text-[12px] text-muted w-20 text-right tabular-nums">
-                        {formatRelativeTime(project.lastOpened)}
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      aria-label={`Remove ${project.name} from recent projects`}
-                      className="btn btn-ghost btn-sm opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shrink-0"
-                      onClick={() => onRemoveProject(project.path)}
-                    >
-                      <TrashIcon className="size-3.5" aria-hidden="true" />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {filtered.length === 0 && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${project.name} from recent projects`}
+                        className="btn btn-ghost btn-sm w-0 overflow-hidden px-0 opacity-0 group-hover:w-7 group-hover:px-1.5 group-hover:opacity-100 focus:w-7 focus:px-1.5 focus:opacity-100 transition-all shrink-0"
+                        onClick={() => onRemoveProject(project.path)}
+                      >
+                        <TrashIcon className="size-3.5" aria-hidden="true" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
               <p className="px-4 py-6 text-[13px] text-muted">
                 {normalizedQuery ? "No matching projects" : "No recent projects"}
               </p>
@@ -364,7 +365,7 @@ export function HomeWorkspace({
             <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => void onRefreshProviders()}
+                onClick={() => void Promise.all([onRefreshCompilers(), onRefreshProviders()])}
                 disabled={providersLoading}
                 className="btn btn-secondary btn-sm"
               >

@@ -702,20 +702,19 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
       </div>
       <span className="truncate">{node.data.name}</span>
       <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-1">
-        {voiceDots &&
-          voiceDots.map((dot) => (
-            <span
-              key={dot.provider}
-              className="inline-block size-[7px] shrink-0 rounded-full"
-              style={{
-                backgroundColor: VOICE_COLORS[dot.provider].ink,
-                boxShadow: dot.pulse ? `0 0 0 3px ${VOICE_COLORS[dot.provider].tint}` : undefined,
-              }}
-              title={dot.label ?? dot.provider}
-              aria-label={dot.label ?? dot.provider}
-              role="img"
-            />
-          ))}
+        {voiceDots?.map((dot) => (
+          <span
+            key={dot.provider}
+            className="inline-block size-[7px] shrink-0 rounded-full"
+            style={{
+              backgroundColor: VOICE_COLORS[dot.provider].ink,
+              boxShadow: dot.pulse ? `0 0 0 3px ${VOICE_COLORS[dot.provider].tint}` : undefined,
+            }}
+            title={dot.label ?? dot.provider}
+            aria-label={dot.label ?? dot.provider}
+            role="img"
+          />
+        ))}
         {isMainFile && (
           <span className="font-sans text-[10px] font-semibold text-muted border border-border-dark rounded px-1 leading-[15px]">
             MAIN

@@ -368,9 +368,9 @@ export default function EditorPage() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("rightPanelWidth");
-      return saved ? parseInt(saved, 10) : 280;
+      return saved ? parseInt(saved, 10) : 380;
     }
-    return 280;
+    return 380;
   });
   const [resizing, setResizing] = useState<"sidebar" | "right" | "preview" | null>(null);
   const [workspaceView, setWorkspaceView] = useState<"write" | "agents" | "history">("write");
@@ -627,6 +627,19 @@ export default function EditorPage() {
     }
     return dots;
   }, [agent.providers, attributedEdits, daemon.projectPath, projectThreads]);
+  const fileVoiceByPath = useMemo(() => {
+    const map: Record<string, AgentProviderId> = {};
+    for (const [path, entries] of Object.entries(fileVoiceDots)) {
+      const first = entries.find((entry) => entry.provider !== "you");
+      if (!first || first.provider === "you") continue;
+      map[path] = first.provider;
+      if (daemon.projectPath) {
+        const rel = projectRelativePath(daemon.projectPath, path);
+        if (rel) map[rel] = first.provider;
+      }
+    }
+    return map;
+  }, [daemon.projectPath, fileVoiceDots]);
   const keepAttributedEdit = useCallback(
     (edit: AttributedEdit) => markAccepted(edit.id),
     [markAccepted],
@@ -3288,7 +3301,11 @@ export default function EditorPage() {
             Table
           </button>
           <span className="ml-auto font-mono text-[11.5px] text-muted truncate">
-            {selectedFile.split("/").join(" / ")}
+            {((daemon.projectPath
+              ? projectRelativePath(daemon.projectPath, selectedFile)
+              : null) ?? selectedFile)
+              .split("/")
+              .join(" / ")}
           </span>
         </div>
       )}
@@ -3465,7 +3482,11 @@ export default function EditorPage() {
     [daemon.files, daemon.projectPath],
   );
 
-  const effectiveRightPanelWidth = agentExpanded ? Math.max(rightPanelWidth, 520) : rightPanelWidth;
+  const effectiveRightPanelWidth = agentExpanded
+    ? Math.max(rightPanelWidth, 520)
+    : showLivePreview
+      ? Math.min(rightPanelWidth, 330)
+      : Math.max(rightPanelWidth, 380);
   const isHomeVisible = !showUsageDashboard && (!daemon.projectPath || showHomeWorkspace);
   const isWorkspaceVisible = !showHomeWorkspace && !showUsageDashboard;
   const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
@@ -4461,6 +4482,7 @@ export default function EditorPage() {
                         .catch((error: unknown) => toast(String(error), "error"))
                     }
                     onOpenUsage={() => setShowUsageDashboard(true)}
+                    todayUsageByProvider={todayUsageByProvider}
                   />
                 </div>
               )}
@@ -4536,7 +4558,10 @@ export default function EditorPage() {
                       showRightPanel &&
                       Boolean(daemon.projectPath && showLivePreview)
                     }
-                    onSwitchToPdf={() => setShowLivePreview(true)}
+                    onSwitchToPdf={() => {
+                      setShowLivePreview(true);
+                      setShowRightPanel(false);
+                    }}
                     onDockInWrite={() => {
                       setWorkspaceView("write");
                       setShowRightPanel(true);
@@ -4559,80 +4584,6 @@ export default function EditorPage() {
                   />
                 </AgentErrorBoundary>
               </aside>
-              {workspaceView === "write" &&
-                daemon.projectPath &&
-                showLivePreview &&
-                !showUsageDashboard &&
-                !showHomeWorkspace && (
-                  <>
-                    <div className="relative group w-1 flex-shrink-0">
-                      <motion.div
-                        drag="x"
-                        dragConstraints={{ left: 0, right: 0 }}
-                        dragElastic={0}
-                        dragMomentum={false}
-                        onDragStart={() => startResize("preview")}
-                        onDrag={(_event, info) => handleResizeDrag("preview", info)}
-                        onDragEnd={endResize}
-                        className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                        style={{ x: 0 }}
-                      />
-                      <div
-                        className={`w-full h-full transition-colors ${
-                          resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
-                        }`}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        width:
-                          resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
-                      }}
-                      className="flex-shrink-0 min-w-0 max-w-[60%] h-full rounded-[10px] border border-border bg-stage overflow-hidden shadow-[var(--frame-shadow)]"
-                    >
-                      <LivePdfPreview
-                        projectPath={daemon.projectPath}
-                        mainFile={latexSettings.settings.mainFile}
-                        pdfPath={latexCompiler.pdfPath}
-                        pdfVersion={latexCompiler.pdfVersion}
-                        compileStatus={latexCompiler.compileStatus}
-                        compileLog={latexCompiler.compileLog}
-                        diagnostics={latexCompiler.diagnostics}
-                        lastResult={latexCompiler.lastResult}
-                        lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
-                        autoCompile={latexSettings.settings.autoCompile}
-                        staleAgentEdits={staleAgentEdits}
-                        compiler={latexSettings.settings.compiler}
-                        compilersStatus={latexCompiler.compilersStatus}
-                        shellEscape={latexSettings.settings.shellEscape}
-                        highlightTarget={pdfHighlightTarget}
-                        onCompile={handleCompileShortcut}
-                        onStopCompile={handleStopCompile}
-                        onToggleAutoCompile={handleToggleAutoCompile}
-                        onChangeCompiler={(nextCompiler) => {
-                          void latexSettings.updateSettings({ compiler: nextCompiler });
-                        }}
-                        onToggleShellEscape={() => {
-                          void latexSettings.updateSettings({
-                            shellEscape: !latexSettings.settings.shellEscape,
-                          });
-                        }}
-                        onOpenBuildSettings={() => {
-                          setSettingsInitialTab("build");
-                          setShowLatexSettings(true);
-                        }}
-                        onSelectMainFile={() => setShowMainFileDialog(true)}
-                        onCleanAuxFiles={handleCleanAuxFiles}
-                        onForwardSync={handleLivePreviewForwardSync}
-                        onSynctexClick={handleLivePreviewSynctexClick}
-                        onJumpToDiagnostic={handleJumpToDiagnostic}
-                        onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
-                        onOpenBuildActivity={openBuildActivity}
-                        onClose={handleCloseLivePreview}
-                      />
-                    </div>
-                  </>
-                )}
               {isAgentsView && (
                 <div className="w-[clamp(11rem,25vw,20rem)] shrink-0 overflow-hidden">
                   <ProjectInspector
@@ -4693,6 +4644,16 @@ export default function EditorPage() {
                     }
                     onPull={!activeWorktreePath && gitStatus?.remote ? handleGitPull : undefined}
                     onPush={!activeWorktreePath && gitStatus?.remote ? handleGitPush : undefined}
+                    lastBuild={{
+                      mainFile: latexSettings.settings.mainFile,
+                      durationMs: latexCompiler.lastCompileDurationMs,
+                      builtAt: latexCompiler.lastPdfBuildStartedAt,
+                      status: latexCompiler.compileStatus,
+                      staleAgentEdits,
+                      errorCount: latexCompiler.diagnostics.filter((d) => d.severity === "error")
+                        .length,
+                    }}
+                    fileVoiceByPath={fileVoiceByPath}
                     diffPanel={
                       checkoutPath && inspectorGitStatus?.isRepo ? (
                         <WorkspaceChanges
@@ -4734,6 +4695,85 @@ export default function EditorPage() {
           );
         })()}
 
+        {workspaceView === "write" &&
+          daemon.projectPath &&
+          showLivePreview &&
+          !showUsageDashboard &&
+          !showHomeWorkspace && (
+            <>
+              <div className="relative group w-1 flex-shrink-0 -mx-1">
+                <motion.div
+                  drag="x"
+                  dragConstraints={{ left: 0, right: 0 }}
+                  dragElastic={0}
+                  dragMomentum={false}
+                  onDragStart={() => startResize("preview")}
+                  onDrag={(_event, info) => handleResizeDrag("preview", info)}
+                  onDragEnd={endResize}
+                  className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                  style={{ x: 0 }}
+                />
+                <div
+                  className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
+                    resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
+                  }`}
+                />
+              </div>
+              <div
+                style={{
+                  width:
+                    resizing === "preview"
+                      ? "var(--preview-panel-width)"
+                      : showRightPanel
+                        ? Math.min(livePreviewWidth, 420)
+                        : livePreviewWidth,
+                }}
+                className="flex-shrink-0 min-w-0 max-w-[55%] h-full rounded-[10px] border border-border bg-stage overflow-hidden shadow-[var(--frame-shadow)]"
+              >
+                <LivePdfPreview
+                  projectPath={daemon.projectPath}
+                  mainFile={latexSettings.settings.mainFile}
+                  pdfPath={latexCompiler.pdfPath}
+                  pdfVersion={latexCompiler.pdfVersion}
+                  compileStatus={latexCompiler.compileStatus}
+                  compileLog={latexCompiler.compileLog}
+                  diagnostics={latexCompiler.diagnostics}
+                  lastResult={latexCompiler.lastResult}
+                  lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
+                  autoCompile={latexSettings.settings.autoCompile}
+                  staleAgentEdits={staleAgentEdits}
+                  compiler={latexSettings.settings.compiler}
+                  compilersStatus={latexCompiler.compilersStatus}
+                  shellEscape={latexSettings.settings.shellEscape}
+                  highlightTarget={pdfHighlightTarget}
+                  onCompile={handleCompileShortcut}
+                  onStopCompile={handleStopCompile}
+                  onToggleAutoCompile={handleToggleAutoCompile}
+                  onChangeCompiler={(nextCompiler) => {
+                    void latexSettings.updateSettings({ compiler: nextCompiler });
+                  }}
+                  onToggleShellEscape={() => {
+                    void latexSettings.updateSettings({
+                      shellEscape: !latexSettings.settings.shellEscape,
+                    });
+                  }}
+                  onOpenBuildSettings={() => {
+                    setSettingsInitialTab("build");
+                    setShowLatexSettings(true);
+                  }}
+                  onSelectMainFile={() => setShowMainFileDialog(true)}
+                  onCleanAuxFiles={handleCleanAuxFiles}
+                  onForwardSync={handleLivePreviewForwardSync}
+                  onSynctexClick={handleLivePreviewSynctexClick}
+                  onJumpToDiagnostic={handleJumpToDiagnostic}
+                  onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
+                  onOpenBuildActivity={openBuildActivity}
+                  onClose={handleCloseLivePreview}
+                />
+              </div>
+            </>
+          )}
+
         {daemon.projectPath &&
           workspaceView === "history" &&
           !showUsageDashboard &&
@@ -4768,6 +4808,7 @@ export default function EditorPage() {
                 gitStatus={gitStatus}
                 stagedChanges={gitStatus?.changes.filter((c) => c.staged) ?? []}
                 unstagedChanges={gitStatus?.changes.filter((c) => !c.staged) ?? []}
+                fileVoiceByPath={fileVoiceByPath}
                 commitMessage={commitMessage}
                 onCommitMessageChange={setCommitMessage}
                 onStageFile={handleStageFile}

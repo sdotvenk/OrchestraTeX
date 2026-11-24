@@ -231,22 +231,17 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             }
             if (group.length === 0) return null;
             return (
-              <details key={part.id} className="text-[12px]">
-                <summary className="cursor-pointer py-1 font-medium" style={{ color: voiceText }}>
-                  {group.length} {group.length === 1 ? "tool call" : "tool calls"}
-                </summary>
-                <div className="space-y-1">
-                  {group.map((tool) => (
-                    <ToolDisplay
-                      key={tool.id}
-                      part={tool}
-                      childrenTools={childToolsByParent.get(tool.callId) ?? EMPTY_TOOLS}
-                      projectPath={projectPath}
-                      onFileClick={onFileClick}
-                    />
-                  ))}
-                </div>
-              </details>
+              <div key={part.id} className="space-y-0.5 py-0.5">
+                {group.map((tool) => (
+                  <ToolDisplay
+                    key={tool.id}
+                    part={tool}
+                    childrenTools={childToolsByParent.get(tool.callId) ?? EMPTY_TOOLS}
+                    projectPath={projectPath}
+                    onFileClick={onFileClick}
+                  />
+                ))}
+              </div>
             );
           }
           if (part.type === "text") {

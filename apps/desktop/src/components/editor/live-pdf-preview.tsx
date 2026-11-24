@@ -268,8 +268,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                       { id: "tectonic", label: "Tectonic" },
                     ] as const
                   ).map((eng) => {
-                    const isAvailable =
-                      !compilersStatus || compilersStatus[eng.id]?.available !== false;
+                    const isAvailable = compilersStatus?.[eng.id]?.available !== false;
                     const isSelected = compiler === eng.id;
                     return (
                       <button
@@ -451,7 +450,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
             </button>
           )}
 
-          {pdfState.numPages > 0 && (
+          {pdfState.numPages > 0 && compileStatus !== "error" && errorDiags.length === 0 && (
             <>
               <span className="w-px h-4 bg-border mx-0.5 shrink-0" aria-hidden="true" />
               <div className="flex items-center gap-0.5 shrink-0">

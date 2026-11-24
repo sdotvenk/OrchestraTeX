@@ -130,10 +130,11 @@ export function ApprovalCard({
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         {hasCustomOptions ? (
           interaction.options.map((opt) => {
-            const isReject = opt.kind.includes("reject");
+            const kind = opt.kind ?? "";
+            const isReject = kind.includes("reject");
             const decision: "allow_once" | "allow_session" | "deny" = isReject
               ? "deny"
-              : opt.kind.includes("always")
+              : kind.includes("always")
                 ? "allow_session"
                 : "allow_once";
             return (
