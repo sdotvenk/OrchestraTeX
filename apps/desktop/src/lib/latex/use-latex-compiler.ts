@@ -69,18 +69,26 @@ export function useLatexCompiler({
     });
   }, []);
 
-  // Listen to real-time compiler stdout/stderr lines (batched at display refresh rate)
+  // Listen to real-time compiler stdout/stderr lines (batched on Rust IPC & display refresh rate)
   useEffect(() => {
     let active = true;
-    const unlistenPromise = listen<CompileOutputEvent>("latex-compile-output", (event) => {
-      if (!active) return;
-      logSeqRef.current += 1;
-      pendingLogRef.current.push({ ...event.payload, seq: logSeqRef.current });
+    const enqueue = (items: CompileOutputEvent[]) => {
+      if (!active || items.length === 0) return;
+      for (const item of items) {
+        logSeqRef.current += 1;
+        pendingLogRef.current.push({ ...item, seq: logSeqRef.current });
+      }
       if (logRafRef.current === null) {
         logRafRef.current = requestAnimationFrame(() => {
           flushCompileLog();
         });
       }
+    };
+    const unlistenSingle = listen<CompileOutputEvent>("latex-compile-output", (event) => {
+      enqueue([event.payload]);
+    });
+    const unlistenBatch = listen<CompileOutputEvent[]>("latex-compile-output-batch", (event) => {
+      enqueue(Array.isArray(event.payload) ? event.payload : []);
     });
 
     return () => {
@@ -90,7 +98,8 @@ export function useLatexCompiler({
         logRafRef.current = null;
       }
       pendingLogRef.current = [];
-      void unlistenPromise.then((unlisten) => unlisten());
+      void unlistenSingle.then((unlisten) => unlisten());
+      void unlistenBatch.then((unlisten) => unlisten());
     };
   }, [flushCompileLog]);
 

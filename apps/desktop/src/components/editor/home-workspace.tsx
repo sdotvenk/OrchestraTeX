@@ -117,19 +117,31 @@ export function HomeWorkspace({
     <section aria-label="Home" className="h-full overflow-auto bg-bg">
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_520px] gap-7 px-6 lg:px-14 pt-4 pb-10 max-w-[1440px] mx-auto min-h-full">
         {/* Left column */}
-        <div className="flex flex-col gap-5 min-h-0">
+        <div className="flex flex-col gap-[22px] min-h-0">
           <h1>
             <OrchestraTeXWordmark prominent />
           </h1>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            <button type="button" className="btn btn-primary" onClick={onOpenFolder}>
+            <button
+              type="button"
+              className="btn btn-primary h-9 px-4 rounded-[9px]"
+              onClick={onOpenFolder}
+            >
               Open folder…
             </button>
-            <button type="button" className="btn btn-secondary" onClick={onNewProject}>
+            <button
+              type="button"
+              className="btn btn-secondary h-9 px-3.5 rounded-[9px]"
+              onClick={onNewProject}
+            >
               New project
             </button>
-            <button type="button" className="btn btn-secondary" onClick={onCloneFromGit}>
+            <button
+              type="button"
+              className="btn btn-secondary h-9 px-3.5 rounded-[9px]"
+              onClick={onCloneFromGit}
+            >
               Clone from Git…
             </button>
           </div>

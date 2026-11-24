@@ -70,7 +70,6 @@ export function UsageDashboard({
 }: UsageDashboardProps) {
   const [datePreset, setDatePreset] = useState<UsageDatePreset>("7d");
   const [selectedProject, setSelectedProject] = useState<string>(currentProjectPath ?? "__all__");
-  const [result, setResult] = useState<UsageLogQueryResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
@@ -113,60 +112,99 @@ export function UsageDashboard({
     return options;
   }, [currentProjectPath, recentProjects]);
 
+  const [loadedScope, setLoadedScope] = useState<{
+    result: UsageLogQueryResult;
+    datePreset: UsageDatePreset;
+    selectedProject: string;
+    rangeLabel: string;
+    projectLabel: string;
+  } | null>(null);
+  const requestIdRef = useRef(0);
+  const scopeMatchesCurrent =
+    loadedScope !== null &&
+    loadedScope.datePreset === datePreset &&
+    loadedScope.selectedProject === selectedProject;
+  const result = scopeMatchesCurrent ? loadedScope.result : null;
+
   const loadUsage = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
+    setExportStatus(null);
+    const rangeLabel = DATE_PRESETS.find((p) => p.id === datePreset)?.label ?? datePreset;
+    const projectLabel =
+      selectedProject === "__all__"
+        ? "All projects"
+        : (projectOptions.find((p) => p.path === selectedProject)?.name ?? selectedProject);
     try {
       const { startMs, endMs } = computeDateRange(datePreset);
       const projectPath = selectedProject === "__all__" ? null : selectedProject;
       const data = await queryUsageLog({ startMs, endMs, projectPath });
-      setResult(data);
+      if (requestIdRef.current !== requestId) return;
+      setLoadedScope({
+        result: data,
+        datePreset,
+        selectedProject,
+        rangeLabel,
+        projectLabel,
+      });
       setRefreshedAt(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
     } catch (err) {
+      if (requestIdRef.current !== requestId) return;
+      setLoadedScope(null);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
-  }, [datePreset, selectedProject]);
+  }, [datePreset, selectedProject, projectOptions]);
 
   useEffect(() => {
     void loadUsage();
   }, [loadUsage]);
 
   const handleExportCsv = useCallback(async () => {
-    if (!result) return;
+    if (!loadedScope || !scopeMatchesCurrent) return;
     setExportStatus(null);
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const dest = await save({
-        defaultPath: `orchestratex-usage-${datePreset}.csv`,
+        defaultPath: `orchestratex-usage-${loadedScope.datePreset}.csv`,
         filters: [{ name: "CSV", extensions: ["csv"] }],
       });
       if (!dest) return;
-      const rangeLabel = DATE_PRESETS.find((p) => p.id === datePreset)?.label ?? datePreset;
-      const projectLabel =
-        selectedProject === "__all__"
-          ? "All projects"
-          : (projectOptions.find((p) => p.path === selectedProject)?.name ?? selectedProject);
-      const csv = buildUsageCsv(result, { rangeLabel, projectLabel });
+      const csv = buildUsageCsv(loadedScope.result, {
+        rangeLabel: loadedScope.rangeLabel,
+        projectLabel: loadedScope.projectLabel,
+      });
       const { writeTextFile } = await import("@tauri-apps/plugin-fs");
       await writeTextFile(dest, csv);
       setExportStatus("Exported");
     } catch (err) {
       setExportStatus(err instanceof Error ? err.message : "Export failed");
     }
-  }, [result, datePreset, selectedProject, projectOptions]);
+  }, [loadedScope, scopeMatchesCurrent]);
 
   useEffect(() => {
     onTopBarStateChange?.({
       refreshedAt,
       loading,
-      canExport: Boolean(result) && !loading,
+      canExport: scopeMatchesCurrent && !loading && !error,
       exportStatus,
       onRefresh: () => void loadUsage(),
       onExportCsv: () => void handleExportCsv(),
     });
-  }, [onTopBarStateChange, refreshedAt, loading, result, exportStatus, loadUsage, handleExportCsv]);
+  }, [
+    onTopBarStateChange,
+    refreshedAt,
+    loading,
+    scopeMatchesCurrent,
+    error,
+    exportStatus,
+    loadUsage,
+    handleExportCsv,
+  ]);
 
   const groupedBreakdown = useMemo(() => {
     if (!result) return [];
@@ -352,7 +390,6 @@ export function UsageDashboard({
           const usedPct = primaryWindow?.usedPercent;
           const hasQuota = usedPct !== null && usedPct !== undefined;
           const isInstalled = Boolean(provider?.installed);
-          const isCustomLocal = id === "custom-acp" && isInstalled && !hasQuota;
           const resetText = formatResetCountdown(primaryWindow?.resetsAt);
 
           return (
@@ -376,26 +413,24 @@ export function UsageDashboard({
               <div className="mt-3 flex items-baseline gap-1.5">
                 <span
                   className={`text-[28px] leading-none font-semibold tracking-tight tabular-nums ${
-                    hasQuota || isCustomLocal ? "text-foreground" : "text-muted"
+                    hasQuota ? "text-foreground" : "text-muted"
                   }`}
                 >
-                  {hasQuota ? `${Math.round(usedPct)}%` : isCustomLocal ? "0" : "—"}
+                  {hasQuota ? `${Math.round(usedPct)}%` : "—"}
                 </span>
                 <span className="text-[12px] text-muted truncate">
                   {hasQuota
                     ? `of ${primaryWindow?.label ?? "5-hour window"}`
-                    : isCustomLocal
-                      ? "limits · runs locally"
-                      : isInstalled
-                        ? "quota not reported"
-                        : "not configured"}
+                    : isInstalled
+                      ? "quota not reported"
+                      : "not configured"}
                 </span>
               </div>
 
               <div
                 className="mt-2 h-2 rounded-[4px] bg-sunken overflow-hidden relative"
                 style={
-                  !hasQuota && !isCustomLocal
+                  !hasQuota
                     ? {
                         backgroundImage:
                           "repeating-linear-gradient(135deg, var(--hatch-a) 0 4px, var(--hatch-b) 4px 8px)",
@@ -418,11 +453,9 @@ export function UsageDashboard({
                 <span className="truncate">
                   {hasQuota
                     ? (resetText ?? primaryWindow?.status ?? "Active")
-                    : isCustomLocal
-                      ? "Measured zero, not missing"
-                      : isInstalled
-                        ? (provider?.rateLimits?.note ?? "Token counts only")
-                        : "Configure in Settings → Agents"}
+                    : isInstalled
+                      ? (provider?.rateLimits?.note ?? "Token counts only")
+                      : "Configure in Settings → Agents"}
                 </span>
                 {secondaryWindow?.usedPercent !== null &&
                   secondaryWindow?.usedPercent !== undefined && (

@@ -39,7 +39,8 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   antigravity: "Antigravity",
-  "custom-acp": "Agent",
+  "custom-acp": "Custom ACP",
+  you: "",
 };
 
 export function ScoreDrawer({
@@ -64,14 +65,15 @@ export function ScoreDrawer({
         <div className="flex flex-1 justify-between font-mono text-[10px] text-muted pr-1">
           {[0, 0.2, 0.4, 0.6, 0.8, 1].map((fraction) =>
             fraction === 1 ? (
-              <span key={fraction} className="text-foreground-strong font-medium">
+              <span key={fraction} className="text-foreground-strong font-medium whitespace-nowrap">
                 now
               </span>
             ) : (
-              <span key={fraction}>
+              <span key={fraction} className="whitespace-nowrap tabular-nums">
                 {new Date(start + span * fraction).toLocaleTimeString([], {
                   hour: "2-digit",
                   minute: "2-digit",
+                  hour12: false,
                 })}
               </span>
             ),
@@ -102,9 +104,11 @@ export function ScoreDrawer({
                   aria-hidden="true"
                 />
                 <span className="truncate font-medium text-foreground-strong">{lane.title}</span>
-                <span className="shrink-0 text-[11px] text-muted">
-                  {PROVIDER_DISPLAY[lane.provider] ?? "Agent"}
-                </span>
+                {PROVIDER_DISPLAY[lane.provider] && (
+                  <span className="shrink-0 text-[11px] text-muted">
+                    {PROVIDER_DISPLAY[lane.provider]}
+                  </span>
+                )}
               </div>
               <div className="relative h-[26px] flex-1">
                 {positions.length > 1 && (

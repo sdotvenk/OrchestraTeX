@@ -87,7 +87,7 @@ export type HistoryWorkspaceProps = {
   onCommitAndPush?: (message: string) => Promise<void> | void;
   onGenerateCommitMessageAI?: () => Promise<void> | void;
   isGeneratingCommitMessageAI?: boolean;
-  onPreviewGitFileDiff?: (path: string) => void;
+  onPreviewGitFileDiff?: (path: string, staged: boolean) => void;
   onPublishToGitHub?: () => void;
   isPushing?: boolean;
   fileVoiceByPath?: Record<string, AgentProviderId>;
@@ -559,9 +559,15 @@ export function HistoryWorkspace({
   );
 
   const [localSelectedCommitHash, setLocalSelectedCommitHash] = useState<string | null>(null);
-  const activeCommitHash = selectedCommitHash ?? localSelectedCommitHash;
+  const activeCommitHash =
+    selectedCommitHash !== undefined ? selectedCommitHash : localSelectedCommitHash;
 
-  const totalGitChanges = stagedChanges.length + unstagedChanges.length;
+  const totalGitChanges = useMemo(() => {
+    const unique = new Set<string>();
+    for (const c of stagedChanges) unique.add(c.path);
+    for (const c of unstagedChanges) unique.add(c.path);
+    return unique.size;
+  }, [stagedChanges, unstagedChanges]);
   const rawRemote = gitStatus?.remote?.trim() ?? "";
   const isRemoteUrl =
     rawRemote.includes("://") || rawRemote.includes("@") || rawRemote.includes("/");
@@ -1004,14 +1010,20 @@ export function HistoryWorkspace({
                         )}
                         <button
                           type="button"
-                          onClick={() => onPreviewGitFileDiff?.(file.path)}
+                          onClick={() => {
+                            setLocalSelectedCommitHash(null);
+                            setSidebarTab("commits");
+                            onPreviewGitFileDiff?.(file.path, true);
+                          }}
                           className="truncate text-left flex-1 hover:underline"
                           title={file.path}
                         >
                           {file.path}
                         </button>
                         <span className="ml-auto shrink-0 text-[11px] text-muted">
-                          {file.status[0]?.toUpperCase() ?? "M"}
+                          {file.status === "conflict"
+                            ? "!"
+                            : (file.status[0]?.toUpperCase() ?? "M")}
                         </span>
                       </div>
                     );
@@ -1045,14 +1057,20 @@ export function HistoryWorkspace({
                         )}
                         <button
                           type="button"
-                          onClick={() => onPreviewGitFileDiff?.(file.path)}
+                          onClick={() => {
+                            setLocalSelectedCommitHash(null);
+                            setSidebarTab("commits");
+                            onPreviewGitFileDiff?.(file.path, false);
+                          }}
                           className="truncate text-left flex-1 hover:underline"
                           title={file.path}
                         >
                           {file.path}
                         </button>
                         <span className="ml-auto shrink-0 text-[11px] text-muted">
-                          {file.status[0]?.toUpperCase() ?? "M"}
+                          {file.status === "conflict"
+                            ? "!"
+                            : (file.status[0]?.toUpperCase() ?? "M")}
                         </span>
                       </div>
                     );

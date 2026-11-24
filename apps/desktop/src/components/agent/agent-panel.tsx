@@ -10,7 +10,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatModelDisplayName, formatProviderDisplayName } from "@/lib/agent/model-display";
 import type {
   AgentProviderId,
@@ -52,16 +52,13 @@ interface AgentPanelProps {
   onApproveInteraction?: (threadId: string, interactionId: string) => void;
   mode?: "docked" | "workspace";
   threePane?: boolean;
-  pdfPageLabel?: string | null;
   onSwitchToPdf?: () => void;
   onDockInWrite?: () => void;
   latestBuildLogExcerpt?: string | null;
-  isExpanded?: boolean;
-  onToggleExpand?: () => void;
   onClose?: () => void;
 }
 
-export function AgentPanel({
+export const AgentPanel = memo(function AgentPanel({
   agent,
   agentSettings,
   onUpdateAgentSettings,
@@ -81,7 +78,6 @@ export function AgentPanel({
   onApproveInteraction,
   mode = "docked",
   threePane = false,
-  pdfPageLabel = null,
   onSwitchToPdf,
   onDockInWrite,
   latestBuildLogExcerpt = null,
@@ -107,7 +103,7 @@ export function AgentPanel({
     agent.providers.length > 0 &&
     !agent.loadingProviders &&
     (!activeProvider?.installed || !activeProvider.authenticated) &&
-    !activeThread?.messages.length;
+    !(activeThread?.messages?.length ?? 0);
 
   useEffect(() => {
     if (anyReadyProvider) {
@@ -125,8 +121,13 @@ export function AgentPanel({
       targetProvider?.models[0]?.id;
     const modelInfo = targetProvider?.models.find((m) => m.id === defaultModel);
     const savedEffort = agentSettings.defaultEffortByProvider[providerId];
+    const supported = modelInfo?.supportedEffortLevels ?? [];
+    const validSaved =
+      savedEffort && (supported.length === 0 || supported.includes(savedEffort))
+        ? savedEffort
+        : undefined;
     const defaultEffort = modelInfo?.supportsEffort
-      ? (savedEffort ?? modelInfo.defaultEffort ?? undefined)
+      ? (validSaved ?? modelInfo.defaultEffort ?? supported[0] ?? undefined)
       : undefined;
 
     if (activeThread) {
@@ -141,11 +142,14 @@ export function AgentPanel({
   const handleChangeModel = async (modelId: string) => {
     onSetDefaultModel(currentProviderId, modelId);
     const modelInfo = activeProvider?.models.find((m) => m.id === modelId);
+    const savedEffort = agentSettings.defaultEffortByProvider[currentProviderId];
+    const supported = modelInfo?.supportedEffortLevels ?? [];
+    const validSaved =
+      savedEffort && (supported.length === 0 || supported.includes(savedEffort))
+        ? savedEffort
+        : undefined;
     const effort = modelInfo?.supportsEffort
-      ? (agentSettings.defaultEffortByProvider[currentProviderId] ??
-        modelInfo.defaultEffort ??
-        modelInfo.supportedEffortLevels[0] ??
-        "")
+      ? (validSaved ?? modelInfo.defaultEffort ?? supported[0] ?? "")
       : "";
     if (activeThread) {
       await agent.updateThread(activeThread.summary.id, {
@@ -182,11 +186,35 @@ export function AgentPanel({
     }
   };
 
-  const handleSend = async (content: string, attachments?: AttachmentInput[]) => {
-    setUserBypassedOnboarding(true);
-    setView("chat");
-    await agent.sendMessage(content, attachments);
-  };
+  const handleSend = useCallback(
+    async (content: string, attachments?: AttachmentInput[]) => {
+      setUserBypassedOnboarding(true);
+      setView("chat");
+      await agent.sendMessage(content, attachments);
+    },
+    [agent],
+  );
+
+  const handleQuickPrompt = useCallback(
+    (prompt: string) => {
+      void handleSend(prompt);
+    },
+    [handleSend],
+  );
+
+  const handleRespondInteraction = useCallback(
+    async (interactionId: string, response: Parameters<typeof agent.respondInteraction>[2]) => {
+      if (!activeThread) return;
+      await agent.respondInteraction(activeThread.summary.id, interactionId, response);
+      if (
+        (response.kind === "approvalDecision" && response.decision !== "deny") ||
+        (response.kind === "planDecision" && response.approved)
+      ) {
+        onApproveInteraction?.(activeThread.summary.id, interactionId);
+      }
+    },
+    [activeThread, agent, onApproveInteraction],
+  );
 
   const queuedForActive = activeThread ? (agent.queuesByThread[activeThread.summary.id] ?? []) : [];
   const closeThreads = () => {
@@ -241,7 +269,6 @@ export function AgentPanel({
                   className="h-9 px-3 border-r border-border text-[12.5px] text-muted hover:text-foreground inline-flex items-center gap-1.5 shrink-0"
                 >
                   <span>PDF</span>
-                  {pdfPageLabel && <span className="text-[10.5px] text-muted">{pdfPageLabel}</span>}
                 </button>
               )}
               {recentTabs.map((t) => {
@@ -414,8 +441,8 @@ export function AgentPanel({
       )}
 
       {/* Tasks Progress Bar */}
-      {view === "chat" && activeThread && activeThread.tasks.length > 0 && (
-        <TasksDisplay tasks={activeThread.tasks} />
+      {view === "chat" && activeThread && (activeThread.tasks?.length ?? 0) > 0 && (
+        <TasksDisplay tasks={activeThread.tasks ?? []} />
       )}
 
       {/* Global / Turn Error Banner */}
@@ -481,17 +508,8 @@ export function AgentPanel({
             projectFiles={projectFiles}
             activeFile={activeFile}
             onFileClick={onFileClick}
-            onQuickPrompt={(prompt) => void handleSend(prompt)}
-            onRespondInteraction={async (interactionId, response) => {
-              if (!activeThread) return;
-              await agent.respondInteraction(activeThread.summary.id, interactionId, response);
-              if (
-                (response.kind === "approvalDecision" && response.decision !== "deny") ||
-                (response.kind === "planDecision" && response.approved)
-              ) {
-                onApproveInteraction?.(activeThread.summary.id, interactionId);
-              }
-            }}
+            onQuickPrompt={handleQuickPrompt}
+            onRespondInteraction={handleRespondInteraction}
           />
 
           <AgentComposer
@@ -558,4 +576,4 @@ export function AgentPanel({
       )}
     </div>
   );
-}
+});

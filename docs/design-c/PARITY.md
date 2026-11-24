@@ -1,6 +1,6 @@
 # Design C Render Parity Record
 
-**Branch:** `feat/design-c-v1`  
+**Branch:** `feat/design-c-v1`
 **Screens verified:** Home (`Home.dc.html`), Write (`Main.dc.html`), Build & Files (`Build.dc.html`), Dock (`Dock.dc.html`), Agents (`Threads.dc.html`), History (`Review.dc.html`), Usage & limits (`Usage.dc.html`), Nocturne (`Night.dc.html`).
 
 All screens use semantic CSS tokens in `apps/desktop/src/app/globals.css` (Lux and Nocturne), real harness brand marks (`ProviderIcon`), and live backend data only (no synthetic fixtures or mock annotations).
@@ -9,13 +9,13 @@ All screens use semantic CSS tokens in `apps/desktop/src/app/globals.css` (Lux a
 
 | Screen | Element | Status | Justification |
 | --- | --- | --- | --- |
-| Global Shell | Root scale (`1rem = 16px`), 8px workspace top gap, branch pill truncation, canonical avatar order | Matched | Moved `font-size: 13px` to `body` only (`G1`) so Tailwind `rem` scale is 1:1 with renders (40px top bar, 48px Home wordmark, 36px Home buttons, 12px `text-xs`); added `pt-2` paper gap (`G2`), `max-w-[220px] truncate` on branch pill (`G3`), canonical `claude, codex, antigravity, custom-acp` avatar order (`G4`), human-readable model/harness display names (`G5`), and per-workspace right-hand status segments (`G6`). |
+| Global Shell | Root scale (`1rem = 16px`), 8px workspace top gap, branch pill truncation, canonical avatar order | Matched | Moved `font-size: 13px` to `body` only (`G1`) so Tailwind `rem` scale is 1:1 with renders (40px top bar, 48px Home wordmark, 36px Home buttons, 12px `text-xs`); added `pt-2` paper gap (`G2`), `max-w-[250px] truncate` on branch pill (`G3`), canonical `claude, codex, antigravity, custom-acp` avatar order (`G4`), human-readable model/harness display names (`G5`), and per-workspace right-hand status segments (`G6`). |
 | Global Shell | Dialog chrome (`ConfirmDialog`, `InputDialog`, `GitHubPublishDialog`, `MainFileSelectionDialog`) | Matched | Removed all legacy LMMs-Lab brutalist `shadow-[3px_3px_0_var(--foreground)]` offset shadows and unused `.btn-brutalist`; migrated all 4 dialogs to `.ox-frame rounded-[12px]` chrome. |
 | Global Shell | Top bar ThemePicker & Settings buttons | Functional addition | Needed so users can switch Lux/Nocturne/Auto and open Build/Editor/Agents settings from any workspace view. |
 | Global Shell | Top bar voice avatars | Matched (brand marks) | Uses real `ProviderIcon` marks (Claude, Codex, Antigravity, Custom ACP) in canonical order instead of single-letter mock placeholders. |
 | Global Shell | Bottom status bar `Sync → PDF` button | Removed | Matches Design C renders; forward SyncTeX lives in the PDF pane header instead. |
 | Global Shell | Nocturne `"Three-pane layout: source · thread · PDF (wide windows)"` text | Omitted | Mock-only annotation excluded from shipping UI. |
-| Home | Two-column layout (`1.45fr 1fr`), wordmark, action bar, Recent projects, `Set up this Mac` | Matched | Matches `Home.dc.html` geometry (`H1`/`H2`), baseline-aligned agent meta (`H3`), borderless-until-focus `Search ⌘P` with conditional `Clear` (`H4`), and vertically centered empty state with `Open folder…` (`H5`). |
+| Home | Two-column layout (`1fr 520px`), wordmark, action bar, Recent projects, `Set up this Mac` | Matched | Matches `Home.dc.html` geometry (`H1`/`H2`, flush without outer main padding), baseline-aligned agent meta (`H3`), borderless-until-focus `Search ⌘P` with conditional `Clear` (`H4`), and vertically centered empty state with `Open folder…` (`H5`). |
 | Home | Recent project row Git branch/dirty & `Initialise Git` inline action | Backend-limited | `RecentProject` persistence stores path/name/lastOpened without probing unopened folders' Git repos on mount; thread counts and voice dots render when present. |
 | Home | LaTeX ready state (`✓ Ready · Tectonic`) + `Detect again` | Functional addition | Shows live compiler detection when a TeX engine is already installed; falls back to the radio installer card (`LaTeXInstallPrompt`) when none is detected. |
 | Home | Agents checklist `Detect again` & `Configure…` footer | Functional addition | Lets users re-detect CLIs or jump directly to the Agents settings tab. |

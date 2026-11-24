@@ -425,11 +425,11 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                 setDrawerOpen((p) => !p);
                 setDrawerTab("issues");
               }}
-              className="inline-flex items-center gap-1.5 rounded-full bg-error-bg border border-[var(--danger-line)] px-2 py-0.5 text-[11.5px] text-error font-medium truncate transition-colors"
+              className="inline-flex items-center gap-1 rounded-full bg-error-bg border border-[var(--danger-line)] px-2 py-0.5 text-[11px] text-error font-medium shrink-0 whitespace-nowrap transition-colors"
               title="Open Problems"
             >
               <WarningCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
-              <span className="tabular-nums">
+              <span className="tabular-nums whitespace-nowrap">
                 Build failed · {errorDiags.length} {errorDiags.length === 1 ? "error" : "errors"}
               </span>
             </button>

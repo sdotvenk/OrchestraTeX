@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentThread, ThreadSummary } from "./types";
+import { normalizeAgentThread, resolvePreferredEffort } from "./use-agent";
 import {
   applyAgentStreamEvent,
   applyPartDeltas,
@@ -172,5 +173,41 @@ describe("use-agent-reducer", () => {
 
     state = removeQueuedThreadMessage(state, "thread-1", "q-1");
     expect(state.queuesByThread["thread-1"]?.map((q) => q.id)).toEqual(["q-2"]);
+  });
+
+  it("normalizes partial thread payloads missing tasks, messages, or parts", () => {
+    const partial = {
+      summary: makeSummary(),
+      messages: [
+        {
+          id: "m1",
+          role: "assistant",
+          createdAt: 1000,
+        },
+      ],
+    } as unknown as AgentThread;
+
+    const normalized = normalizeAgentThread(partial);
+    expect(normalized.tasks).toEqual([]);
+    expect(normalized.pendingInteraction).toBeNull();
+    expect(normalized.messages).toHaveLength(1);
+    expect(normalized.messages[0]?.parts).toEqual([]);
+    expect(normalized.messages[0]?.changedFiles).toEqual([]);
+
+    const withoutMessages = { summary: makeSummary() } as unknown as AgentThread;
+    expect(normalizeAgentThread(withoutMessages).messages).toEqual([]);
+    expect(normalizeAgentThread(withoutMessages).tasks).toEqual([]);
+  });
+
+  it("resolves preferred reasoning effort with fallback when saved effort is unsupported", () => {
+    const model = {
+      supportsEffort: true,
+      defaultEffort: "medium",
+      supportedEffortLevels: ["low", "medium", "high"],
+    };
+    expect(resolvePreferredEffort(model, undefined, "xhigh")).toBe("medium");
+    expect(resolvePreferredEffort(model, undefined, "high")).toBe("high");
+    expect(resolvePreferredEffort(model, "low", "high")).toBe("low");
+    expect(resolvePreferredEffort({ supportsEffort: false }, "high", "medium")).toBeUndefined();
   });
 });

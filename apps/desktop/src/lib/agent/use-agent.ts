@@ -76,6 +76,41 @@ export interface UpdateThreadPatch {
   runtimeMode?: RuntimeMode;
 }
 
+export function normalizeAgentThread(thread: AgentThread): AgentThread {
+  const rawMessages = Array.isArray(thread.messages) ? thread.messages : [];
+  return {
+    ...thread,
+    messages: rawMessages.map((msg) => ({
+      ...msg,
+      parts: Array.isArray(msg.parts) ? msg.parts : [],
+      changedFiles: Array.isArray(msg.changedFiles) ? msg.changedFiles : [],
+    })),
+    pendingInteraction: thread.pendingInteraction ?? null,
+    tasks: Array.isArray(thread.tasks) ? thread.tasks : [],
+  };
+}
+
+export function resolvePreferredEffort(
+  modelInfo:
+    | {
+        supportsEffort?: boolean;
+        defaultEffort?: string | null;
+        supportedEffortLevels?: string[];
+      }
+    | undefined,
+  requestedEffort?: string,
+  savedEffort?: string,
+): string | undefined {
+  if (!modelInfo?.supportsEffort) return undefined;
+  const supported = modelInfo.supportedEffortLevels ?? [];
+  const isSupported = (val?: string | null): val is string =>
+    Boolean(val && (supported.length === 0 || supported.includes(val)));
+  if (isSupported(requestedEffort)) return requestedEffort;
+  if (isSupported(savedEffort)) return savedEffort;
+  if (isSupported(modelInfo.defaultEffort)) return modelInfo.defaultEffort;
+  return supported[0] ?? undefined;
+}
+
 export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions) {
   const [state, setState] = useState<AgentState>(createInitialAgentState);
 
@@ -227,10 +262,12 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
       if (!targetProject) return null;
       const generation = ++threadLoadGeneration.current;
       const buffered = drainPendingDeltas();
-      const loaded = await invoke<AgentThread>("agent_load_thread", {
-        projectPath: targetProject,
-        threadId,
-      });
+      const loaded = normalizeAgentThread(
+        await invoke<AgentThread>("agent_load_thread", {
+          projectPath: targetProject,
+          threadId,
+        }),
+      );
       if (generation !== threadLoadGeneration.current || targetProject !== projectPathRef.current) {
         return null;
       }
@@ -336,11 +373,7 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
       const model = requestedModel ?? savedModel ?? fallbackModel;
       const modelInfo = provider?.models.find((m) => m.id === model);
       const savedEffort = settingsRef.current.defaultEffortByProvider[providerId];
-      const reasoningEffort =
-        requestedEffort ??
-        (modelInfo?.supportsEffort
-          ? (savedEffort ?? modelInfo.defaultEffort ?? undefined)
-          : undefined);
+      const reasoningEffort = resolvePreferredEffort(modelInfo, requestedEffort, savedEffort);
       return { model, reasoningEffort };
     },
     [],
@@ -356,15 +389,17 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
         opts?.model,
         opts?.reasoningEffort,
       );
-      const thread = await invoke<AgentThread>("agent_create_thread", {
-        projectPath: targetProject,
-        providerId,
-        model,
-        reasoningEffort,
-        interactionMode: opts?.interactionMode ?? settingsRef.current.defaultInteractionMode,
-        runtimeMode: opts?.runtimeMode ?? settingsRef.current.defaultRuntimeMode,
-        title: opts?.title,
-      });
+      const thread = normalizeAgentThread(
+        await invoke<AgentThread>("agent_create_thread", {
+          projectPath: targetProject,
+          providerId,
+          model,
+          reasoningEffort,
+          interactionMode: opts?.interactionMode ?? settingsRef.current.defaultInteractionMode,
+          runtimeMode: opts?.runtimeMode ?? settingsRef.current.defaultRuntimeMode,
+          title: opts?.title,
+        }),
+      );
       setState((prev) => ({
         ...prev,
         activeThread: thread,
@@ -435,11 +470,13 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
     const cfg = summary
       ? customConfigsRef.current.find((c) => c.providerId === summary.providerId)
       : undefined;
-    const forked = await invoke<AgentThread>("agent_fork_thread", {
-      projectPath: targetProject,
-      threadId,
-      customBinaryPath: cfg?.binaryPath,
-    });
+    const forked = normalizeAgentThread(
+      await invoke<AgentThread>("agent_fork_thread", {
+        projectPath: targetProject,
+        threadId,
+        customBinaryPath: cfg?.binaryPath,
+      }),
+    );
     setState((prev) => ({
       ...prev,
       activeThread: forked,
@@ -708,9 +745,22 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
   }, []);
 
   const activeProviderStatus = useMemo(() => {
-    const pid = state.activeThread?.summary.providerId ?? resolveDefaultProvider();
+    const pid =
+      state.activeThread?.summary.providerId ??
+      (() => {
+        const preferred = settings.defaultProvider;
+        const preferredStatus = state.providers.find((p) => p.id === preferred);
+        if (preferredStatus?.installed && preferredStatus.authenticated) {
+          return preferred;
+        }
+        const ready = state.providers.find((p) => p.installed && p.authenticated);
+        if (ready) return ready.id;
+        const installed = state.providers.find((p) => p.installed);
+        if (installed) return installed.id;
+        return preferred;
+      })();
     return state.providers.find((p) => p.id === pid) ?? null;
-  }, [resolveDefaultProvider, state.activeThread?.summary.providerId, state.providers]);
+  }, [settings.defaultProvider, state.activeThread?.summary.providerId, state.providers]);
 
   const availableSlashCommands = useMemo(() => {
     const providerCommands = activeProviderStatus?.commands ?? [];
@@ -726,36 +776,70 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
     return merged;
   }, [activeProviderStatus]);
 
-  return {
-    providers: state.providers,
-    threads: state.threads,
-    activeThread: state.activeThread,
-    activeProviderStatus,
-    availableSlashCommands,
-    queuesByThread: state.queuesByThread,
-    providerLogs: state.providerLogs,
-    loadingProviders: state.loadingProviders,
-    loadingThreads: state.loadingThreads,
-    sending: state.sending,
-    error: state.error,
-    clearError,
-    refreshProviders,
-    refreshRateLimits,
-    refreshThreads,
-    loadThread,
-    createThread,
-    updateThread,
-    deleteThread,
-    forkThread,
-    compactThread,
-    sendMessage,
-    steerTurn,
-    interruptTurn,
-    respondInteraction,
-    queueMessage,
-    removeQueuedMessage,
-    updateQueuedMessage,
-    steerQueuedMessage,
-    runOneShotPrompt,
-  };
+  return useMemo(
+    () => ({
+      providers: state.providers,
+      threads: state.threads,
+      activeThread: state.activeThread,
+      activeProviderStatus,
+      availableSlashCommands,
+      queuesByThread: state.queuesByThread,
+      providerLogs: state.providerLogs,
+      loadingProviders: state.loadingProviders,
+      loadingThreads: state.loadingThreads,
+      sending: state.sending,
+      error: state.error,
+      clearError,
+      refreshProviders,
+      refreshRateLimits,
+      refreshThreads,
+      loadThread,
+      createThread,
+      updateThread,
+      deleteThread,
+      forkThread,
+      compactThread,
+      sendMessage,
+      steerTurn,
+      interruptTurn,
+      respondInteraction,
+      queueMessage,
+      removeQueuedMessage,
+      updateQueuedMessage,
+      steerQueuedMessage,
+      runOneShotPrompt,
+    }),
+    [
+      state.providers,
+      state.threads,
+      state.activeThread,
+      activeProviderStatus,
+      availableSlashCommands,
+      state.queuesByThread,
+      state.providerLogs,
+      state.loadingProviders,
+      state.loadingThreads,
+      state.sending,
+      state.error,
+      clearError,
+      refreshProviders,
+      refreshRateLimits,
+      refreshThreads,
+      loadThread,
+      createThread,
+      updateThread,
+      deleteThread,
+      forkThread,
+      compactThread,
+      sendMessage,
+      steerTurn,
+      interruptTurn,
+      respondInteraction,
+      queueMessage,
+      removeQueuedMessage,
+      updateQueuedMessage,
+      steerQueuedMessage,
+      runOneShotPrompt,
+    ],
+  );
 }

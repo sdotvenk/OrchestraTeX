@@ -417,37 +417,53 @@ export function ProjectInspector({
             )}
           </section>
           <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
-            <div className="flex items-center">
-              <span className="text-[12.5px] font-medium">Working changes</span>
-              <span className="ml-auto font-mono text-[11px] text-[var(--muted-foreground)]">
-                {gitStatus?.changes.length ?? 0}
-              </span>
-            </div>
-            {gitStatus && gitStatus.changes.length > 0 && (
-              <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
-                {gitStatus.changes.slice(0, 8).map((change) => {
-                  const voiceProvider = fileVoiceByPath?.[change.path];
-                  return (
-                    <div
-                      key={change.path}
-                      className="flex items-center gap-2 font-mono text-[11.5px] text-[var(--foreground-secondary)]"
-                    >
-                      {voiceProvider && (
-                        <span
-                          aria-hidden="true"
-                          className="h-[7px] w-[7px] shrink-0 rounded-full"
-                          style={{ backgroundColor: getProviderMeta(voiceProvider).colorVar }}
-                        />
-                      )}
-                      <span className="truncate">{change.path}</span>
-                      <span className="ml-auto shrink-0 text-[10.5px] text-[var(--muted-foreground)]">
-                        {change.status[0]?.toUpperCase()}
-                      </span>
+            {(() => {
+              const uniqueChanges = new Map<string, { path: string; status: string }>();
+              for (const change of gitStatus?.changes ?? []) {
+                const existing = uniqueChanges.get(change.path);
+                if (!existing || change.status === "conflict") {
+                  uniqueChanges.set(change.path, { path: change.path, status: change.status });
+                }
+              }
+              const dedupedList = Array.from(uniqueChanges.values());
+              return (
+                <>
+                  <div className="flex items-center">
+                    <span className="text-[12.5px] font-medium">Working changes</span>
+                    <span className="ml-auto font-mono text-[11px] text-[var(--muted-foreground)]">
+                      {dedupedList.length}
+                    </span>
+                  </div>
+                  {dedupedList.length > 0 && (
+                    <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                      {dedupedList.slice(0, 8).map((change) => {
+                        const voiceProvider = fileVoiceByPath?.[change.path];
+                        return (
+                          <div
+                            key={change.path}
+                            className="flex items-center gap-2 font-mono text-[11.5px] text-[var(--foreground-secondary)]"
+                          >
+                            {voiceProvider && (
+                              <span
+                                aria-hidden="true"
+                                className="h-[7px] w-[7px] shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor: getProviderMeta(voiceProvider).colorVar,
+                                }}
+                              />
+                            )}
+                            <span className="truncate">{change.path}</span>
+                            <span className="ml-auto shrink-0 text-[10.5px] text-[var(--muted-foreground)]">
+                              {change.status === "conflict" ? "!" : change.status[0]?.toUpperCase()}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  )}
+                </>
+              );
+            })()}
             {(onReviewChanges || onCommitAndPr) && (
               <div className="mt-2.5 grid grid-cols-2 gap-1.5">
                 {onReviewChanges && (

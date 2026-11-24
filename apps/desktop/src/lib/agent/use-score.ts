@@ -5,22 +5,36 @@ import { projectRelativePath } from "./edit-attribution";
 import { buildScoreLanes, createScoreCollector, SCORE_WINDOW_MS, type ScoreMark } from "./score";
 import type { AgentStreamEvent, ThreadSummary } from "./types";
 
-export function useScore(projectPath: string | null, threads: readonly ThreadSummary[]) {
+export function useScore(
+  projectPath: string | null,
+  threads: readonly ThreadSummary[],
+  visible = true,
+) {
   const [marks, setMarks] = useState<ScoreMark[]>([]);
   const [end, setEnd] = useState(Date.now);
   const collector = useMemo(() => createScoreCollector(), []);
   const threadList = useRef(threads);
   threadList.current = threads;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const dirtyRef = useRef(false);
 
   const refresh = useCallback(() => {
+    dirtyRef.current = false;
     const now = Date.now();
     setEnd(now);
     setMarks(collector.snapshot(now));
   }, [collector]);
 
   useEffect(() => {
+    if (visible) {
+      refresh();
+    }
+  }, [visible, refresh]);
+
+  useEffect(() => {
     if (!projectPath) return;
-    refresh();
+    if (visibleRef.current) refresh();
     let active = true;
     const eventThreads = new Map<string, ThreadSummary>();
     const unlisten = listen<AgentStreamEvent>("agent-event", ({ payload }) => {
@@ -43,9 +57,15 @@ export function useScore(projectPath: string | null, threads: readonly ThreadSum
         eventThreads.get(payload.threadId) ??
         threadList.current.find((item) => item.id === payload.threadId);
       if (!thread || !pathsEqual(thread.projectPath, projectPath)) return;
-      if (collector.ingest(projectPath, payload, Date.now())) refresh();
+      if (collector.ingest(projectPath, payload, Date.now())) {
+        if (visibleRef.current) refresh();
+        else dirtyRef.current = true;
+      }
     });
-    const clock = setInterval(refresh, 15_000);
+    const clock = setInterval(() => {
+      if (visibleRef.current) refresh();
+      else collector.prune(Date.now());
+    }, 15_000);
     return () => {
       active = false;
       clearInterval(clock);
@@ -65,7 +85,8 @@ export function useScore(projectPath: string | null, threads: readonly ThreadSum
         at,
         filePath: filePath ?? undefined,
       });
-      refresh();
+      if (visibleRef.current) refresh();
+      else dirtyRef.current = true;
     },
     [collector, projectPath, refresh],
   );
@@ -74,7 +95,8 @@ export function useScore(projectPath: string | null, threads: readonly ThreadSum
     (threadId: string, interactionId: string) => {
       if (!projectPath) return;
       collector.approve(projectPath, threadId, interactionId);
-      refresh();
+      if (visibleRef.current) refresh();
+      else dirtyRef.current = true;
     },
     [collector, projectPath, refresh],
   );

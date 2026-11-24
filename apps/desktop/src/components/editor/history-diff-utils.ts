@@ -159,6 +159,82 @@ export function formatCheckpointTime(isoString: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+export function decodeGitPatchPath(raw: string, stripDiffPrefix = true): string {
+  const untabbed = raw.endsWith("\t") ? raw.slice(0, -1) : raw;
+  const unquoted = (() => {
+    if (untabbed.length >= 2 && untabbed.startsWith('"') && untabbed.endsWith('"')) {
+      const inner = untabbed.slice(1, -1);
+      const bytes: number[] = [];
+      const encoder = new TextEncoder();
+      for (let i = 0; i < inner.length; ) {
+        const ch = inner[i];
+        if (ch === "\\" && i + 1 < inner.length) {
+          const next = inner[i + 1];
+          if (next && next >= "0" && next <= "7") {
+            const oct = inner.slice(i + 1, i + 4);
+            if (/^[0-7]{3}$/.test(oct)) {
+              bytes.push(Number.parseInt(oct, 8));
+              i += 4;
+              continue;
+            }
+          }
+          const escapes: Record<string, number> = {
+            n: 10,
+            r: 13,
+            t: 9,
+            "\\": 92,
+            '"': 34,
+            b: 8,
+            f: 12,
+          };
+          if (next && escapes[next] !== undefined) {
+            bytes.push(escapes[next]);
+            i += 2;
+            continue;
+          }
+        }
+        const cp = inner.codePointAt(i);
+        if (cp === undefined) break;
+        const charStr = String.fromCodePoint(cp);
+        if (cp < 0x80) {
+          bytes.push(cp);
+        } else {
+          for (const b of encoder.encode(charStr)) bytes.push(b);
+        }
+        i += charStr.length;
+      }
+      return new TextDecoder().decode(new Uint8Array(bytes));
+    }
+    return untabbed;
+  })();
+  return stripDiffPrefix ? unquoted.replace(/^[ab]\//, "") : unquoted;
+}
+
+function extractDiffGitBPath(line: string): string {
+  const rest = line.slice("diff --git ".length);
+  if (rest.endsWith('"')) {
+    let i = rest.length - 2;
+    while (i >= 0) {
+      if (rest[i] === '"') {
+        let backslashes = 0;
+        for (let k = i - 1; k >= 0 && rest[k] === "\\"; k -= 1) {
+          backslashes += 1;
+        }
+        if (backslashes % 2 === 0) {
+          return decodeGitPatchPath(rest.slice(i));
+        }
+      }
+      i -= 1;
+    }
+  }
+  const idx = rest.lastIndexOf(" b/");
+  if (idx !== -1) {
+    return decodeGitPatchPath(rest.slice(idx + 1));
+  }
+  const parts = rest.split(" ");
+  return decodeGitPatchPath(parts[parts.length - 1] ?? "unknown");
+}
+
 export function parseUnifiedDiff(diffText: string): ParsedFileDiff[] {
   if (!diffText.trim()) {
     return [];
@@ -251,10 +327,8 @@ export function parseUnifiedDiff(diffText: string): ParsedFileDiff[] {
   for (const line of lines) {
     if (line.startsWith("diff --git ")) {
       flushFile();
-      const parts = line.split(" ");
-      const bPath = parts[3]?.startsWith("b/") ? parts[3].slice(2) : (parts[3] ?? "unknown");
       currentFile = {
-        path: bPath,
+        path: extractDiffGitBPath(line),
         headerLines: [line],
         hunkBlocks: [],
       };
@@ -263,6 +337,10 @@ export function parseUnifiedDiff(diffText: string): ParsedFileDiff[] {
 
     if (!currentFile) {
       continue;
+    }
+
+    if (!currentHunk && line.startsWith("rename to ")) {
+      currentFile.path = decodeGitPatchPath(line.slice("rename to ".length), false);
     }
 
     if (line.startsWith("@@ ")) {
@@ -274,8 +352,14 @@ export function parseUnifiedDiff(diffText: string): ParsedFileDiff[] {
     if (currentHunk) {
       currentHunk.push(line);
     } else {
-      if (line.startsWith("+++ b/") || line.startsWith("--- a/")) {
-        currentFile.path = line.slice(6).replace(/\t$/, "");
+      if (line.startsWith("+++ ") && !line.startsWith("+++ /dev/null")) {
+        currentFile.path = decodeGitPatchPath(line.slice(4));
+      } else if (
+        line.startsWith("--- ") &&
+        !line.startsWith("--- /dev/null") &&
+        currentFile.path === "unknown"
+      ) {
+        currentFile.path = decodeGitPatchPath(line.slice(4));
       }
       currentFile.headerLines.push(line);
     }

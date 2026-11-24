@@ -47,7 +47,7 @@ OrchestraTeX/
 | Monaco Editor    | `apps/desktop/src/components/editor/monaco-editor.tsx`| File editor with language detection         |
 | Diff Editor      | `apps/desktop/src/components/editor/monaco-diff-editor.tsx` | Unified diff viewer                   |
 | Terminal         | `apps/desktop/src/components/editor/terminal.tsx`     | xterm.js + PTY                              |
-| Git Panel        | `apps/desktop/src/components/editor/sidebar-git-panel.tsx` | Git status, staging, commit            |
+| History Workspace | `apps/desktop/src/components/editor/history-workspace.tsx` | Checkpoints, commits, staging, diff   |
 | Changes Review   | `apps/desktop/src/components/editor/changes-review-panel.tsx` | Review changes before commit        |
 | Inline Diff      | `apps/desktop/src/components/editor/inline-diff-review.tsx` | Inline diff visualization            |
 | GitHub Publish   | `apps/desktop/src/components/editor/github-publish-dialog.tsx` | Create GitHub repo & push          |

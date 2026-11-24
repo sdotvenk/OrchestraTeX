@@ -1,6 +1,6 @@
 "use client";
 
-import type { FileNode, GitStatus } from "@orchestratex/shared";
+import type { FileNode, GitLogEntry, GitStatus } from "@orchestratex/shared";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion, type PanInfo, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
@@ -28,6 +28,7 @@ import {
 import { EditorErrorBoundary } from "@/components/editor/editor-error-boundary";
 import { EditorSkeleton } from "@/components/editor/editor-skeleton";
 import { GitHubPublishDialog } from "@/components/editor/github-publish-dialog";
+import { formatCheckpointTime } from "@/components/editor/history-diff-utils";
 import { HistoryWorkspace } from "@/components/editor/history-workspace";
 import { HomeWorkspace, type ProjectThreadCounts } from "@/components/editor/home-workspace";
 import type { PdfHighlightTarget } from "@/components/editor/pdf-viewer";
@@ -341,6 +342,14 @@ export default function EditorPage() {
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("file");
   const [gitDiffPreview, setGitDiffPreview] = useState<GitDiffPreviewState | null>(null);
   const [historyDiffPreview, setHistoryDiffPreview] = useState<GitDiffPreviewState | null>(null);
+  const [selectedHistoryCommit, setSelectedHistoryCommit] = useState<GitLogEntry | null>(null);
+  const [historyCommitDiff, setHistoryCommitDiff] = useState<{
+    entry: GitLogEntry;
+    content: string;
+    isLoading: boolean;
+    error: string | null;
+  } | null>(null);
+  const [worktreeGitLog, setWorktreeGitLog] = useState<GitLogEntry[]>([]);
   const [splitPane, setSplitPane] = useState<SplitPaneState | null>(null);
   const [splitDropHint, setSplitDropHint] = useState<SplitPaneSide | null>(null);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
@@ -500,10 +509,25 @@ export default function EditorPage() {
   const activeWorkspaceThreadId = activeWorkspaceThread?.id;
   const { loadThread } = agent;
   const { refreshPullRequest } = orchestration;
+  const activeWorktreePathRef = useRef(activeWorktreePath);
+  activeWorktreePathRef.current = activeWorktreePath;
+  const worktreeStatusRequestIdRef = useRef(0);
   const refreshWorktreeStatus = useCallback(async () => {
-    if (!activeWorktreePath) return;
-    const status = await invoke<GitStatus>("git_status", { dir: activeWorktreePath });
+    const targetDir = activeWorktreePath;
+    if (!targetDir) return;
+    const requestId = ++worktreeStatusRequestIdRef.current;
+    const [status, log] = await Promise.all([
+      invoke<GitStatus>("git_status", { dir: targetDir }),
+      invoke<GitLogEntry[]>("git_log", { dir: targetDir, limit: 30 }).catch(() => []),
+    ]);
+    if (
+      worktreeStatusRequestIdRef.current !== requestId ||
+      activeWorktreePathRef.current !== targetDir
+    ) {
+      return;
+    }
     setWorktreeGitStatus(status);
+    setWorktreeGitLog(log);
   }, [activeWorktreePath]);
 
   useEffect(() => {
@@ -521,25 +545,35 @@ export default function EditorPage() {
   }, [daemon.isOpeningProject, daemon.projectPath, loadThread, openingThread, toast]);
 
   useEffect(() => {
-    if (workspaceView !== "agents") return;
+    if (workspaceView !== "agents" && !(workspaceView === "history" && showThreadHistory)) return;
     let active = true;
     const updateStatus = async () => {
       if (!activeWorktreePath) return;
       try {
-        const status = await invoke<GitStatus>("git_status", { dir: activeWorktreePath });
-        if (active) setWorktreeGitStatus(status);
+        const [status, log] = await Promise.all([
+          invoke<GitStatus>("git_status", { dir: activeWorktreePath }),
+          invoke<GitLogEntry[]>("git_log", { dir: activeWorktreePath, limit: 30 }).catch(() => []),
+        ]);
+        if (active) {
+          setWorktreeGitStatus(status);
+          setWorktreeGitLog(log);
+        }
       } catch {
-        if (active) setWorktreeGitStatus(null);
+        if (active) {
+          setWorktreeGitStatus(null);
+          setWorktreeGitLog([]);
+        }
       }
     };
     setWorktreeGitStatus(null);
+    setWorktreeGitLog([]);
     void updateStatus();
     const timer = setInterval(() => void updateStatus(), 10_000);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, [activeWorktreePath, workspaceView]);
+  }, [activeWorktreePath, showThreadHistory, workspaceView]);
 
   useEffect(() => {
     if (workspaceView !== "agents" || !activeWorkspaceThreadId || !daemon.projectPath) return;
@@ -568,7 +602,6 @@ export default function EditorPage() {
   const runningThreads = projectThreads.filter((thread) => thread.status === "running").length;
   const [showThemePicker, setShowThemePicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [agentExpanded, setAgentExpanded] = useState(false);
   const [agentDraftInjection, setAgentDraftInjection] = useState<AgentDraftInjection | null>(null);
   const [pendingTerminalCommand, setPendingTerminalCommand] = useState<{
     id: number;
@@ -673,10 +706,6 @@ export default function EditorPage() {
   const rafIdRef = useRef<number | null>(null);
 
   const gitStatus = daemon.gitStatus;
-  const stagedChanges = useMemo(
-    () => (gitStatus?.changes ?? []).filter((c: { staged: boolean; path: string }) => c.staged),
-    [gitStatus?.changes],
-  );
 
   // LaTeX settings and editor settings
   const latexSettings = useLatexSettings();
@@ -698,7 +727,15 @@ export default function EditorPage() {
     }
   }, [daemon.files, latexSettings.settings.mainFile, latexSettings, texFiles]);
 
-  const score = useScore(daemon.projectPath, agent.threads);
+  const score = useScore(
+    daemon.projectPath,
+    agent.threads,
+    workspaceView === "write" &&
+      !buildActivityCollapsed &&
+      buildActivityTab === "score" &&
+      !showHomeWorkspace &&
+      !showUsageDashboard,
+  );
 
   const latexCompiler = useLatexCompiler({
     settings: latexSettings.settings,
@@ -774,6 +811,32 @@ export default function EditorPage() {
     ],
   );
 
+  const threePaneAgentWidth = Math.min(Math.max(rightPanelWidth, 330), 360);
+  const threePanePdfWidth = Math.min(livePreviewWidth, 420);
+  const threePaneChromeBudget = (showSidebar ? sidebarWidth + 14 : 0) + 48;
+  const canFitThreePanes =
+    windowWidth >= threePaneChromeBudget + 360 + threePaneAgentWidth + threePanePdfWidth;
+  const showLivePreviewEffective = showLivePreview && (!showRightPanel || canFitThreePanes);
+  const openPdfPreview = useCallback(() => {
+    if (showRightPanel && !canFitThreePanes) {
+      setShowRightPanel(false);
+    }
+    setShowLivePreview(true);
+  }, [canFitThreePanes, showRightPanel]);
+  const togglePdfPreview = useCallback(() => {
+    if (showLivePreviewEffective) {
+      setShowLivePreview(false);
+    } else {
+      openPdfPreview();
+    }
+  }, [openPdfPreview, showLivePreviewEffective]);
+  const openDockedAgentPanel = useCallback(() => {
+    setShowRightPanel(true);
+    if (windowWidth < 1600) {
+      setShowLivePreview(false);
+    }
+  }, [windowWidth]);
+
   const executeLocalCompile = useCallback(
     async (mainFile: string) => {
       if (!daemon.projectPath) return;
@@ -781,7 +844,7 @@ export default function EditorPage() {
         toast("No LaTeX compiler detected. Install TinyTeX, Tectonic, or TeX Live below.", "error");
         return;
       }
-      setShowLivePreview(true);
+      openPdfPreview();
       const res = await latexCompiler.compile({
         directory: daemon.projectPath,
         mainFile,
@@ -796,7 +859,7 @@ export default function EditorPage() {
         }
       }
     },
-    [daemon.projectPath, hasAnyCompiler, latexCompiler, toast],
+    [daemon.projectPath, hasAnyCompiler, latexCompiler, openPdfPreview, toast],
   );
 
   // Handle compile with main file detection
@@ -845,8 +908,12 @@ export default function EditorPage() {
   }, []);
 
   const handleToggleRightPanel = useCallback(() => {
-    setShowRightPanel((prev) => !prev);
-  }, []);
+    if (showRightPanel) {
+      setShowRightPanel(false);
+    } else {
+      openDockedAgentPanel();
+    }
+  }, [openDockedAgentPanel, showRightPanel]);
 
   useEffect(() => {
     localStorage.setItem("sidebarWidth", String(sidebarWidth));
@@ -1268,7 +1335,7 @@ export default function EditorPage() {
           line: line ?? cursorPosition.line,
           column: column ?? cursorPosition.column,
         });
-        setShowLivePreview(true);
+        openPdfPreview();
         setPdfHighlightTarget({
           page: res.page,
           x: res.h,
@@ -1288,21 +1355,122 @@ export default function EditorPage() {
       daemon.projectPath,
       latexCompiler,
       latexSettings.settings.mainFile,
+      openPdfPreview,
       selectedFile,
       toast,
     ],
   );
 
   const historyDiffRequestIdRef = useRef(0);
+  const historyCommitRequestIdRef = useRef(0);
+
+  const isViewingWorktreeHistory = Boolean(showThreadHistory && activeWorktreePath);
+  const activeHistoryDir = isViewingWorktreeHistory ? activeWorktreePath : daemon.projectPath;
+  const activeHistoryGitStatus = isViewingWorktreeHistory ? worktreeGitStatus : gitStatus;
+  const activeHistoryStagedChanges = useMemo(
+    () => (activeHistoryGitStatus?.changes ?? []).filter((c) => c.staged),
+    [activeHistoryGitStatus?.changes],
+  );
+  const activeHistoryUnstagedChanges = useMemo(
+    () => (activeHistoryGitStatus?.changes ?? []).filter((c) => !c.staged),
+    [activeHistoryGitStatus?.changes],
+  );
+  const uniqueHistoryChangeCount = useMemo(
+    () => new Set((activeHistoryGitStatus?.changes ?? []).map((c) => c.path)).size,
+    [activeHistoryGitStatus?.changes],
+  );
 
   useEffect(() => {
-    void daemon.projectPath;
+    void activeHistoryDir;
     gitDiffRequestIdRef.current += 1;
     historyDiffRequestIdRef.current += 1;
+    historyCommitRequestIdRef.current += 1;
     setGitDiffPreview(null);
     setHistoryDiffPreview(null);
+    setSelectedHistoryCommit(null);
+    setHistoryCommitDiff(null);
     setEditorViewMode("file");
-  }, [daemon.projectPath]);
+  }, [activeHistoryDir]);
+
+  const handlePreviewHistoryFileDiff = useCallback(
+    async (path: string, staged: boolean) => {
+      if (!activeHistoryDir) return;
+      const requestId = historyDiffRequestIdRef.current + 1;
+      historyDiffRequestIdRef.current = requestId;
+      historyCommitRequestIdRef.current += 1;
+      setSelectedHistoryCommit(null);
+      setHistoryCommitDiff(null);
+      setHistoryDiffPreview({
+        path,
+        staged,
+        content: "",
+        isLoading: true,
+        error: null,
+      });
+      try {
+        const content = isViewingWorktreeHistory
+          ? await invoke<string>("git_diff", { dir: activeHistoryDir, file: path, staged })
+          : await daemon.gitDiff(path, staged);
+        if (historyDiffRequestIdRef.current !== requestId) return;
+        setHistoryDiffPreview({
+          path,
+          staged,
+          content,
+          isLoading: false,
+          error: null,
+        });
+      } catch (error) {
+        if (historyDiffRequestIdRef.current !== requestId) return;
+        setHistoryDiffPreview({
+          path,
+          staged,
+          content: "",
+          isLoading: false,
+          error: String(error),
+        });
+      }
+    },
+    [activeHistoryDir, daemon, isViewingWorktreeHistory],
+  );
+
+  const handleSelectHistoryCommit = useCallback(
+    async (entry: GitLogEntry) => {
+      if (!activeHistoryDir) return;
+      const requestId = historyCommitRequestIdRef.current + 1;
+      historyCommitRequestIdRef.current = requestId;
+      historyDiffRequestIdRef.current += 1;
+      setHistoryDiffPreview(null);
+      setSelectedHistoryCommit(entry);
+      setHistoryCommitDiff({
+        entry,
+        content: "",
+        isLoading: true,
+        error: null,
+      });
+      try {
+        const content = await invoke<string>("git_commit_diff", {
+          dir: activeHistoryDir,
+          hash: entry.hash,
+        });
+        if (historyCommitRequestIdRef.current !== requestId) return;
+        setHistoryCommitDiff({
+          entry,
+          content,
+          isLoading: false,
+          error: null,
+        });
+      } catch (error) {
+        if (historyCommitRequestIdRef.current !== requestId) return;
+        setHistoryCommitDiff({
+          entry,
+          content: "",
+          isLoading: false,
+          error: String(error),
+        });
+      }
+    },
+    [activeHistoryDir],
+  );
 
   const loadDiffPreview = useCallback(
     async (
@@ -2205,15 +2373,17 @@ export default function EditorPage() {
     for (const change of gitStatus.changes) {
       const normalized = change.path.replace(/\\/g, "/").replace(/^\.\//, "");
       const code =
-        change.status === "modified"
-          ? "M"
-          : change.status === "added"
-            ? "A"
-            : change.status === "deleted"
-              ? "D"
-              : change.status === "renamed"
-                ? "R"
-                : "?";
+        change.status === "conflict"
+          ? "!"
+          : change.status === "modified"
+            ? "M"
+            : change.status === "added"
+              ? "A"
+              : change.status === "deleted"
+                ? "D"
+                : change.status === "renamed"
+                  ? "R"
+                  : "?";
       map[normalized] = code;
     }
     return map;
@@ -2674,17 +2844,39 @@ export default function EditorPage() {
 
   const handleStageFile = useCallback(
     (path: string) => {
+      if (isViewingWorktreeHistory && activeHistoryDir) {
+        void invoke("git_add", { dir: activeHistoryDir, files: [path] })
+          .then(() => refreshWorktreeStatus())
+          .catch((error: unknown) => toast(String(error), "error"));
+        return;
+      }
       daemon.gitAdd([path]);
     },
-    [daemon],
+    [activeHistoryDir, daemon, isViewingWorktreeHistory, refreshWorktreeStatus, toast],
   );
 
   const handleUnstageFile = useCallback(
     (path: string) => {
-      const originalPath = stagedChanges.find((change) => change.path === path)?.originalPath;
-      daemon.gitUnstage(originalPath ? [path, originalPath] : [path]);
+      const originalPath = activeHistoryStagedChanges.find(
+        (change) => change.path === path,
+      )?.originalPath;
+      const files = originalPath ? [path, originalPath] : [path];
+      if (isViewingWorktreeHistory && activeHistoryDir) {
+        void invoke("git_unstage", { dir: activeHistoryDir, files })
+          .then(() => refreshWorktreeStatus())
+          .catch((error: unknown) => toast(String(error), "error"));
+        return;
+      }
+      daemon.gitUnstage(files);
     },
-    [daemon, stagedChanges],
+    [
+      activeHistoryDir,
+      activeHistoryStagedChanges,
+      daemon,
+      isViewingWorktreeHistory,
+      refreshWorktreeStatus,
+      toast,
+    ],
   );
 
   const handleGitPush = useCallback(async () => {
@@ -2751,7 +2943,7 @@ export default function EditorPage() {
 
   const handleAskAgentSelection = useCallback(
     (selectionText: string, filePath: string, startLine: number, endLine: number) => {
-      setShowRightPanel(true);
+      openDockedAgentPanel();
       const loc =
         filePath && startLine > 0
           ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
@@ -2763,13 +2955,13 @@ export default function EditorPage() {
         contextChip: { label: loc, snippet },
       });
     },
-    [],
+    [openDockedAgentPanel],
   );
 
   const handleNewThreadFromSelection = useCallback(
     (selectionText: string, filePath: string, startLine: number, endLine: number) => {
       void agent.createThread().catch((error: unknown) => toast(String(error), "error"));
-      setShowRightPanel(true);
+      openDockedAgentPanel();
       const loc =
         filePath && startLine > 0
           ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
@@ -2781,12 +2973,12 @@ export default function EditorPage() {
         contextChip: { label: loc, snippet },
       });
     },
-    [agent, toast],
+    [agent, openDockedAgentPanel, toast],
   );
 
   const handleExplainSelection = useCallback(
     (selectionText: string, filePath: string, startLine: number, endLine: number) => {
-      setShowRightPanel(true);
+      openDockedAgentPanel();
       const loc =
         filePath && startLine > 0
           ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
@@ -2798,13 +2990,13 @@ export default function EditorPage() {
         contextChip: { label: loc, snippet },
       });
     },
-    [],
+    [openDockedAgentPanel],
   );
 
   const handleFixDiagnosticsWithAi = useCallback(
     (diags: LatexDiagnostic[]) => {
       if (diags.length === 0) return;
-      setShowRightPanel(true);
+      openDockedAgentPanel();
       const list = diags
         .slice(0, 12)
         .map(
@@ -2818,16 +3010,16 @@ export default function EditorPage() {
       const prompt = `Please fix these LaTeX compilation issues:\n\n${mainHint}${list}`;
       void agent.sendMessage(prompt);
     },
-    [agent, latexSettings.settings.mainFile],
+    [agent, latexSettings.settings.mainFile, openDockedAgentPanel],
   );
 
   const handleGenerateCommitMessageAI = useCallback(async () => {
-    if (!daemon.projectPath) {
+    if (!activeHistoryDir) {
       toast("Please open a project first.", "error");
       return;
     }
 
-    if (stagedChanges.length === 0) {
+    if (activeHistoryStagedChanges.length === 0) {
       toast("Stage files before generating commit message.", "error");
       return;
     }
@@ -2836,7 +3028,15 @@ export default function EditorPage() {
 
     try {
       const diffChunks: string[] = await Promise.all(
-        stagedChanges.map((change: { path: string }) => daemon.gitDiff(change.path, true)),
+        activeHistoryStagedChanges.map((change: { path: string }) =>
+          isViewingWorktreeHistory
+            ? invoke<string>("git_diff", {
+                dir: activeHistoryDir,
+                file: change.path,
+                staged: true,
+              })
+            : daemon.gitDiff(change.path, true),
+        ),
       );
       const mergedDiff = diffChunks
         .filter((chunk: string) => chunk.trim().length > 0)
@@ -2867,18 +3067,49 @@ export default function EditorPage() {
     } finally {
       setIsGeneratingCommitMessageAI(false);
     }
-  }, [agent, daemon, stagedChanges, toast]);
+  }, [
+    activeHistoryDir,
+    activeHistoryStagedChanges,
+    agent,
+    daemon,
+    isViewingWorktreeHistory,
+    toast,
+  ]);
 
-  const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) return;
-    const result = await daemon.gitCommit(commitMessage.trim());
-    if (result.success) {
-      toast("Changes committed", "success");
-      setCommitMessage("");
-    } else {
+  const handleCommit = useCallback(
+    async (overrideMessage?: string): Promise<boolean> => {
+      const finalMessage = (overrideMessage ?? commitMessage).trim();
+      if (!finalMessage) return false;
+      if (isViewingWorktreeHistory && activeHistoryDir) {
+        try {
+          await invoke("git_commit", { dir: activeHistoryDir, message: finalMessage });
+          toast("Changes committed", "success");
+          setCommitMessage("");
+          await refreshWorktreeStatus();
+          return true;
+        } catch (error) {
+          toast(error instanceof Error ? error.message : String(error), "error");
+          return false;
+        }
+      }
+      const result = await daemon.gitCommit(finalMessage);
+      if (result.success) {
+        toast("Changes committed", "success");
+        setCommitMessage("");
+        return true;
+      }
       toast(result.error || "Failed to commit", "error");
-    }
-  }, [commitMessage, daemon, toast]);
+      return false;
+    },
+    [
+      activeHistoryDir,
+      commitMessage,
+      daemon,
+      isViewingWorktreeHistory,
+      refreshWorktreeStatus,
+      toast,
+    ],
+  );
 
   const validateFileName = useCallback((name: string): string | null => {
     if (!name.trim()) {
@@ -2941,7 +3172,7 @@ export default function EditorPage() {
       // Toggle Agent panel: Cmd/Ctrl+L
       if (isMod && !e.shiftKey && key === "l") {
         e.preventDefault();
-        setShowRightPanel((prev) => !prev);
+        handleToggleRightPanel();
         return;
       }
 
@@ -2966,7 +3197,7 @@ export default function EditorPage() {
       if (isMod && !e.shiftKey && key === "p") {
         e.preventDefault();
         if (daemon.projectPath) {
-          setShowLivePreview((prev) => !prev);
+          togglePdfPreview();
         }
         return;
       }
@@ -2980,6 +3211,8 @@ export default function EditorPage() {
     selectedFile,
     handleCloseTab,
     handleCompileWithDetection,
+    handleToggleRightPanel,
+    togglePdfPreview,
     workspaceView,
     showHomeWorkspace,
     showUsageDashboard,
@@ -3058,6 +3291,37 @@ export default function EditorPage() {
     setShowLatexSettings(true);
   }, []);
   const handleCloseRightPanel = useCallback(() => setShowRightPanel(false), []);
+  const handleCloseAgentsView = useCallback(() => setWorkspaceView("write"), []);
+  const handleAgentsWorkspaceFileClick = useCallback(
+    (path: string) => {
+      setWorkspaceView("write");
+      handleAgentFileClick(path);
+    },
+    [handleAgentFileClick],
+  );
+  const handleSwitchDockedToPdf = useCallback(() => {
+    setShowRightPanel(false);
+    setShowLivePreview(true);
+  }, []);
+  const handleDockAgentInWrite = useCallback(() => {
+    setWorkspaceView("write");
+    openDockedAgentPanel();
+  }, [openDockedAgentPanel]);
+  const handleOpenAgentsWorkspace = useCallback(() => {
+    setShowHomeWorkspace(false);
+    setShowUsageDashboard(false);
+    setWorkspaceView("agents");
+  }, []);
+  const latestBuildLogExcerpt = useMemo(
+    () =>
+      latexCompiler.compileLog.length > 0
+        ? latexCompiler.compileLog
+            .slice(-5)
+            .map((entry) => entry.line)
+            .join("\n")
+        : null,
+    [latexCompiler.compileLog],
+  );
   const handleResetAgentBoundary = useCallback(() => {
     void agent.refreshProviders();
   }, [agent]);
@@ -3441,20 +3705,10 @@ export default function EditorPage() {
     [daemon.files, daemon.projectPath],
   );
 
-  const canFitThreePanes = windowWidth >= (showSidebar ? sidebarWidth : 0) + 360 + 330 + 360;
-  const showLivePreviewEffective = showLivePreview && (!showRightPanel || canFitThreePanes);
-  const openDockedAgentPanel = () => {
-    setShowRightPanel(true);
-    if (windowWidth < 1600) {
-      setShowLivePreview(false);
-    }
-  };
   const maxDockedWidth = Math.max(380, windowWidth - (showSidebar ? sidebarWidth : 0) - 420);
-  const effectiveRightPanelWidth = agentExpanded
-    ? Math.min(Math.max(rightPanelWidth, 570), maxDockedWidth)
-    : showLivePreviewEffective
-      ? Math.min(Math.max(rightPanelWidth, 330), 360)
-      : Math.min(Math.max(rightPanelWidth, 560), maxDockedWidth);
+  const effectiveRightPanelWidth = showLivePreviewEffective
+    ? threePaneAgentWidth
+    : Math.min(Math.max(rightPanelWidth, 560), maxDockedWidth);
   const isHomeVisible = !showUsageDashboard && (!daemon.projectPath || showHomeWorkspace);
   const isWorkspaceVisible = !showHomeWorkspace && !showUsageDashboard;
   const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
@@ -3507,7 +3761,7 @@ export default function EditorPage() {
                 />
                 {gitStatus?.branch && (
                   <span
-                    className="hidden sm:inline-flex items-center gap-1 font-mono text-[11.5px] text-muted border border-border rounded-full px-2 py-0.5 min-w-0 max-w-[220px]"
+                    className="hidden sm:inline-flex items-center gap-1 font-mono text-[11.5px] text-muted border border-border rounded-full px-2 py-0.5 min-w-0 max-w-[250px]"
                     title={`Branch: ${gitStatus.branch}`}
                   >
                     <GitBranchIcon className="size-3 shrink-0" aria-hidden="true" />
@@ -3762,12 +4016,7 @@ export default function EditorPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!showLivePreview && showRightPanel && !canFitThreePanes) {
-                        setShowRightPanel(false);
-                      }
-                      setShowLivePreview((prev) => !prev);
-                    }}
+                    onClick={togglePdfPreview}
                     className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
                       showLivePreviewEffective
                         ? "text-foreground bg-subtle/80"
@@ -3799,8 +4048,8 @@ export default function EditorPage() {
             !showUsageDashboard &&
             workspaceView === "history" && (
               <span className="hidden md:inline text-[12px] text-muted tabular-nums">
-                {gitStatus && gitStatus.changes.length > 0
-                  ? `${gitStatus.changes.length} ${gitStatus.changes.length === 1 ? "file" : "files"} changed`
+                {uniqueHistoryChangeCount > 0
+                  ? `${uniqueHistoryChangeCount} ${uniqueHistoryChangeCount === 1 ? "file" : "files"} changed`
                   : "Working tree clean"}
               </span>
             )}
@@ -3822,19 +4071,19 @@ export default function EditorPage() {
 
           {showUsageDashboard && usageTopBarState ? (
             <div className="flex items-center gap-2">
-              {usageTopBarState.refreshedAt && (
-                <button
-                  type="button"
-                  onClick={usageTopBarState.onRefresh}
-                  disabled={usageTopBarState.loading}
-                  className="text-[12px] text-muted hover:text-foreground tabular-nums transition-colors disabled:opacity-50"
-                  title="Click to refresh usage"
-                >
-                  {usageTopBarState.loading
-                    ? "Refreshing…"
-                    : `Refreshed ${usageTopBarState.refreshedAt}`}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={usageTopBarState.onRefresh}
+                disabled={usageTopBarState.loading}
+                className="text-[12px] text-muted hover:text-foreground tabular-nums transition-colors disabled:opacity-50"
+                title="Click to refresh usage"
+              >
+                {usageTopBarState.loading
+                  ? "Refreshing…"
+                  : usageTopBarState.refreshedAt
+                    ? `Refreshed ${usageTopBarState.refreshedAt}`
+                    : "Refresh"}
+              </button>
               <button
                 type="button"
                 onClick={usageTopBarState.onExportCsv}
@@ -3884,7 +4133,13 @@ export default function EditorPage() {
       </header>
 
       {/* Main Workspace Area: Rail on Warm Paper + White Inset Frames */}
-      <main className="flex-1 min-h-0 flex relative overflow-hidden px-2 pt-2 pb-2 gap-2">
+      <main
+        className={
+          isHomeVisible
+            ? "flex-1 min-h-0 flex relative overflow-hidden"
+            : "flex-1 min-h-0 flex relative overflow-hidden px-2 pt-2 pb-2 gap-2"
+        }
+      >
         {showUsageDashboard ? (
           <div className="min-w-0 flex-1 overflow-auto">
             <UsageDashboard
@@ -4136,7 +4391,7 @@ export default function EditorPage() {
                                       type="button"
                                       onClick={() => {
                                         void agent.loadThread(t.id);
-                                        setShowRightPanel(true);
+                                        openDockedAgentPanel();
                                       }}
                                       className="w-full text-left px-2 py-1 rounded-[6px] text-[12px] text-muted hover:text-foreground hover:bg-subtle truncate"
                                     >
@@ -4322,7 +4577,7 @@ export default function EditorPage() {
                       }
                       if (mark.threadId) {
                         void agent.loadThread(mark.threadId);
-                        setShowRightPanel(true);
+                        openDockedAgentPanel();
                       }
                     }}
                   />
@@ -4574,48 +4829,22 @@ export default function EditorPage() {
                     draftInjection={agentDraftInjection}
                     onDraftConsumed={handleAgentDraftConsumed}
                     onFileClick={
-                      isAgentsView
-                        ? (path) => {
-                            setWorkspaceView("write");
-                            handleAgentFileClick(path);
-                          }
-                        : handleAgentFileClick
+                      isAgentsView ? handleAgentsWorkspaceFileClick : handleAgentFileClick
                     }
                     onRunTerminalCommand={handleAgentRunTerminalCommand}
                     onApproveInteraction={score.approveWait}
                     onOpenAgentSettings={handleOpenAgentSettings}
-                    onOpenWorkspace={
-                      daemon.projectPath ? () => activateWorkspaceTab("agents") : undefined
-                    }
+                    onOpenWorkspace={daemon.projectPath ? handleOpenAgentsWorkspace : undefined}
                     mode={isAgentsView ? "workspace" : "docked"}
                     threePane={
                       workspaceView === "write" &&
                       showRightPanel &&
                       Boolean(daemon.projectPath && showLivePreviewEffective)
                     }
-                    onSwitchToPdf={() => {
-                      setShowLivePreview(true);
-                      setShowRightPanel(false);
-                    }}
-                    onDockInWrite={() => {
-                      setWorkspaceView("write");
-                      openDockedAgentPanel();
-                    }}
-                    latestBuildLogExcerpt={
-                      latexCompiler.compileLog.length > 0
-                        ? latexCompiler.compileLog
-                            .slice(-5)
-                            .map((entry) => entry.line)
-                            .join("\n")
-                        : null
-                    }
-                    isExpanded={isAgentsView ? true : agentExpanded}
-                    onToggleExpand={
-                      isAgentsView
-                        ? () => setWorkspaceView("write")
-                        : () => setAgentExpanded((p) => !p)
-                    }
-                    onClose={isAgentsView ? () => setWorkspaceView("write") : handleCloseRightPanel}
+                    onSwitchToPdf={handleSwitchDockedToPdf}
+                    onDockInWrite={handleDockAgentInWrite}
+                    latestBuildLogExcerpt={latestBuildLogExcerpt}
+                    onClose={isAgentsView ? handleCloseAgentsView : handleCloseRightPanel}
                   />
                 </AgentErrorBoundary>
               </aside>
@@ -4760,7 +4989,7 @@ export default function EditorPage() {
                     resizing === "preview"
                       ? "var(--preview-panel-width)"
                       : showRightPanel
-                        ? Math.min(livePreviewWidth, 420)
+                        ? threePanePdfWidth
                         : livePreviewWidth,
                 }}
                 className="flex-shrink-0 min-w-0 max-w-[55%] h-full rounded-[10px] border border-border bg-stage overflow-hidden shadow-[var(--frame-shadow)]"
@@ -4872,31 +5101,40 @@ export default function EditorPage() {
                 </div>
               )}
               <HistoryWorkspace
-                key={
-                  showThreadHistory && activeWorktreePath ? activeWorktreePath : daemon.projectPath
-                }
+                key={activeHistoryDir ?? daemon.projectPath}
                 className="flex-1"
-                projectDir={
-                  showThreadHistory && activeWorktreePath ? activeWorktreePath : daemon.projectPath
-                }
-                gitStatus={gitStatus}
-                gitLogEntries={showThreadHistory && activeWorktreePath ? [] : daemon.gitLogEntries}
-                stagedChanges={gitStatus?.changes.filter((c) => c.staged) ?? []}
-                unstagedChanges={gitStatus?.changes.filter((c) => !c.staged) ?? []}
-                fileVoiceByPath={fileVoiceByPath}
+                projectDir={activeHistoryDir ?? daemon.projectPath}
+                gitStatus={activeHistoryGitStatus}
+                gitLogEntries={isViewingWorktreeHistory ? worktreeGitLog : daemon.gitLogEntries}
+                selectedCommitHash={selectedHistoryCommit?.hash ?? null}
+                onSelectCommit={(entry) => void handleSelectHistoryCommit(entry)}
+                stagedChanges={activeHistoryStagedChanges}
+                unstagedChanges={activeHistoryUnstagedChanges}
+                fileVoiceByPath={isViewingWorktreeHistory ? undefined : fileVoiceByPath}
                 commitMessage={commitMessage}
                 onCommitMessageChange={setCommitMessage}
                 onStageFile={handleStageFile}
                 onUnstageFile={handleUnstageFile}
-                onCommit={() => handleCommit()}
-                onCommitAndPush={async () => {
-                  await handleCommit();
-                  await handleGitPush();
+                onCommit={async (message) => {
+                  await handleCommit(message);
                 }}
+                onCommitAndPush={
+                  !isViewingWorktreeHistory && activeHistoryGitStatus?.remote
+                    ? async (message) => {
+                        if (await handleCommit(message)) {
+                          await handleGitPush();
+                        }
+                      }
+                    : undefined
+                }
                 onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
                 isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
-                onPreviewGitFileDiff={(path) => void _handlePreviewGitDiff(path, false)}
-                onPublishToGitHub={() => void handlePublishToGitHub()}
+                onPreviewGitFileDiff={(path, staged) =>
+                  void handlePreviewHistoryFileDiff(path, staged)
+                }
+                onPublishToGitHub={
+                  !isViewingWorktreeHistory ? () => void handlePublishToGitHub() : undefined
+                }
                 onOpenThread={(id) => {
                   const thread = orchestration.threads.find((item) => item.id === id);
                   if (thread)
@@ -4905,10 +5143,7 @@ export default function EditorPage() {
                     );
                 }}
                 beforeMutation={() => {
-                  const checkout =
-                    showThreadHistory && activeWorktreePath
-                      ? activeWorktreePath
-                      : daemon.projectPath;
+                  const checkout = activeHistoryDir ?? daemon.projectPath;
                   if (
                     checkout === daemon.projectPath &&
                     (Object.values(pendingSourceWritesRef.current).some(Boolean) ||
@@ -4927,7 +5162,7 @@ export default function EditorPage() {
                   }
                 }}
                 onFilesChanged={() => {
-                  if (!showThreadHistory || !activeWorktreePath) {
+                  if (!isViewingWorktreeHistory) {
                     void daemon.refreshFiles();
                     void daemon.refreshGitStatus();
                   } else {
@@ -4937,7 +5172,7 @@ export default function EditorPage() {
                   }
                 }}
                 commitDiffPanel={
-                  <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-panel">
+                  <div className="flex-1 min-w-0 min-h-0 flex flex-col ox-frame overflow-hidden bg-panel">
                     {historyDiffPreview ? (
                       <>
                         <div className="h-10 px-4 border-b border-border flex items-center justify-between gap-2 shrink-0">
@@ -4945,28 +5180,67 @@ export default function EditorPage() {
                             <span className="text-[12.5px] font-mono font-medium truncate">
                               {historyDiffPreview.path}
                             </span>
-                            <span className="text-[11px] text-muted">
+                            <span className="text-[11px] text-muted shrink-0">
                               {historyDiffPreview.staged ? "Staged" : "Working tree"}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setWorkspaceView("write");
-                              void handleFileSelect(historyDiffPreview.path);
-                            }}
-                            className="btn btn-secondary btn-sm h-7 px-2.5 text-[11.5px]"
-                          >
-                            Open in Write
-                          </button>
+                          {!isViewingWorktreeHistory && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWorkspaceView("write");
+                                void handleFileSelect(historyDiffPreview.path);
+                              }}
+                              className="btn btn-secondary btn-sm h-7 px-2.5 text-[11.5px] shrink-0"
+                            >
+                              Open in Write
+                            </button>
+                          )}
                         </div>
                         <div className="flex-1 min-h-0 overflow-hidden">
                           {renderGitDiffContent(historyDiffPreview, parsedHistoryDiff)}
                         </div>
                       </>
+                    ) : historyCommitDiff ? (
+                      <>
+                        <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-3 shrink-0">
+                          <div className="min-w-0">
+                            <div className="text-[14px] font-semibold text-foreground truncate">
+                              {historyCommitDiff.entry.message}
+                            </div>
+                            <div className="text-[11.5px] font-mono text-muted truncate mt-0.5">
+                              {historyCommitDiff.entry.shortHash} · {historyCommitDiff.entry.author}{" "}
+                              · {formatCheckpointTime(historyCommitDiff.entry.date)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                          {historyCommitDiff.isLoading ? (
+                            <EditorSkeleton className="h-full" />
+                          ) : historyCommitDiff.error ? (
+                            <div className="h-full flex items-center justify-center px-6 text-xs text-muted">
+                              Failed to load commit diff: {historyCommitDiff.error}
+                            </div>
+                          ) : !historyCommitDiff.content.trim() ? (
+                            <div className="h-full flex items-center justify-center px-6 text-xs text-muted">
+                              No textual diff available for this commit.
+                            </div>
+                          ) : (
+                            <MonacoEditor
+                              content={historyCommitDiff.content}
+                              readOnly
+                              onContentChange={() => {}}
+                              language="diff"
+                              editorSettings={editorSettings.settings}
+                              editorTheme={editorSettings.editorTheme}
+                              className="h-full"
+                            />
+                          )}
+                        </div>
+                      </>
                     ) : (
                       <div className="h-full flex items-center justify-center text-xs text-muted">
-                        Select a changed file to inspect its diff.
+                        Select a commit or changed file to inspect its diff.
                       </div>
                     )}
                   </div>
@@ -5020,7 +5294,7 @@ export default function EditorPage() {
         }}
         onCompile={handleCompileShortcut}
         onToggleSidebar={() => setShowSidebar((p) => !p)}
-        onTogglePdf={() => setShowLivePreview((p) => !p)}
+        onTogglePdf={togglePdfPreview}
         onToggleAgent={handleToggleRightPanel}
         onToggleTerminal={toggleTerminal}
         onOpenSettings={() => {

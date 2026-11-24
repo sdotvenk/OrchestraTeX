@@ -100,6 +100,11 @@ export function createScoreCollector() {
       const mark = marks.get(id);
       if (mark) marks.set(id, { ...mark, waitState: "approved" });
     },
+    prune(at = Date.now()) {
+      for (const [id, mark] of marks) {
+        if (mark.at < at - SCORE_WINDOW_MS && mark.waitState !== "waiting") marks.delete(id);
+      }
+    },
     snapshot(at = Date.now()) {
       for (const [id, mark] of marks) {
         if (mark.at < at - SCORE_WINDOW_MS && mark.waitState !== "waiting") marks.delete(id);

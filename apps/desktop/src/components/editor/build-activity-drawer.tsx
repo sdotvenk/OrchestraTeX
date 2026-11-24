@@ -88,10 +88,7 @@ export function BuildActivityDrawer({
         <div className="flex h-8 items-center gap-3 px-3 text-[12px] text-muted min-w-0">
           <button
             type="button"
-            onClick={() => {
-              onChange("score");
-              onToggle();
-            }}
+            onClick={() => onChange("score")}
             className="font-medium text-foreground-strong hover:underline shrink-0 whitespace-nowrap"
             aria-expanded={false}
           >
@@ -125,10 +122,7 @@ export function BuildActivityDrawer({
           <div className="ml-auto flex items-center gap-2 shrink-0 whitespace-nowrap">
             <button
               type="button"
-              onClick={() => {
-                onChange("problems");
-                onToggle();
-              }}
+              onClick={() => onChange("problems")}
               className="hover:text-foreground transition-colors"
             >
               Problems {diagnostics.length}
@@ -136,10 +130,7 @@ export function BuildActivityDrawer({
             <span aria-hidden="true">·</span>
             <button
               type="button"
-              onClick={() => {
-                onChange("build-log");
-                onToggle();
-              }}
+              onClick={() => onChange("build-log")}
               className="hover:text-foreground transition-colors"
             >
               Build log
@@ -147,10 +138,7 @@ export function BuildActivityDrawer({
             <span aria-hidden="true">·</span>
             <button
               type="button"
-              onClick={() => {
-                onChange("terminal");
-                onToggle();
-              }}
+              onClick={() => onChange("terminal")}
               className="hover:text-foreground transition-colors"
             >
               Terminal
@@ -317,7 +305,7 @@ export function BuildActivityDrawer({
                         >
                           {d.severity === "error" ? "ERROR" : "WARN"}
                         </span>
-                        <span className="font-mono text-foreground-strong shrink-0">
+                        <span className="font-mono text-foreground-strong truncate max-w-[45%] shrink">
                           {d.file}
                           {d.line > 0 ? `:${d.line}` : ""}
                         </span>
