@@ -73,6 +73,15 @@ export function parseCheckpointMessage(id: string, rawMessage: string): ParsedCh
             phase,
           };
         }
+        if (typeof record.title === "string" && record.title.trim().length > 0) {
+          const isSafety = record.type === "safety" || id.startsWith("safety-");
+          return {
+            kind: isSafety ? "safety" : "manual",
+            title: record.title.trim(),
+            author: "you",
+            authorLabel: isSafety ? "Safety" : "You",
+          };
+        }
       }
     } catch {
       // Fall through to manual/safety parsing

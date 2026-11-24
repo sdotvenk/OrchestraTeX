@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, LockKey, X } from "@phosphor-icons/react";
+import { LockKey } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import type { PendingInteraction } from "@/lib/agent/types";
 
@@ -110,7 +110,7 @@ export function ApprovalCard({
       {showReason && <div className="text-xs text-foreground">{reason}</div>}
 
       {interaction.command && (
-        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap break-all">
+        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap break-words">
           {interaction.command}
         </pre>
       )}

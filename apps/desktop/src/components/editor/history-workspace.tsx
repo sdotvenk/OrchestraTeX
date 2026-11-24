@@ -632,7 +632,7 @@ export function HistoryWorkspace({
                             : "bg-transparent hover:bg-subtle"
                         }`}
                       >
-                        <span className="text-[11px] font-mono text-muted w-[38px] shrink-0 pt-0.5">
+                        <span className="text-[11px] font-mono text-muted whitespace-nowrap shrink-0 pt-0.5 tabular-nums">
                           {formatCheckpointTime(checkpoint.createdAt)}
                         </span>
                         {parsed.kind === "safety" ? (

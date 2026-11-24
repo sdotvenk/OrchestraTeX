@@ -1,19 +1,6 @@
 "use client";
 
-import {
-  CaretDown,
-  CaretRight,
-  Check,
-  Clock,
-  FileText,
-  Globe,
-  MagnifyingGlass,
-  PencilSimple,
-  SpinnerGap,
-  Terminal,
-  Wrench,
-  X,
-} from "@phosphor-icons/react";
+import { SpinnerGap } from "@phosphor-icons/react";
 import { memo, useState } from "react";
 import type { AgentPart } from "@/lib/agent/types";
 import { toRelativeProjectPath } from "./utils";
@@ -26,33 +13,6 @@ interface ToolDisplayProps {
   projectPath?: string | null;
   onFileClick?: (path: string) => void;
   depth?: number;
-}
-
-function getToolIcon(toolName: string) {
-  const name = toolName.toLowerCase();
-  if (name === "bash" || name === "command" || name === "execute" || name === "terminal") {
-    return Terminal;
-  }
-  if (name === "read" || name === "view" || name.includes("read_file")) {
-    return FileText;
-  }
-  if (
-    name === "edit" ||
-    name === "write" ||
-    name === "multiedit" ||
-    name === "filechange" ||
-    name.includes("write_file") ||
-    name.includes("edit_file")
-  ) {
-    return PencilSimple;
-  }
-  if (name === "grep" || name === "glob" || name === "search" || name.includes("search")) {
-    return MagnifyingGlass;
-  }
-  if (name.includes("web") || name.includes("fetch")) {
-    return Globe;
-  }
-  return Wrench;
 }
 
 function getToolSummaryLabel(part: ToolPart, projectPath?: string | null): string {
@@ -120,10 +80,8 @@ export const ToolDisplay = memo(function ToolDisplay({
   );
   const [showFullOutput, setShowFullOutput] = useState(false);
 
-  const Icon = getToolIcon(part.tool);
   const summary = getToolSummaryLabel(part, projectPath);
   const isRunning = part.status === "running";
-  const isPending = part.status === "pending";
   const isError = part.status === "error" || Boolean(part.error);
 
   const relFile = part.filePath ? toRelativeProjectPath(part.filePath, projectPath) : null;
@@ -143,17 +101,6 @@ export const ToolDisplay = memo(function ToolDisplay({
       name === "search" ||
       name.includes("search")
     );
-  })();
-
-  const diffCounts = (() => {
-    if (!part.diff) return null;
-    let added = 0;
-    let removed = 0;
-    for (const line of part.diff.split("\n")) {
-      if (line.startsWith("+") && !line.startsWith("+++")) added++;
-      else if (line.startsWith("-") && !line.startsWith("---")) removed++;
-    }
-    return added > 0 || removed > 0 ? { added, removed } : null;
   })();
 
   return (

@@ -267,7 +267,8 @@ export function UsageDashboard({
           const secondaryWindow = provider?.rateLimits?.windows[1] ?? null;
           const usedPct = primaryWindow?.usedPercent;
           const hasQuota = usedPct !== null && usedPct !== undefined;
-          const isCustomLocal = id === "custom-acp" && !hasQuota;
+          const isInstalled = Boolean(provider?.installed);
+          const isCustomLocal = id === "custom-acp" && isInstalled && !hasQuota;
           const resetText = formatResetCountdown(primaryWindow?.resetsAt);
 
           return (
@@ -284,8 +285,7 @@ export function UsageDashboard({
                 <span className="ml-auto text-[11.5px] font-normal text-muted truncate">
                   {provider?.account?.planType ??
                     provider?.rateLimits?.planType ??
-                    provider?.transport ??
-                    (id === "custom-acp" ? "local-llm" : "ACP")}
+                    (isInstalled ? (provider?.transport ?? "ACP") : "not configured")}
                 </span>
               </div>
 
@@ -302,7 +302,9 @@ export function UsageDashboard({
                     ? `of ${primaryWindow?.label ?? "5-hour window"}`
                     : isCustomLocal
                       ? "limits · runs locally"
-                      : "quota not reported"}
+                      : isInstalled
+                        ? "quota not reported"
+                        : "not configured"}
                 </span>
               </div>
 
@@ -334,7 +336,9 @@ export function UsageDashboard({
                     ? (resetText ?? primaryWindow?.status ?? "Active")
                     : isCustomLocal
                       ? "Measured zero, not missing"
-                      : (provider?.rateLimits?.note ?? "Token counts only")}
+                      : isInstalled
+                        ? (provider?.rateLimits?.note ?? "Token counts only")
+                        : "Configure in Settings → Agents"}
                 </span>
                 {secondaryWindow?.usedPercent !== null &&
                   secondaryWindow?.usedPercent !== undefined && (

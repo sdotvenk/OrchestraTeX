@@ -106,7 +106,6 @@ import {
   BookOpenTextIcon,
   BracketsCurlyIcon,
   ClipboardTextIcon,
-  CopyIcon,
   CubeIcon,
   FileCodeIcon,
   FileIcon as FileIconSymbol,
@@ -118,11 +117,9 @@ import {
   GearIcon,
   ImageIcon,
   MusicNoteIcon,
-  PencilLineIcon,
   TableIcon,
   TerminalIcon,
   TerminalWindowIcon,
-  TrashIcon,
   VideoCameraIcon,
   XIcon,
 } from "@phosphor-icons/react";
@@ -329,7 +326,7 @@ const FILE_ICON_MAP: Record<string, IconType> = {
   ".tsv": TableIcon,
 };
 
-function FileIcon({
+function _FileIcon({
   type,
   expanded,
   filename,

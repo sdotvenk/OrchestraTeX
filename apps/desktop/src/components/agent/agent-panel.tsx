@@ -3,9 +3,6 @@
 import type { FileNode } from "@orchestratex/shared";
 import {
   ArrowSquareOut,
-  ArrowsInSimple,
-  ArrowsOutSimple,
-  CaretDown,
   Chats,
   GitFork,
   Plus,
@@ -86,8 +83,6 @@ export function AgentPanel({
   onSwitchToPdf,
   onDockInWrite,
   latestBuildLogExcerpt = null,
-  isExpanded = false,
-  onToggleExpand,
   onClose,
 }: AgentPanelProps) {
   const chatToggleRef = useRef<HTMLButtonElement>(null);
@@ -212,7 +207,7 @@ export function AgentPanel({
           : "Custom ACP";
   const currentModelId =
     activeThread?.summary.model ?? activeProvider?.models?.[0]?.id ?? "default";
-  const currentEffort = activeThread?.summary.reasoningEffort ?? "medium";
+  const currentEffort = activeThread?.summary.reasoningEffort ?? null;
   const currentRuntime = activeThread?.summary.runtimeMode ?? agentSettings.defaultRuntimeMode;
   const runtimeLabel =
     currentRuntime === "full-access"
@@ -228,59 +223,65 @@ export function AgentPanel({
     <div className="h-full w-full flex flex-col bg-panel min-w-0">
       {mode === "docked" && !threePane ? (
         <>
-          <div className="h-9 bg-[var(--tab-strip-bg)] border-b border-border flex items-center pr-1.5 overflow-x-auto shrink-0">
-            {onSwitchToPdf && (
-              <button
-                type="button"
-                onClick={onSwitchToPdf}
-                className="h-9 px-3 border-r border-border text-[12.5px] text-muted hover:text-foreground inline-flex items-center gap-1.5 shrink-0"
-              >
-                <span>PDF</span>
-                {pdfPageLabel && <span className="text-[10.5px] text-muted">{pdfPageLabel}</span>}
-              </button>
-            )}
-            {recentTabs.map((t) => {
-              const isTabActive = t.id === activeThread?.summary.id && view === "chat";
-              const tabVoice = VOICE_COLORS[t.providerId] ?? VOICE_COLORS.claude;
-              return (
+          <div className="h-9 bg-[var(--tab-strip-bg)] border-b border-border flex items-center shrink-0 min-w-0">
+            <div className="flex items-center min-w-0 flex-1 overflow-x-auto">
+              {onSwitchToPdf && (
                 <button
-                  key={t.id}
                   type="button"
-                  onClick={() => {
-                    void agent.loadThread(t.id);
-                    setView("chat");
-                  }}
-                  style={isTabActive ? { boxShadow: `inset 0 -2px 0 ${tabVoice.ink}` } : undefined}
-                  className={`h-9 px-3 border-r border-border text-[12.5px] inline-flex items-center gap-1.5 max-w-[180px] shrink-0 ${
-                    isTabActive
-                      ? "bg-panel text-foreground-strong font-medium"
-                      : "text-muted hover:text-foreground"
-                  }`}
+                  onClick={onSwitchToPdf}
+                  className="h-9 px-3 border-r border-border text-[12.5px] text-muted hover:text-foreground inline-flex items-center gap-1.5 shrink-0"
                 >
-                  <span
-                    className="size-2 rounded-full shrink-0"
-                    style={{ backgroundColor: tabVoice.ink }}
-                    aria-hidden="true"
-                  />
-                  <span className="truncate">{t.title}</span>
+                  <span>PDF</span>
+                  {pdfPageLabel && <span className="text-[10.5px] text-muted">{pdfPageLabel}</span>}
                 </button>
-              );
-            })}
+              )}
+              {recentTabs.map((t) => {
+                const isTabActive = t.id === activeThread?.summary.id && view === "chat";
+                const tabVoice = VOICE_COLORS[t.providerId] ?? VOICE_COLORS.claude;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      void agent.loadThread(t.id);
+                      setView("chat");
+                    }}
+                    style={
+                      isTabActive ? { boxShadow: `inset 0 -2px 0 ${tabVoice.ink}` } : undefined
+                    }
+                    className={`h-9 px-3 border-r border-border text-[12.5px] inline-flex items-center gap-1.5 max-w-[160px] shrink-0 ${
+                      isTabActive
+                        ? "bg-panel text-foreground-strong font-medium"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    <span
+                      className="size-2 rounded-full shrink-0"
+                      style={{ backgroundColor: tabVoice.ink }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">{t.title}</span>
+                  </button>
+                );
+              })}
+            </div>
             {onOpenWorkspace && (
-              <button
-                type="button"
-                onClick={onOpenWorkspace}
-                className="ml-auto rounded-[7px] border border-border-dark bg-panel px-2.5 py-1 text-[12px] text-foreground inline-flex items-center gap-1 hover:bg-subtle shrink-0"
-              >
-                <ArrowSquareOut className="size-3" aria-hidden="true" />
-                <span>Open in Agents</span>
-              </button>
+              <div className="px-1.5 shrink-0 border-l border-border h-full flex items-center bg-[var(--tab-strip-bg)]">
+                <button
+                  type="button"
+                  onClick={onOpenWorkspace}
+                  className="rounded-[7px] border border-border-dark bg-panel px-2.5 py-1 text-[12px] text-foreground inline-flex items-center gap-1 hover:bg-subtle shrink-0 whitespace-nowrap"
+                >
+                  <ArrowSquareOut className="size-3" aria-hidden="true" />
+                  <span>Open in Agents</span>
+                </button>
+              </div>
             )}
           </div>
           <div className="px-4 py-1.5 border-b border-border/70 flex items-center gap-2 text-[12px] text-muted shrink-0">
             <span className="font-medium text-foreground">{providerDisplayName}</span>
             <span className="font-mono truncate">
-              {currentModelId} · {currentEffort}
+              {currentEffort ? `${currentModelId} · ${currentEffort}` : currentModelId}
             </span>
             <span aria-hidden="true">·</span>
             <span className="truncate">{runtimeLabel}</span>

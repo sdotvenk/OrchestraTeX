@@ -74,32 +74,38 @@ export function BuildActivityDrawer({
       className="ox-frame flex shrink-0 flex-col overflow-hidden"
     >
       {collapsed ? (
-        <div className="flex h-8 items-center gap-4 px-3 text-[12px] text-muted">
+        <div className="flex h-8 items-center gap-3 px-3 text-[12px] text-muted min-w-0">
           <button
             type="button"
             onClick={() => {
               onChange("score");
               onToggle();
             }}
-            className="font-medium text-foreground-strong hover:underline"
+            className="font-medium text-foreground-strong hover:underline shrink-0 whitespace-nowrap"
             aria-expanded={false}
           >
             ▸ Score
           </button>
-          {threadStatuses?.slice(0, 3).map((thread) => {
-            const voice = VOICE_COLORS[thread.providerId] ?? VOICE_COLORS["custom-acp"];
-            return (
-              <span key={thread.id} className="inline-flex items-center gap-1.5 truncate">
+          <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
+            {threadStatuses?.slice(0, 3).map((thread) => {
+              const voice = VOICE_COLORS[thread.providerId] ?? VOICE_COLORS["custom-acp"];
+              return (
                 <span
-                  className="size-[7px] shrink-0 rounded-full"
-                  style={{ backgroundColor: voice.ink }}
-                  aria-hidden="true"
-                />
-                <span className="truncate">{thread.label}</span>
-              </span>
-            );
-          })}
-          <div className="ml-auto flex items-center gap-2 shrink-0">
+                  key={thread.id}
+                  className="inline-flex items-center gap-1.5 min-w-0 truncate shrink"
+                  title={thread.label}
+                >
+                  <span
+                    className="size-[7px] shrink-0 rounded-full"
+                    style={{ backgroundColor: voice.ink }}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate whitespace-nowrap">{thread.label}</span>
+                </span>
+              );
+            })}
+          </div>
+          <div className="ml-auto flex items-center gap-2 shrink-0 whitespace-nowrap">
             <button
               type="button"
               onClick={() => {
@@ -331,7 +337,8 @@ export function BuildActivityDrawer({
                     onClick={() => onChange("build-log")}
                     className="ml-auto font-mono hover:text-foreground transition-colors"
                   >
-                    raw log: {mainFileLogName} · {log.length} lines
+                    raw log: {mainFileLogName}
+                    {log.length > 0 ? ` · ${log.length} lines` : ""}
                   </button>
                 </div>
               </div>

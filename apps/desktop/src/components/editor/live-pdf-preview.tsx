@@ -261,6 +261,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                   <div className="ox-sec px-2.5 pt-1.5 pb-1">Engine</div>
                   {(
                     [
+                      { id: "auto", label: "Auto", hint: "best installed" },
                       { id: "pdflatex", label: "pdfLaTeX" },
                       { id: "xelatex", label: "XeLaTeX" },
                       { id: "lualatex", label: "LuaLaTeX" },
@@ -268,7 +269,8 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                       { id: "tectonic", label: "Tectonic" },
                     ] as const
                   ).map((eng) => {
-                    const isAvailable = compilersStatus?.[eng.id]?.available !== false;
+                    const isAvailable =
+                      eng.id === "auto" ? true : compilersStatus?.[eng.id]?.available !== false;
                     const isSelected = compiler === eng.id;
                     return (
                       <button

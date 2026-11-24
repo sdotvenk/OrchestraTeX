@@ -454,9 +454,19 @@ export default function EditorPage() {
     onOpenUsage: handleOpenUsagePopover,
   });
   const orchestration = useOrchestration(agentSettings.settings);
+  const mergedOrchestrationThreads = useMemo(() => {
+    const byId = new Map<string, ThreadSummary>();
+    for (const thread of orchestration.threads) {
+      byId.set(thread.id, thread);
+    }
+    for (const thread of agent.threads) {
+      byId.set(thread.id, thread);
+    }
+    return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [agent.threads, orchestration.threads]);
   const threadCountsByProject = useMemo(() => {
     const counts: Record<string, ProjectThreadCounts> = {};
-    for (const thread of orchestration.threads) {
+    for (const thread of mergedOrchestrationThreads) {
       if (thread.archived) continue;
       const project = counts[thread.projectPath] ?? {
         total: 0,
@@ -473,7 +483,7 @@ export default function EditorPage() {
       counts[thread.projectPath] = project;
     }
     return counts;
-  }, [orchestration.threads]);
+  }, [mergedOrchestrationThreads]);
   const activeWorkspaceThread =
     agent.activeThread?.summary.projectPath === daemon.projectPath
       ? agent.activeThread.summary
@@ -3301,9 +3311,10 @@ export default function EditorPage() {
             Table
           </button>
           <span className="ml-auto font-mono text-[11.5px] text-muted truncate">
-            {((daemon.projectPath
-              ? projectRelativePath(daemon.projectPath, selectedFile)
-              : null) ?? selectedFile)
+            {(
+              (daemon.projectPath ? projectRelativePath(daemon.projectPath, selectedFile) : null) ??
+              selectedFile
+            )
               .split("/")
               .join(" / ")}
           </span>
@@ -4354,17 +4365,37 @@ export default function EditorPage() {
                   />
                 }
                 diagnostics={latexCompiler.diagnostics}
-                threadStatuses={agent.threads.slice(0, 3).map((t) => ({
-                  id: t.id,
-                  providerId: t.providerId,
-                  label:
-                    t.status === "running"
-                      ? `${t.providerId === "claude" ? "Claude" : t.providerId === "codex" ? "Codex" : t.providerId === "antigravity" ? "Antigravity" : "Agent"} editing`
-                      : `${t.providerId === "claude" ? "Claude" : t.providerId === "codex" ? "Codex" : t.providerId === "antigravity" ? "Antigravity" : "Agent"} ${t.status === "error" ? "error" : "done"}`,
-                }))}
+                threadStatuses={agent.threads
+                  .filter((t) => !t.archived)
+                  .slice(0, 3)
+                  .map((t) => {
+                    const name =
+                      t.providerId === "claude"
+                        ? "Claude"
+                        : t.providerId === "codex"
+                          ? "Codex"
+                          : t.providerId === "antigravity"
+                            ? "Antigravity"
+                            : "Custom ACP";
+                    const state =
+                      t.status === "running"
+                        ? "editing"
+                        : t.status === "waiting_input"
+                          ? "waiting"
+                          : t.status === "error"
+                            ? "error"
+                            : t.messageCount > 0
+                              ? "done"
+                              : "idle";
+                    return {
+                      id: t.id,
+                      providerId: t.providerId,
+                      label: `${name} ${state}`,
+                    };
+                  })}
                 buildSummary={
                   latexCompiler.lastCompileDurationMs != null
-                    ? `${latexSettings.settings.compiler} · ${latexCompiler.compileStatus === "error" ? "failed after " : ""}${latexCompiler.lastCompileDurationMs} ms`
+                    ? `${latexCompiler.lastResult?.compiler ?? latexSettings.settings.compiler} · ${latexCompiler.compileStatus === "error" ? "failed after " : ""}${latexCompiler.lastCompileDurationMs} ms`
                     : undefined
                 }
                 mainFileLogName={
@@ -4467,7 +4498,7 @@ export default function EditorPage() {
               {isAgentsView && (
                 <div className="w-[clamp(10rem,22vw,17rem)] shrink-0 overflow-hidden">
                   <OrchestrationSidebar
-                    threads={orchestration.threads}
+                    threads={mergedOrchestrationThreads}
                     activeThreadId={activeWorkspaceThread?.id}
                     activeProjectPath={daemon.projectPath}
                     prByThreadId={orchestration.pullRequests}
@@ -4598,7 +4629,7 @@ export default function EditorPage() {
                         : null
                     }
                     activeThread={activeWorkspaceThread}
-                    threads={orchestration.threads}
+                    threads={mergedOrchestrationThreads}
                     error={orchestration.error}
                     onOpenThread={(thread) =>
                       void handleOpenOrchestrationThread(thread).catch((error: unknown) =>
