@@ -322,7 +322,7 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
 
   const writeFile = useCallback(
     async (relativePath: string, content: string) => {
-      if (!projectState.projectPath) return;
+      if (!projectState.projectPath) return false;
 
       try {
         const fullPath = resolvePathWithinProject(projectState.projectPath, relativePath);
@@ -331,12 +331,26 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
           content,
           encoding: "utf-8",
         });
+        return true;
       } catch (error) {
         console.error("Failed to write file:", error);
         setError(String(error), "save file");
+        return false;
       }
     },
     [projectState.projectPath, setError],
+  );
+
+  const writeFileIfUnchanged = useCallback(
+    async (relativePath: string, expectedContent: string, content: string) => {
+      if (!projectState.projectPath) throw new Error("No project open");
+      await invoke("write_file", {
+        path: resolvePathWithinProject(projectState.projectPath, relativePath),
+        content,
+        expectedContent,
+      });
+    },
+    [projectState.projectPath],
   );
 
   const refreshFiles = useCallback(async () => {
@@ -921,6 +935,7 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       refreshFiles,
       readFile,
       writeFile,
+      writeFileIfUnchanged,
       createFile,
       createDirectory,
       renamePath,
@@ -951,6 +966,7 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       refreshFiles,
       readFile,
       writeFile,
+      writeFileIfUnchanged,
       createFile,
       createDirectory,
       renamePath,

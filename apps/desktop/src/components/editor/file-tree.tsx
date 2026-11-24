@@ -16,6 +16,8 @@ import {
 import type { NodeRendererProps, TreeApi } from "react-arborist";
 import { Tree } from "react-arborist";
 import { createPortal } from "react-dom";
+import type { AgentProviderId } from "@/lib/agent/types";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { pathSync } from "@/lib/path";
 
 async function runCommand(cmd: string, args: string[]): Promise<boolean> {
@@ -135,6 +137,12 @@ export interface FileOperations {
   deletePath: (path: string) => Promise<void>;
 }
 
+export interface FileVoiceDot {
+  provider: AgentProviderId | "you";
+  label?: string;
+  pulse?: boolean;
+}
+
 type Props = {
   files: FileNode[];
   onFileSelect?: (path: string) => void;
@@ -144,6 +152,7 @@ type Props = {
   fileOperations?: FileOperations;
   projectPath?: string;
   onRefresh?: () => void;
+  fileVoiceDots?: Record<string, FileVoiceDot[]>;
 };
 
 interface ContextMenuState {
@@ -356,6 +365,7 @@ interface DragState {
 interface FileTreeContextValue {
   selectedFile?: string;
   highlightedFile?: string | null;
+  fileVoiceDots?: Record<string, FileVoiceDot[]>;
   onContextMenu?: (e: React.MouseEvent, node: FileNode, parentPath: string) => void;
   onFileSelect?: (path: string) => void;
   // Mouse-based drag-and-drop
@@ -385,8 +395,16 @@ const FileTreeContext = createContext<FileTreeContextValue>({
 // --- Node renderer ---
 
 function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
-  const { selectedFile, highlightedFile, onContextMenu, onFileSelect, dragState, onDragMouseDown } =
-    useContext(FileTreeContext);
+  const {
+    selectedFile,
+    highlightedFile,
+    fileVoiceDots,
+    onContextMenu,
+    onFileSelect,
+    dragState,
+    onDragMouseDown,
+  } = useContext(FileTreeContext);
+  const voiceDots = fileVoiceDots?.[node.data.path];
 
   const isDirectory = node.data.type === "directory";
   const isSelected = selectedFile === node.data.path;
@@ -483,6 +501,21 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
       />
       <FileIcon type={node.data.type} expanded={node.isOpen} filename={node.data.name} />
       <span className="truncate">{node.data.name}</span>
+      {voiceDots && voiceDots.length > 0 && (
+        <span className="ml-auto flex items-center gap-1 flex-shrink-0 pl-1">
+          {voiceDots.map((dot) => (
+            <span
+              key={`${dot.provider}-${dot.label ?? "dot"}`}
+              className="inline-block w-[7px] h-[7px] rounded-full flex-shrink-0"
+              style={{
+                backgroundColor: VOICE_COLORS[dot.provider].ink,
+                boxShadow: dot.pulse ? `0 0 0 3px ${VOICE_COLORS[dot.provider].tint}` : undefined,
+              }}
+              title={dot.label ?? dot.provider}
+            />
+          ))}
+        </span>
+      )}
     </div>
   );
 }
@@ -522,6 +555,7 @@ function FileTreeInner({
   fileOperations,
   projectPath,
   onRefresh,
+  fileVoiceDots,
 }: Props) {
   const treeRef = useRef<TreeApi<ArboristFileNode>>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1184,6 +1218,7 @@ function FileTreeInner({
     () => ({
       selectedFile,
       highlightedFile,
+      fileVoiceDots,
       onContextMenu: handleContextMenu,
       onFileSelect,
       dragState,
@@ -1192,6 +1227,7 @@ function FileTreeInner({
     [
       selectedFile,
       highlightedFile,
+      fileVoiceDots,
       handleContextMenu,
       onFileSelect,
       dragState,

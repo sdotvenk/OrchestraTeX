@@ -41,6 +41,8 @@ import {
 } from "@/components/ui/tab-bar";
 import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
+import type { AttributedEdit } from "@/lib/agent/edit-attribution";
+import { useAgentEdits } from "@/lib/agent/use-agent-edits";
 import { useEditorSettings } from "@/lib/editor";
 import { UI_PALETTES } from "@/lib/editor/types";
 import { VOICE_COLORS } from "@/lib/editor/voice-colors";
@@ -57,7 +59,7 @@ import {
   useLatexSettings,
 } from "@/lib/latex";
 import type { LatexDiagnostic, MainFileDetectionResult, SynctexResult } from "@/lib/latex/types";
-import { pathSync } from "@/lib/path";
+import { pathSync, pathsEqual } from "@/lib/path";
 import { useRecentProjects } from "@/lib/recent-projects";
 import { useTauriDaemon } from "@/lib/tauri";
 
@@ -422,7 +424,51 @@ export default function EditorPage() {
   const contentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const splitContentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const savingVisualTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastSaveTimeRef = useRef<{ path: string; time: number } | null>(null);
+  const lastSaveTimesRef = useRef(new Map<string, number>());
+  const pendingSourceWritesRef = useRef<{ primary?: string; split?: string }>({});
+  const currentProjectRef = useRef(daemon.projectPath);
+  const selectedFileRef = useRef(selectedFile);
+  currentProjectRef.current = daemon.projectPath;
+  selectedFileRef.current = selectedFile;
+  const sourceIsDirty = useCallback((path: string) => {
+    const pending = pendingSourceWritesRef.current;
+    return pending.primary === path || pending.split === path;
+  }, []);
+  const isLocallyModified = useCallback(
+    (path: string) =>
+      sourceIsDirty(path) || Date.now() - (lastSaveTimesRef.current.get(path) ?? 0) < 750,
+    [sourceIsDirty],
+  );
+  const {
+    edits: attributedEdits,
+    rememberFile: rememberAgentEditFile,
+    markAccepted,
+    markRejected,
+  } = useAgentEdits(daemon.projectPath, projectThreads, daemon.readFile, isLocallyModified);
+  const fileVoiceDots = useMemo(() => {
+    const dots: NonNullable<React.ComponentProps<typeof FileSidebarPanel>["fileVoiceDots"]> = {};
+    for (const edit of attributedEdits) {
+      if (
+        edit.status === "rejected" ||
+        !daemon.projectPath ||
+        !pathsEqual(edit.thread.projectPath, daemon.projectPath)
+      )
+        continue;
+      const thread = projectThreads.find((item) => item.id === edit.thread.id) ?? edit.thread;
+      const entries = dots[edit.filePath] ?? [];
+      const label =
+        agent.providers.find((provider) => provider.id === thread.providerId)?.name ?? thread.title;
+      if (!entries.some((entry) => entry.provider === thread.providerId)) {
+        entries.push({ provider: thread.providerId, label, pulse: thread.status === "running" });
+      }
+      dots[edit.filePath] = entries;
+    }
+    return dots;
+  }, [agent.providers, attributedEdits, daemon.projectPath, projectThreads]);
+  const keepAttributedEdit = useCallback(
+    (edit: AttributedEdit) => markAccepted(edit.id),
+    [markAccepted],
+  );
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const gitDiffRequestIdRef = useRef(0);
   const splitLoadRequestIdRef = useRef(0);
@@ -462,6 +508,15 @@ export default function EditorPage() {
     settings: latexSettings.settings,
     projectPath: daemon.projectPath,
   });
+  const staleAgentEdits = latexCompiler.pdfPath
+    ? attributedEdits.filter(
+        (edit) =>
+          daemon.projectPath &&
+          pathsEqual(edit.thread.projectPath, daemon.projectPath) &&
+          edit.status !== "rejected" &&
+          edit.observedAt > (latexCompiler.lastPdfBuildStartedAt ?? 0),
+      ).length
+    : 0;
 
   // Check if any LaTeX compiler is available
   const hasAnyCompiler =
@@ -471,6 +526,55 @@ export default function EditorPage() {
       latexCompiler.compilersStatus.lualatex.available ||
       latexCompiler.compilersStatus.latexmk.available ||
       latexCompiler.compilersStatus.tectonic.available);
+
+  const undoAttributedEdit = useCallback(
+    async (edit: AttributedEdit) => {
+      const projectPath = daemon.projectPath;
+      if (
+        edit.status !== "pending" ||
+        !projectPath ||
+        !pathsEqual(edit.thread.projectPath, projectPath)
+      )
+        return;
+      if (sourceIsDirty(edit.filePath)) {
+        toast("Save your current changes before undoing this edit.", "error");
+        return;
+      }
+      try {
+        await daemon.writeFileIfUnchanged(edit.filePath, edit.after, edit.before);
+        if (currentProjectRef.current !== projectPath) return;
+        markRejected(edit.id);
+        rememberAgentEditFile(edit.filePath, edit.before, projectPath);
+        if (selectedFileRef.current === edit.filePath) {
+          setFileContent((current) => (current === edit.after ? edit.before : current));
+        }
+        setSplitPane((current) =>
+          current?.selectedFile === edit.filePath && current.content === edit.after
+            ? { ...current, content: edit.before }
+            : current,
+        );
+        if (hasAnyCompiler && latexSettings.settings.mainFile) {
+          latexCompiler.scheduleAutoCompile({
+            directory: projectPath,
+            mainFile: latexSettings.settings.mainFile,
+          });
+        }
+      } catch (error) {
+        toast(String(error), "error");
+      }
+    },
+    [
+      daemon.projectPath,
+      daemon.writeFileIfUnchanged,
+      hasAnyCompiler,
+      latexCompiler,
+      latexSettings.settings.mainFile,
+      markRejected,
+      rememberAgentEditFile,
+      sourceIsDirty,
+      toast,
+    ],
+  );
 
   const executeLocalCompile = useCallback(
     async (mainFile: string) => {
@@ -566,11 +670,15 @@ export default function EditorPage() {
   }, [pendingGoToLine]);
 
   useEffect(() => {
+    const timers = [contentSaveTimeoutRef, splitContentSaveTimeoutRef, savingVisualTimeoutRef];
+    for (const timer of timers) {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+    }
+    pendingSourceWritesRef.current = {};
+    lastSaveTimesRef.current.clear();
+    setIsSaving(false);
     if (!daemon.projectPath) {
-      if (splitContentSaveTimeoutRef.current) {
-        clearTimeout(splitContentSaveTimeoutRef.current);
-        splitContentSaveTimeoutRef.current = null;
-      }
       setSplitPane(null);
       setShowLivePreview(false);
       setBibEntries([]);
@@ -605,13 +713,13 @@ export default function EditorPage() {
         Promise.all(
           bibPaths.map(async (p) => ({
             file: p,
-            content: (await daemonReadFile(p).catch(() => null)) ?? "",
+            content: await daemonReadFile(p).catch(() => null),
           })),
         ),
         Promise.all(
           texPaths.map(async (p) => ({
             file: p,
-            content: (await daemonReadFile(p).catch(() => null)) ?? "",
+            content: await daemonReadFile(p).catch(() => null),
           })),
         ),
       ]);
@@ -619,10 +727,14 @@ export default function EditorPage() {
 
       const parsedBibs: BibEntry[] = [];
       for (const item of bibContents) {
+        if (item.content === null) continue;
+        rememberAgentEditFile(item.file, item.content, projectRoot, true);
         parsedBibs.push(...parseBibTeXEntries(item.content, item.file));
       }
       const parsedLabels: LabelEntry[] = [];
       for (const item of texContents) {
+        if (item.content === null) continue;
+        rememberAgentEditFile(item.file, item.content, projectRoot, true);
         parsedLabels.push(...parseLatexLabels(item.content, item.file));
       }
       setBibEntries(parsedBibs);
@@ -632,7 +744,7 @@ export default function EditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [daemon.projectPath, daemon.files, daemonReadFile]);
+  }, [daemon.projectPath, daemon.files, daemonReadFile, rememberAgentEditFile]);
 
   // Debounced body word count & outline source for active TeX file
   useEffect(() => {
@@ -812,6 +924,7 @@ export default function EditorPage() {
         setIsLoadingFile(true);
         try {
           const content = await daemon.readFile(resolvedPath);
+          if (content !== null) rememberAgentEditFile(resolvedPath, content, daemon.projectPath);
           setFileContent(content ?? "");
         } catch (err) {
           const errorStr = String(err);
@@ -856,7 +969,7 @@ export default function EditorPage() {
         setFileContent("");
       }
     },
-    [daemon, getFileType, resolveSelectablePath, toast],
+    [daemon, getFileType, rememberAgentEditFile, resolveSelectablePath, toast],
   );
 
   const runInverseSynctex = useCallback(
@@ -1122,9 +1235,8 @@ export default function EditorPage() {
       });
     } else if (kind === "modify") {
       // Reload file content if the currently selected file was modified externally
-      // Skip if this was our own save (within 2 seconds)
-      const lastSave = lastSaveTimeRef.current;
-      const isOurSave = lastSave && lastSave.path === path && Date.now() - lastSave.time < 2000;
+      // Preserve dirty text and ignore the watcher echo after a local save.
+      const isOurSave = isLocallyModified(path);
 
       if (path === selectedFile && !isOurSave) {
         daemon
@@ -1185,6 +1297,7 @@ export default function EditorPage() {
     latexSettings.settings.mainFile,
     selectedFile,
     handleFileSelect,
+    isLocallyModified,
     daemon,
     splitPane,
   ]);
@@ -1291,6 +1404,7 @@ export default function EditorPage() {
       clearTimeout(splitContentSaveTimeoutRef.current);
       splitContentSaveTimeoutRef.current = null;
     }
+    pendingSourceWritesRef.current.split = undefined;
     setSplitPane(null);
   }, []);
 
@@ -1357,6 +1471,7 @@ export default function EditorPage() {
         try {
           const content = await daemon.readFile(resolvedPath);
           if (splitLoadRequestIdRef.current !== requestId) return;
+          if (content !== null) rememberAgentEditFile(resolvedPath, content, daemon.projectPath);
           setSplitPane((prev) => {
             if (!prev || prev.selectedFile !== resolvedPath) return prev;
             return {
@@ -1417,7 +1532,15 @@ export default function EditorPage() {
         };
       });
     },
-    [daemon, getFileType, resolveSelectablePath, toast, selectedFile, handleFileSelect],
+    [
+      daemon,
+      getFileType,
+      resolveSelectablePath,
+      toast,
+      selectedFile,
+      handleFileSelect,
+      rememberAgentEditFile,
+    ],
   );
 
   const handleSplitContentChange = useCallback(
@@ -1436,11 +1559,15 @@ export default function EditorPage() {
 
       const fileToSave = splitPane?.selectedFile;
       if (!fileToSave) return;
+      pendingSourceWritesRef.current.split = fileToSave;
 
-      splitContentSaveTimeoutRef.current = setTimeout(async () => {
+      const timer = setTimeout(async () => {
+        let saved = false;
         try {
-          await daemon.writeFile(fileToSave, content);
-          lastSaveTimeRef.current = { path: fileToSave, time: Date.now() };
+          saved = await daemon.writeFile(fileToSave, content);
+          if (!saved || currentProjectRef.current !== daemon.projectPath) return;
+          lastSaveTimesRef.current.set(fileToSave, Date.now());
+          rememberAgentEditFile(fileToSave, content, daemon.projectPath);
           if (
             daemon.projectPath &&
             latexSettings.settings.mainFile &&
@@ -1454,14 +1581,21 @@ export default function EditorPage() {
           }
         } catch (error) {
           console.error("Failed to save split pane file:", error);
+        } finally {
+          if (splitContentSaveTimeoutRef.current === timer) {
+            splitContentSaveTimeoutRef.current = null;
+            if (saved) pendingSourceWritesRef.current.split = undefined;
+          }
         }
       }, 500);
+      splitContentSaveTimeoutRef.current = timer;
     },
     [
       daemon,
       hasAnyCompiler,
       latexCompiler,
       latexSettings.settings.mainFile,
+      rememberAgentEditFile,
       splitPane?.selectedFile,
     ],
   );
@@ -1720,8 +1854,9 @@ export default function EditorPage() {
         id: path,
         label: pathSync.basename(path),
         title: path,
+        voiceDot: fileVoiceDots[path]?.[0],
       })) ?? [],
-    [splitPane?.openTabs],
+    [fileVoiceDots, splitPane?.openTabs],
   );
 
   const renderSplitPane = useCallback(
@@ -1796,6 +1931,14 @@ export default function EditorPage() {
                   onContentChange={handleSplitContentChange}
                   language={getFileLanguage(splitSelectedFile)}
                   filePath={splitSelectedFile}
+                  attributedEdits={attributedEdits.filter(
+                    (edit) =>
+                      edit.status !== "rejected" &&
+                      edit.filePath === splitSelectedFile &&
+                      edit.after === splitPane.content,
+                  )}
+                  onKeepEdit={keepAttributedEdit}
+                  onUndoEdit={undoAttributedEdit}
                   bibEntries={bibEntries}
                   texLabels={texLabels}
                   onCompileShortcut={() => {
@@ -1812,6 +1955,9 @@ export default function EditorPage() {
       );
     },
     [
+      attributedEdits,
+      keepAttributedEdit,
+      undoAttributedEdit,
       splitPane,
       getFileType,
       closeSplitPane,
@@ -1842,8 +1988,9 @@ export default function EditorPage() {
         id: path,
         label: pathSync.basename(path),
         title: path,
+        voiceDot: fileVoiceDots[path]?.[0],
       })),
-    [openTabs],
+    [fileVoiceDots, openTabs],
   );
 
   // Sidebar tabs configuration
@@ -1882,12 +2029,19 @@ export default function EditorPage() {
       }
 
       const fileToSave = selectedFile;
-      contentSaveTimeoutRef.current = setTimeout(async () => {
+      pendingSourceWritesRef.current.primary = fileToSave;
+      const timer = setTimeout(async () => {
+        let saved = false;
         if (fileToSave) {
           try {
-            await daemon.writeFile(fileToSave, content);
-            lastSaveTimeRef.current = { path: fileToSave, time: Date.now() };
+            saved = await daemon.writeFile(fileToSave, content);
+            if (saved && currentProjectRef.current === daemon.projectPath) {
+              lastSaveTimesRef.current.set(fileToSave, Date.now());
+              rememberAgentEditFile(fileToSave, content, daemon.projectPath);
+            }
             if (
+              saved &&
+              currentProjectRef.current === daemon.projectPath &&
               daemon.projectPath &&
               latexSettings.settings.mainFile &&
               hasAnyCompiler &&
@@ -1902,14 +2056,25 @@ export default function EditorPage() {
             console.error("Failed to save file:", error);
           }
         }
+        if (contentSaveTimeoutRef.current !== timer) return;
+        contentSaveTimeoutRef.current = null;
+        if (saved) pendingSourceWritesRef.current.primary = undefined;
         if (savingVisualTimeoutRef.current) {
           clearTimeout(savingVisualTimeoutRef.current);
           savingVisualTimeoutRef.current = null;
         }
         setIsSaving(false);
       }, 500);
+      contentSaveTimeoutRef.current = timer;
     },
-    [selectedFile, daemon, hasAnyCompiler, latexCompiler, latexSettings.settings.mainFile],
+    [
+      selectedFile,
+      daemon,
+      hasAnyCompiler,
+      latexCompiler,
+      latexSettings.settings.mainFile,
+      rememberAgentEditFile,
+    ],
   );
 
   const handleOpenFolder = useCallback(async () => {
@@ -2526,6 +2691,14 @@ export default function EditorPage() {
                 onContentChange={handleContentChange}
                 language={getFileLanguage(selectedFile)}
                 filePath={selectedFile}
+                attributedEdits={attributedEdits.filter(
+                  (edit) =>
+                    edit.status !== "rejected" &&
+                    edit.filePath === selectedFile &&
+                    edit.after === fileContent,
+                )}
+                onKeepEdit={keepAttributedEdit}
+                onUndoEdit={undoAttributedEdit}
                 diagnostics={activeFileDiagnostics}
                 bibEntries={bibEntries}
                 texLabels={texLabels}
@@ -3039,6 +3212,7 @@ export default function EditorPage() {
                           onCreateFile={() => setCreateDialog({ type: "file" })}
                           onCreateDirectory={() => setCreateDialog({ type: "directory" })}
                           onRefreshFiles={daemon.refreshFiles}
+                          fileVoiceDots={fileVoiceDots}
                           fileOperations={{
                             createFile: daemon.createFile,
                             createDirectory: daemon.createDirectory,
@@ -3314,6 +3488,7 @@ export default function EditorPage() {
                       lastResult={latexCompiler.lastResult}
                       lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
                       autoCompile={latexSettings.settings.autoCompile}
+                      staleAgentEdits={staleAgentEdits}
                       compiler={latexSettings.settings.compiler}
                       compilersStatus={latexCompiler.compilersStatus}
                       shellEscape={latexSettings.settings.shellEscape}

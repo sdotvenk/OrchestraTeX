@@ -5,8 +5,10 @@ import "@/lib/monaco/config";
 import Editor, { type Monaco, type OnChange, type OnMount } from "@monaco-editor/react";
 import type { editor, IDisposable, Position } from "monaco-editor";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { AttributedEdit } from "@/lib/agent/edit-attribution";
 import { resolveMonoFontFamily } from "@/lib/editor/font-stacks";
 import type { EditorSettings, EditorTheme } from "@/lib/editor/types";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import type { BibEntry, LabelEntry } from "@/lib/latex/bib-parser";
 import type { LatexDiagnostic } from "@/lib/latex/types";
 import { registerLaTeXLanguage } from "@/lib/monaco/latex";
@@ -34,6 +36,9 @@ type Props = {
   ) => void;
   onCursorChange?: (pos: { line: number; column: number }) => void;
   goToLine?: number;
+  attributedEdits?: AttributedEdit[];
+  onKeepEdit?: (edit: AttributedEdit) => void;
+  onUndoEdit?: (edit: AttributedEdit) => void;
 };
 
 type VimModeController = {
@@ -128,6 +133,9 @@ export const MonacoEditor = memo(function MonacoEditor({
   onAskAgent,
   onCursorChange,
   goToLine,
+  attributedEdits,
+  onKeepEdit,
+  onUndoEdit,
 }: Props) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -466,8 +474,111 @@ export const MonacoEditor = memo(function MonacoEditor({
     };
   }, []);
 
+  const decorationIdsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed || !editorReady) return;
+    const model = ed.getModel();
+    if (!model) return;
+
+    const lineCount = model.getLineCount();
+    const nextDecorations: editor.IModelDeltaDecoration[] = (attributedEdits ?? []).map((edit) => {
+      const provider = edit.thread.providerId;
+      const startLine = Math.max(1, Math.min(edit.startLine, lineCount));
+      const endLine = Math.max(startLine, Math.min(edit.endLine, lineCount));
+      return {
+        range: {
+          startLineNumber: startLine,
+          startColumn: 1,
+          endLineNumber: endLine,
+          endColumn: model.getLineMaxColumn(endLine),
+        },
+        options: {
+          isWholeLine: true,
+          className: edit.status === "pending" ? `ox-voice-range--${provider}` : undefined,
+          linesDecorationsClassName: `ox-voice-gutter--${provider}`,
+          hoverMessage: {
+            value: `${provider} · ${edit.thread.title}`,
+          },
+        },
+      };
+    });
+
+    decorationIdsRef.current = ed.deltaDecorations(decorationIdsRef.current, nextDecorations);
+    return () => {
+      if (decorationIdsRef.current.length > 0 && editorRef.current) {
+        decorationIdsRef.current = editorRef.current.deltaDecorations(decorationIdsRef.current, []);
+      }
+    };
+  }, [attributedEdits, editorReady]);
+
+  const jumpToAttributedEdit = useCallback((edit: AttributedEdit) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.revealLineInCenter(edit.startLine);
+    ed.setPosition({ lineNumber: edit.startLine, column: 1 });
+    ed.focus();
+  }, []);
+
+  const pendingEdits = attributedEdits?.filter((edit) => edit.status === "pending");
+
   return (
     <div className={`relative flex flex-col ${className}`}>
+      {pendingEdits && pendingEdits.length > 0 && (
+        <section
+          className="absolute top-2 right-4 z-10 flex flex-col gap-1 max-w-[320px] pointer-events-auto"
+          aria-label="Attributed agent edits"
+        >
+          {pendingEdits.map((edit) => {
+            const voice = VOICE_COLORS[edit.thread.providerId] ?? VOICE_COLORS["custom-acp"];
+            const label = `${edit.thread.providerId} · ${edit.thread.title}`;
+            return (
+              <div
+                key={edit.id}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border bg-panel/95 backdrop-blur-sm shadow-sm text-[11.5px]"
+              >
+                <button
+                  type="button"
+                  onClick={() => jumpToAttributedEdit(edit)}
+                  className="inline-flex items-center gap-1.5 min-w-0 flex-1 text-left hover:underline"
+                  title={`Jump to ${label} (L${edit.startLine})`}
+                  aria-label={`Jump to ${label} at line ${edit.startLine}`}
+                >
+                  <span
+                    className="inline-block w-[7px] h-[7px] rounded-full flex-shrink-0"
+                    style={{ backgroundColor: voice.ink }}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate font-medium" style={{ color: voice.text }}>
+                    {label}
+                  </span>
+                </button>
+                {onKeepEdit && (
+                  <button
+                    type="button"
+                    onClick={() => onKeepEdit(edit)}
+                    className="px-1.5 py-0.5 rounded text-[11px] text-foreground hover:bg-subtle transition-colors"
+                    aria-label={`Keep edit from ${label}`}
+                  >
+                    Keep
+                  </button>
+                )}
+                {onUndoEdit && (
+                  <button
+                    type="button"
+                    onClick={() => onUndoEdit(edit)}
+                    className="px-1.5 py-0.5 rounded text-[11px] text-foreground hover:bg-subtle transition-colors"
+                    aria-label={`Undo edit from ${label}`}
+                  >
+                    Undo
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      )}
       {editorSettings?.vimMode && !readOnly && (
         <div
           ref={vimStatusRef}

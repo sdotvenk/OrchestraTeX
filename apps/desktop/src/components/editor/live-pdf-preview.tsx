@@ -39,6 +39,7 @@ interface LivePdfPreviewProps {
   lastResult: CompilationResult | null;
   lastCompileDurationMs: number | null;
   autoCompile: boolean;
+  staleAgentEdits?: number;
   compiler?: LaTeXCompiler;
   compilersStatus?: LaTeXCompilersStatus | null;
   shellEscape?: boolean;
@@ -68,6 +69,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   lastResult,
   lastCompileDurationMs,
   autoCompile,
+  staleAgentEdits = 0,
   compiler = "pdflatex",
   compilersStatus = null,
   shellEscape = false,
@@ -425,6 +427,14 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           </button>
         </div>
       </div>
+
+      {pdfData && staleAgentEdits > 0 && (
+        <div className="bg-stage px-3 py-2" role="status">
+          <span className="inline-block rounded-full border border-[var(--stale-line)] bg-[var(--stale-bg)] px-2 py-0.5 text-xs text-[var(--stale)]">
+            {staleAgentEdits} agent {staleAgentEdits === 1 ? "edit" : "edits"} since this build
+          </span>
+        </div>
+      )}
 
       {/* Main PDF Body on Calm Drafting Mat */}
       <div className="flex-1 min-h-0 flex flex-col bg-stage">

@@ -84,6 +84,7 @@ const IGNORED_DIRS: &[&str] = &[
 
 const DEBOUNCE_MS: u64 = 100;
 const DEFAULT_TEXT_ENCODING: &str = "utf-8";
+static PROJECT_WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn ensure_utf8_encoding(encoding: Option<&str>) -> Result<(), String> {
     let requested = encoding.unwrap_or(DEFAULT_TEXT_ENCODING).trim();
@@ -284,6 +285,7 @@ pub async fn write_file(
     path: String,
     content: String,
     encoding: Option<String>,
+    expected_content: Option<String>,
 ) -> Result<(), String> {
     let project_path = {
         let state_guard = state.lock().map_err(|e| e.to_string())?;
@@ -296,6 +298,13 @@ pub async fn write_file(
     validate_path_within_project(&path, &project_path)?;
 
     ensure_utf8_encoding(encoding.as_deref())?;
+    let _write_guard = PROJECT_WRITES.lock().await;
+    if let Some(expected) = expected_content {
+        let current = fs::read_to_string(&path).await.map_err(|e| e.to_string())?;
+        if current != expected {
+            return Err("The file has changed since this edit was recorded".to_string());
+        }
+    }
     write_utf8_file(&path, &content).await
 }
 

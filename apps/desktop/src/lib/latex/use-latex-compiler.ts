@@ -59,6 +59,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
   const [pdfPath, setPdfPath] = useState<string | null>(null);
   const [pdfVersion, setPdfVersion] = useState(0);
   const [lastCompileDurationMs, setLastCompileDurationMs] = useState<number | null>(null);
+  const [lastPdfBuildStartedAt, setLastPdfBuildStartedAt] = useState<number | null>(null);
 
   const settingsRef = useRef(settings);
   const projectPathRef = useRef(projectPath);
@@ -67,6 +68,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
   const pendingLogRef = useRef<CompileOutputEvent[]>([]);
   const logRafRef = useRef<number | null>(null);
   const logSeqRef = useRef(0);
+  const generationRef = useRef(0);
 
   settingsRef.current = settings;
   projectPathRef.current = projectPath;
@@ -114,6 +116,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
   // Reset build state when project changes
   useEffect(() => {
     void projectPath;
+    generationRef.current += 1;
     if (autoCompileTimerRef.current) {
       clearTimeout(autoCompileTimerRef.current);
       autoCompileTimerRef.current = null;
@@ -129,6 +132,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
     setLastResult(null);
     setPdfPath(null);
     setLastCompileDurationMs(null);
+    setLastPdfBuildStartedAt(null);
   }, [projectPath]);
 
   useEffect(() => {
@@ -165,6 +169,8 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
     }: CompileInvocationOptions): Promise<CompilationResult | null> => {
       const targetDir = directory ?? projectPathRef.current;
       if (!targetDir || !mainFile) return null;
+      const generation = ++generationRef.current;
+      const startedAt = Date.now();
 
       if (autoCompileTimerRef.current) {
         clearTimeout(autoCompileTimerRef.current);
@@ -201,6 +207,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
           latexmkEngine: compiler === "latexmk" ? curSettings.latexmkEngine : undefined,
         });
 
+        if (generationRef.current !== generation) return null;
         flushCompileLog();
         setLastResult(result);
         if (result.cancelled) {
@@ -213,12 +220,14 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
         setLastCompileDurationMs(result.duration_ms);
         setCompileStatus(result.success ? "success" : "error");
 
-        if (result.pdf_path) {
+        if (result.success && result.pdf_path) {
           setPdfPath(result.pdf_path);
           setPdfVersion((v) => v + 1);
+          setLastPdfBuildStartedAt(startedAt);
         }
         return result;
       } catch (error) {
+        if (generationRef.current !== generation) return null;
         const msg = error instanceof Error ? error.message : String(error);
         const failResult: CompilationResult = {
           success: false,
@@ -333,6 +342,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
     pdfPath,
     pdfVersion,
     lastCompileDurationMs,
+    lastPdfBuildStartedAt,
     compile,
     scheduleAutoCompile,
     stopCompilation,

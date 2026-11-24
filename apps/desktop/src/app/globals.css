@@ -921,3 +921,36 @@ kbd {
   background-color: color-mix(in srgb, var(--accent) 18%, transparent);
   transition: background-color 0.3s ease;
 }
+
+/* Attributed agent edit range & gutter decorations */
+.ox-voice-range--claude {
+  background-color: color-mix(in srgb, var(--voice-claude-tint) 42%, transparent);
+}
+.ox-voice-range--codex {
+  background-color: color-mix(in srgb, var(--voice-codex-tint) 42%, transparent);
+}
+.ox-voice-range--antigravity {
+  background-color: color-mix(in srgb, var(--voice-antigravity-tint) 42%, transparent);
+}
+.ox-voice-range--custom-acp {
+  background-color: color-mix(in srgb, var(--voice-custom-tint) 42%, transparent);
+}
+.ox-voice-range--you {
+  background-color: color-mix(in srgb, var(--voice-you-tint) 42%, transparent);
+}
+
+.ox-voice-gutter--claude {
+  border-left: 3px solid var(--voice-claude-ink);
+}
+.ox-voice-gutter--codex {
+  border-left: 3px solid var(--voice-codex-ink);
+}
+.ox-voice-gutter--antigravity {
+  border-left: 3px solid var(--voice-antigravity-ink);
+}
+.ox-voice-gutter--custom-acp {
+  border-left: 3px solid var(--voice-custom-ink);
+}
+.ox-voice-gutter--you {
+  border-left: 3px solid var(--voice-you-ink);
+}

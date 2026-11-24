@@ -9,13 +9,22 @@ import {
 } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { AgentProviderId } from "@/lib/agent/types";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
+
+export interface TabVoiceDot {
+  provider: AgentProviderId | "you";
+  label?: string;
+  pulse?: boolean;
+}
 
 export interface TabItem {
   id: string;
   label: string;
   title?: string;
   badge?: string | number;
+  voiceDot?: TabVoiceDot;
 }
 
 export type TabReorderPosition = "before" | "after";
@@ -450,7 +459,11 @@ export function TabBar<T extends TabItem>({
                   ? "border-accent text-accent"
                   : "border-transparent text-muted hover:text-foreground"
               } ${onTabReorder ? "cursor-grab" : ""} ${isDragged ? "opacity-40" : ""}`}
-              title={tab.title ?? tab.label}
+              title={
+                tab.voiceDot?.label
+                  ? `${tab.title ?? tab.label} · ${tab.voiceDot.label}`
+                  : (tab.title ?? tab.label)
+              }
             >
               {showDropBefore && (
                 <div className="pointer-events-none absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full bg-accent z-10" />
@@ -463,11 +476,23 @@ export function TabBar<T extends TabItem>({
                 }}
                 onContextMenu={(e) => handleContextMenu(e, tab.id)}
                 onClick={() => handleTabClick(tab.id)}
-                className={`pl-2.5 pr-1.5 py-1 text-[12px] font-mono truncate max-w-[156px] ${
+                className={`inline-flex items-center pl-2.5 pr-1.5 py-1 text-[12px] font-mono truncate max-w-[156px] ${
                   isActive ? "font-medium" : "font-normal"
                 }`}
               >
-                {tab.label}
+                <span className="truncate">{tab.label}</span>
+                {tab.voiceDot && (
+                  <span
+                    className="inline-block w-[7px] h-[7px] rounded-full flex-shrink-0 ml-1.5"
+                    style={{
+                      backgroundColor: VOICE_COLORS[tab.voiceDot.provider].ink,
+                      boxShadow: tab.voiceDot.pulse
+                        ? `0 0 0 3px ${VOICE_COLORS[tab.voiceDot.provider].tint}`
+                        : undefined,
+                    }}
+                    title={tab.voiceDot.label ?? tab.voiceDot.provider}
+                  />
+                )}
               </button>
               {onTabClose && (
                 <button

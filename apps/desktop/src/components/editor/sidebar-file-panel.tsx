@@ -10,7 +10,7 @@ import {
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { EditorErrorBoundary } from "@/components/editor/editor-error-boundary";
-import { type FileOperations, FileTree } from "@/components/editor/file-tree";
+import { type FileOperations, FileTree, type FileVoiceDot } from "@/components/editor/file-tree";
 import { pathSync } from "@/lib/path";
 
 type FileSidebarPanelProps = {
@@ -23,6 +23,7 @@ type FileSidebarPanelProps = {
   onCreateDirectory: () => void;
   onRefreshFiles: () => void | Promise<void>;
   fileOperations: FileOperations;
+  fileVoiceDots?: Record<string, FileVoiceDot[]>;
 };
 
 export function FileSidebarPanel({
@@ -35,6 +36,7 @@ export function FileSidebarPanel({
   onCreateDirectory,
   onRefreshFiles,
   fileOperations,
+  fileVoiceDots,
 }: FileSidebarPanelProps) {
   if (!projectPath) {
     return (
@@ -129,6 +131,7 @@ export function FileSidebarPanel({
           fileOperations={fileOperations}
           projectPath={projectPath}
           onRefresh={onRefreshFiles}
+          fileVoiceDots={fileVoiceDots}
         />
       </EditorErrorBoundary>
     </>
