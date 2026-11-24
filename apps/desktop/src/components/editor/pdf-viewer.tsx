@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  ArrowsOutSimple,
-  Crosshair,
-  MagnifyingGlassMinus,
-  MagnifyingGlassPlus,
-} from "@phosphor-icons/react";
+import { Crosshair, MagnifyingGlassMinus, MagnifyingGlassPlus } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -56,9 +51,21 @@ export const PdfViewer = memo(function PdfViewer({
   const [activeHighlight, setActiveHighlight] = useState<PdfHighlightTarget | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const fitOptionsRef = useRef<HTMLDetailsElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const preservedScrollTopRef = useRef<number | null>(null);
   const hasAutoFittedRef = useRef(false);
+
+  useEffect(() => {
+    const dismissFitOptions = (event: PointerEvent) => {
+      const options = fitOptionsRef.current;
+      if (options?.open && event.target instanceof Node && !options.contains(event.target)) {
+        options.open = false;
+      }
+    };
+    document.addEventListener("pointerdown", dismissFitOptions);
+    return () => document.removeEventListener("pointerdown", dismissFitOptions);
+  }, []);
 
   // Clone Uint8Array so pdf.js worker transfer cannot detach caller state
   const documentFile = useMemo(() => {
@@ -264,85 +271,81 @@ export const PdfViewer = memo(function PdfViewer({
         </div>
 
         <details
+          ref={fitOptionsRef}
           className="relative"
           onKeyDown={(event) => {
-            if (event.key === "Escape") {
+            if (event.key === "Escape" && event.currentTarget.open) {
+              event.stopPropagation();
               event.currentTarget.open = false;
               event.currentTarget.querySelector("summary")?.focus();
             }
           }}
           onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget))
+            if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
               event.currentTarget.open = false;
+            }
           }}
         >
-          <summary className="cursor-pointer list-none rounded px-2 py-1 text-[12px] text-foreground hover:bg-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+          <summary className="cursor-pointer list-none rounded px-2 py-1 text-[12px] text-foreground hover:bg-subtle focus-visible:outline-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
             {fitMode === "width"
               ? "Fit width"
               : fitMode === "page"
                 ? "Fit page"
                 : `${Math.round(scale * 100)}%`}
           </summary>
-          <div className="absolute right-0 top-full z-50 flex items-center gap-1 rounded-lg border border-border bg-panel p-2 shadow-lg">
-            <button
-              type="button"
-              onClick={() => {
-                setFitMode("width");
-                computeFitScale("width");
-              }}
-              className={`px-1.5 py-0.5 text-[10px] font-mono uppercase border transition-colors ${
-                fitMode === "width"
-                  ? "border-foreground bg-foreground text-background"
-                  : "border-border bg-background text-muted hover:text-foreground"
-              }`}
-              title="Fit page width"
-            >
-              Width
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setFitMode("page");
-                computeFitScale("page");
-              }}
-              className={`px-1.5 py-0.5 text-[10px] font-mono uppercase border transition-colors ${
-                fitMode === "page"
-                  ? "border-foreground bg-foreground text-background"
-                  : "border-border bg-background text-muted hover:text-foreground"
-              }`}
-              title="Fit full page"
-            >
-              <ArrowsOutSimple className="size-3 inline" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={zoomOut}
-              className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary transition-colors"
-              title="Zoom out"
-              aria-label="Zoom out"
-            >
-              <MagnifyingGlassMinus className="size-3.5" aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setFitMode("custom");
-                setScale(1.0);
-              }}
-              className="px-1.5 py-0.5 text-[11px] font-mono tabular-nums text-muted hover:text-foreground hover:bg-surface-tertiary transition-colors min-w-[3rem] text-center"
-              title="Reset zoom to 100%"
-            >
-              {Math.round(scale * 100)}%
-            </button>
-            <button
-              type="button"
-              onClick={zoomIn}
-              className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary transition-colors"
-              title="Zoom in"
-              aria-label="Zoom in"
-            >
-              <MagnifyingGlassPlus className="size-3.5" aria-hidden="true" />
-            </button>
+          <div className="absolute right-0 top-full z-50 flex flex-col gap-1 rounded-lg border border-border bg-panel p-1.5 shadow-[var(--shadow-2)]">
+            <div className="flex gap-1 whitespace-nowrap">
+              {(["width", "page"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={fitMode === mode}
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setFitMode(mode);
+                    computeFitScale(mode);
+                    const options = fitOptionsRef.current;
+                    if (options) {
+                      options.open = false;
+                      options.querySelector("summary")?.focus();
+                    }
+                  }}
+                >
+                  {mode === "width" ? "Fit width" : "Fit page"}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-1 border-t border-border pt-1">
+              <button
+                type="button"
+                onClick={zoomOut}
+                className="btn btn-ghost btn-sm"
+                title="Zoom out"
+                aria-label="Zoom out"
+              >
+                <MagnifyingGlassMinus className="size-3.5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFitMode("custom");
+                  setScale(1.0);
+                }}
+                className="btn btn-ghost btn-sm font-mono tabular-nums"
+                title="Reset zoom to 100%"
+              >
+                {Math.round(scale * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={zoomIn}
+                className="btn btn-ghost btn-sm"
+                title="Zoom in"
+                aria-label="Zoom in"
+              >
+                <MagnifyingGlassPlus className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </details>
       </div>

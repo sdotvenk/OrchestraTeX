@@ -16,6 +16,26 @@ interface AgentStatusCardProps {
   onOpenSettings: () => void;
 }
 
+const POPOVER_WIDTH = 310;
+const POPOVER_GAP = 8;
+
+function getPopoverPosition(trigger: HTMLButtonElement) {
+  const rect = trigger.getBoundingClientRect();
+  const spaceAbove = rect.top;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const openAbove = spaceAbove > spaceBelow;
+
+  return {
+    left: Math.max(
+      POPOVER_GAP,
+      Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - POPOVER_GAP),
+    ),
+    top: openAbove ? undefined : rect.bottom + POPOVER_GAP,
+    bottom: openAbove ? window.innerHeight - rect.top + POPOVER_GAP : undefined,
+    maxHeight: Math.max(0, Math.max(spaceAbove, spaceBelow) - POPOVER_GAP * 2),
+  };
+}
+
 function WindowMeter({ window: win }: { window: RateLimitWindow }) {
   const pct =
     win.usedPercent != null ? Math.min(100, Math.max(0, Math.round(win.usedPercent))) : null;
@@ -25,7 +45,11 @@ function WindowMeter({ window: win }: { window: RateLimitWindow }) {
 
   return (
     <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] leading-4">
-      <span className="text-muted whitespace-nowrap">{win.label}</span>
+      <span className="text-muted">{win.label}</span>
+      <span className="text-muted-foreground tabular-nums text-[10.5px] text-right">
+        {pct != null ? `${pct}%` : "Available"}
+        {resetText ? ` · resets ${resetText}` : ""}
+      </span>
       {pct != null ? (
         <div
           className="col-span-2 row-start-2 h-1.5 rounded-full bg-sunken overflow-hidden"
@@ -38,14 +62,7 @@ function WindowMeter({ window: win }: { window: RateLimitWindow }) {
             style={{ width: `${pct}%` }}
           />
         </div>
-      ) : (
-        <span className="flex-1 text-muted">Available</span>
-      )}
-      <span className="text-muted-foreground tabular-nums text-[10.5px] text-right">
-        {pct != null ? `${pct}%` : ""}
-        {pct != null && resetText ? " · " : ""}
-        {resetText ? `resets ${resetText}` : ""}
-      </span>
+      ) : null}
     </div>
   );
 }
@@ -63,23 +80,16 @@ export function AgentStatusCard({
   onRefreshRateLimits,
   onOpenSettings,
 }: AgentStatusCardProps) {
-  const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [position, setPosition] = useState({ left: 8, bottom: 8 });
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const toggleOpen = () => {
-    if (!open && triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setPosition({
-        left: Math.max(8, Math.min(rect.left, window.innerWidth - 318)),
-        bottom: Math.max(8, window.innerHeight - rect.top + 8),
-      });
-    }
-    setOpen((value) => !value);
-  };
+  const [position, setPosition] = useState<ReturnType<typeof getPopoverPosition> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
+  const open = position !== null;
+  const toggleOpen = () => {
+    setPosition(!open && triggerRef.current ? getPopoverPosition(triggerRef.current) : null);
+  };
 
   const connectedProviders = providers.filter((p) => p.installed && p.authenticated);
   const installedProviders = providers.filter((p) => p.installed);
@@ -87,26 +97,36 @@ export function AgentStatusCard({
 
   useEffect(() => {
     if (!open) return;
+    popoverRef.current?.querySelector("button")?.focus({ preventScroll: true });
     const handleClickOutside = (e: MouseEvent) => {
       if (
         containerRef.current &&
         !containerRef.current.contains(e.target as Node) &&
         !popoverRef.current?.contains(e.target as Node)
       ) {
-        setOpen(false);
+        setPosition(null);
       }
     };
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setOpen(false);
+        setPosition(null);
         triggerRef.current?.focus();
       }
     };
+    const reposition = (event: Event) => {
+      if (event.target instanceof Node && popoverRef.current?.contains(event.target)) return;
+      const trigger = triggerRef.current;
+      if (trigger) setPosition(getPopoverPosition(trigger));
+    };
     document.addEventListener("mousedown", handleClickOutside);
     window.addEventListener("keydown", handleEsc);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
       window.removeEventListener("keydown", handleEsc);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
     };
   }, [open]);
 
@@ -186,25 +206,30 @@ export function AgentStatusCard({
         </button>
       )}
 
-      {open &&
+      {position &&
         createPortal(
-          <div
+          <section
             ref={popoverRef}
             id={popoverId}
-            className="fixed w-[310px] max-w-[calc(100vw-16px)] max-h-[calc(100dvh-16px)] overflow-y-auto z-50 rounded-xl border border-border bg-panel p-3.5 flex flex-col gap-3"
+            aria-labelledby={`${popoverId}-title`}
+            className="fixed max-w-[calc(100vw-16px)] overflow-y-auto z-50 rounded-xl border border-border bg-panel p-3.5 flex flex-col gap-3"
             style={{
               boxShadow: "var(--shadow-2)",
-              left: position.left,
-              bottom: position.bottom,
-              maxHeight: `calc(100dvh - ${position.bottom + 8}px)`,
+              width: POPOVER_WIDTH,
+              ...position,
             }}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-[13.5px] font-semibold text-foreground-strong">Agent tools</h3>
+              <h3
+                id={`${popoverId}-title`}
+                className="text-[13.5px] font-semibold text-foreground-strong"
+              >
+                Agent tools
+              </h3>
               <button
                 type="button"
                 onClick={() => {
-                  setOpen(false);
+                  setPosition(null);
                   onOpenSettings();
                 }}
                 className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] text-muted hover:text-foreground hover:bg-subtle transition-colors"
@@ -285,9 +310,11 @@ export function AgentStatusCard({
               })}
             </ul>
 
-            <p className="text-[11px] text-muted leading-relaxed">
-              Install a tool&apos;s command line and sign in, then check again.
-            </p>
+            {installedProviders.length < providers.length && (
+              <p className="text-[11px] text-muted leading-relaxed">
+                Install a tool&apos;s command line and sign in, then check again.
+              </p>
+            )}
 
             <div className="flex items-center gap-2">
               <button
@@ -303,7 +330,7 @@ export function AgentStatusCard({
                 <span>{checking ? "Checking..." : "Check again"}</span>
               </button>
             </div>
-          </div>,
+          </section>,
           document.body,
         )}
     </div>
