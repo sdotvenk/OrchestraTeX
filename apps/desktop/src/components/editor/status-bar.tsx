@@ -19,6 +19,7 @@ interface StatusBarProps {
   wordCount: number;
   activeThreadContext?: { providerLabel: string; percent: number } | null;
   agentSummary?: { total: number; running: number; waiting: number; scheduled: number };
+  cacheSummaryLabel?: string | null;
   lastFetchLabel?: string | null;
 }
 
@@ -53,6 +54,7 @@ export function StatusBar({
   wordCount,
   activeThreadContext,
   agentSummary,
+  cacheSummaryLabel,
   lastFetchLabel,
 }: StatusBarProps) {
   const branchLabel = gitStatus?.branch
@@ -123,16 +125,31 @@ export function StatusBar({
       )}
 
       {workspaceView === "agents" && agentSummary && (
-        <span className="tabular-nums">
-          {agentSummary.total} {agentSummary.total === 1 ? "thread" : "threads"} ·{" "}
-          {agentSummary.running} running · {agentSummary.waiting} waiting
-          {agentSummary.scheduled > 0 ? ` · ${agentSummary.scheduled} scheduled` : ""}
-        </span>
+        <>
+          <span className="tabular-nums">
+            {agentSummary.total} {agentSummary.total === 1 ? "thread" : "threads"} ·{" "}
+            {agentSummary.running} running · {agentSummary.waiting} waiting
+            {agentSummary.scheduled > 0 ? ` · ${agentSummary.scheduled} scheduled` : ""}
+          </span>
+          {cacheSummaryLabel && (
+            <div className="ml-auto flex items-center gap-4">
+              <span className="tabular-nums">{cacheSummaryLabel}</span>
+            </div>
+          )}
+        </>
       )}
 
-      {workspaceView === "history" && lastFetchLabel && (
+      {workspaceView === "history" && (
         <div className="ml-auto flex items-center gap-4">
-          <span>{lastFetchLabel}</span>
+          {lastFetchLabel ? (
+            <span className="tabular-nums">{lastFetchLabel}</span>
+          ) : gitStatus?.remote ? (
+            <span className="tabular-nums">
+              {gitStatus.ahead > 0 || gitStatus.behind > 0
+                ? `Synced · ↑${gitStatus.ahead} ↓${gitStatus.behind}`
+                : "Up to date with origin"}
+            </span>
+          ) : null}
         </div>
       )}
     </footer>

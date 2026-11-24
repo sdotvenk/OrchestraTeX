@@ -34,7 +34,6 @@ import type { PdfHighlightTarget } from "@/components/editor/pdf-viewer";
 import { ProjectSwitcher } from "@/components/editor/project-switcher";
 import { ScoreDrawer } from "@/components/editor/score-drawer";
 import { FileSidebarPanel } from "@/components/editor/sidebar-file-panel";
-import { GitSidebarPanel } from "@/components/editor/sidebar-git-panel";
 import { SidebarOutlinePanel } from "@/components/editor/sidebar-outline-panel";
 import { StatusBar } from "@/components/editor/status-bar";
 import { TerminalPanel } from "@/components/editor/terminal-panel";
@@ -58,6 +57,7 @@ import { ThemePicker } from "@/components/ui/theme-picker";
 import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
 import { type AttributedEdit, projectRelativePath } from "@/lib/agent/edit-attribution";
+import { formatProviderDisplayName } from "@/lib/agent/model-display";
 import type { ScoreMark } from "@/lib/agent/score";
 import type { AgentProviderId, AgentThread, ThreadSummary } from "@/lib/agent/types";
 import { computeDateRange, queryUsageLog } from "@/lib/agent/usage-dashboard";
@@ -368,16 +368,25 @@ export default function EditorPage() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("rightPanelWidth");
-      return saved ? parseInt(saved, 10) : 380;
+      return saved ? parseInt(saved, 10) : 560;
     }
-    return 380;
+    return 560;
   });
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1440,
+  );
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [resizing, setResizing] = useState<"sidebar" | "right" | "preview" | null>(null);
   const [workspaceView, setWorkspaceView] = useState<"write" | "agents" | "history">("write");
   const [showUsageDashboard, setShowUsageDashboard] = useState(false);
   const [usageTopBarState, setUsageTopBarState] = useState<UsageDashboardTopBarState | null>(null);
   const [showHomeWorkspace, setShowHomeWorkspace] = useState(false);
   const [showThreadHistory, setShowThreadHistory] = useState(false);
+  const [checkoutMenuOpen, setCheckoutMenuOpen] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
   const [openingThread, setOpeningThread] = useState<ThreadSummary | null>(null);
   const [worktreeGitStatus, setWorktreeGitStatus] = useState<GitStatus | null>(null);
@@ -391,13 +400,11 @@ export default function EditorPage() {
   const [todayUsageByProvider, setTodayUsageByProvider] = useState<
     Array<{ providerId: AgentProviderId; tokens: number }>
   >([]);
+  const [todayCachePercent, setTodayCachePercent] = useState<number | null>(null);
   const [highlightedFile, _setHighlightedFile] = useState<string | null>(null);
 
   const [commitMessage, setCommitMessage] = useState("");
-  const [showCommitInput, setShowCommitInput] = useState(false);
   const [isGeneratingCommitMessageAI, setIsGeneratingCommitMessageAI] = useState(false);
-  const [showRemoteInput, setShowRemoteInput] = useState(false);
-  const [remoteUrl, setRemoteUrl] = useState("");
   const [createDialog, setCreateDialog] = useState<{
     type: "file" | "directory";
   } | null>(null);
@@ -668,10 +675,6 @@ export default function EditorPage() {
   const gitStatus = daemon.gitStatus;
   const stagedChanges = useMemo(
     () => (gitStatus?.changes ?? []).filter((c: { staged: boolean; path: string }) => c.staged),
-    [gitStatus?.changes],
-  );
-  const unstagedChanges = useMemo(
-    () => (gitStatus?.changes ?? []).filter((c: { staged: boolean; path: string }) => !c.staged),
     [gitStatus?.changes],
   );
 
@@ -1346,13 +1349,6 @@ export default function EditorPage() {
   const loadGitDiffPreview = useCallback(
     (path: string, staged: boolean) =>
       loadDiffPreview(path, staged, gitDiffRequestIdRef, setGitDiffPreview),
-    [loadDiffPreview],
-  );
-
-  const handlePreviewHistoryDiff = useCallback(
-    async (path: string, staged: boolean) => {
-      await loadDiffPreview(path, staged, historyDiffRequestIdRef, setHistoryDiffPreview);
-    },
     [loadDiffPreview],
   );
 
@@ -2188,9 +2184,15 @@ export default function EditorPage() {
               tokens: entry.summary.inputTokens ?? 0,
             })),
         );
+        setTodayCachePercent(
+          res.total.cacheShare != null ? Math.round(res.total.cacheShare * 100) : null,
+        );
       })
       .catch(() => {
-        if (!cancelled) setTodayUsageByProvider([]);
+        if (!cancelled) {
+          setTodayUsageByProvider([]);
+          setTodayCachePercent(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -2670,31 +2672,12 @@ export default function EditorPage() {
     ],
   );
 
-  const handleStageAll = useCallback(() => {
-    if (!gitStatus) return;
-    const unstaged = gitStatus.changes
-      .filter((c: { staged: boolean }) => !c.staged)
-      .map((c: { path: string }) => c.path);
-    if (unstaged.length > 0) {
-      daemon.gitAdd(unstaged);
-    }
-  }, [gitStatus, daemon]);
-
   const handleStageFile = useCallback(
     (path: string) => {
       daemon.gitAdd([path]);
     },
     [daemon],
   );
-
-  const handleUnstageAll = useCallback(() => {
-    const stagedPaths = stagedChanges.flatMap(({ path, originalPath }) =>
-      originalPath ? [path, originalPath] : [path],
-    );
-    if (stagedPaths.length > 0) {
-      daemon.gitUnstage(stagedPaths);
-    }
-  }, [daemon, stagedChanges]);
 
   const handleUnstageFile = useCallback(
     (path: string) => {
@@ -2703,14 +2686,6 @@ export default function EditorPage() {
     },
     [daemon, stagedChanges],
   );
-
-  const handleRemoteSubmit = useCallback(() => {
-    const trimmed = remoteUrl.trim();
-    if (!trimmed) return;
-    daemon.gitAddRemote(trimmed);
-    setRemoteUrl("");
-    setShowRemoteInput(false);
-  }, [daemon, remoteUrl]);
 
   const handleGitPush = useCallback(async () => {
     const result = await daemon.gitPush();
@@ -2729,31 +2704,6 @@ export default function EditorPage() {
       toast(result.error || "Failed to pull changes", "error");
     }
   }, [daemon, toast]);
-
-  const handleRefreshGitStatus = useCallback(() => {
-    void daemon.refreshGitStatus(true);
-  }, [daemon]);
-
-  const handleDiscardAll = useCallback(async () => {
-    const result = await daemon.gitDiscardAll();
-    if (result.success) {
-      toast("All changes discarded", "success");
-    } else {
-      toast(result.error || "Failed to discard changes", "error");
-    }
-  }, [daemon, toast]);
-
-  const handleDiscardFile = useCallback(
-    async (path: string) => {
-      const result = await daemon.gitDiscardFile(path);
-      if (result.success) {
-        toast(`Discarded changes: ${path}`, "success");
-      } else {
-        toast(result.error || "Failed to discard file", "error");
-      }
-    },
-    [daemon, toast],
-  );
 
   const handlePublishToGitHub = useCallback(async () => {
     setGhPublishError(null);
@@ -2882,7 +2832,6 @@ export default function EditorPage() {
       return;
     }
 
-    setShowCommitInput(true);
     setIsGeneratingCommitMessageAI(true);
 
     try {
@@ -2926,7 +2875,6 @@ export default function EditorPage() {
     if (result.success) {
       toast("Changes committed", "success");
       setCommitMessage("");
-      setShowCommitInput(false);
     } else {
       toast(result.error || "Failed to commit", "error");
     }
@@ -3262,7 +3210,7 @@ export default function EditorPage() {
             type="button"
             aria-label="Insert reference"
             onClick={() => triggerLatexSnippet("\\ref{", "}", "label")}
-            className="h-6 px-1.5 rounded-[5px] text-[12px] font-mono text-foreground hover:bg-subtle transition-colors"
+            className="h-6 px-1.5 rounded-[5px] text-[12px] font-sans text-foreground hover:bg-subtle transition-colors"
           >
             \ref
           </button>
@@ -3270,7 +3218,7 @@ export default function EditorPage() {
             type="button"
             aria-label="Insert citation"
             onClick={() => triggerLatexSnippet("\\cite{", "}", "key")}
-            className="h-6 px-1.5 rounded-[5px] text-[12px] font-mono text-foreground hover:bg-subtle transition-colors"
+            className="h-6 px-1.5 rounded-[5px] text-[12px] font-sans text-foreground hover:bg-subtle transition-colors"
           >
             \cite
           </button>
@@ -3493,11 +3441,20 @@ export default function EditorPage() {
     [daemon.files, daemon.projectPath],
   );
 
+  const canFitThreePanes = windowWidth >= (showSidebar ? sidebarWidth : 0) + 360 + 330 + 360;
+  const showLivePreviewEffective = showLivePreview && (!showRightPanel || canFitThreePanes);
+  const openDockedAgentPanel = () => {
+    setShowRightPanel(true);
+    if (windowWidth < 1600) {
+      setShowLivePreview(false);
+    }
+  };
+  const maxDockedWidth = Math.max(380, windowWidth - (showSidebar ? sidebarWidth : 0) - 420);
   const effectiveRightPanelWidth = agentExpanded
-    ? Math.max(rightPanelWidth, 520)
-    : showLivePreview
-      ? Math.min(rightPanelWidth, 330)
-      : Math.max(rightPanelWidth, 380);
+    ? Math.min(Math.max(rightPanelWidth, 570), maxDockedWidth)
+    : showLivePreviewEffective
+      ? Math.min(Math.max(rightPanelWidth, 330), 360)
+      : Math.min(Math.max(rightPanelWidth, 560), maxDockedWidth);
   const isHomeVisible = !showUsageDashboard && (!daemon.projectPath || showHomeWorkspace);
   const isWorkspaceVisible = !showHomeWorkspace && !showUsageDashboard;
   const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
@@ -3550,13 +3507,17 @@ export default function EditorPage() {
                 />
                 {gitStatus?.branch && (
                   <span
-                    className="hidden sm:inline-flex items-center gap-1 font-mono text-[11.5px] text-muted border border-border rounded-full px-2 py-0.5 shrink-0"
+                    className="hidden sm:inline-flex items-center gap-1 font-mono text-[11.5px] text-muted border border-border rounded-full px-2 py-0.5 min-w-0 max-w-[220px]"
                     title={`Branch: ${gitStatus.branch}`}
                   >
-                    <GitBranchIcon className="size-3" aria-hidden="true" />
-                    {gitStatus.branch}
-                    {gitStatus.ahead > 0 ? ` ↑${gitStatus.ahead}` : ""}
-                    {gitStatus.behind > 0 ? ` ↓${gitStatus.behind}` : ""}
+                    <GitBranchIcon className="size-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{gitStatus.branch}</span>
+                    {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
+                      <span className="shrink-0 tabular-nums">
+                        {gitStatus.ahead > 0 ? ` ↑${gitStatus.ahead}` : ""}
+                        {gitStatus.behind > 0 ? ` ↓${gitStatus.behind}` : ""}
+                      </span>
+                    )}
                   </span>
                 )}
                 {isSaving && (
@@ -3568,7 +3529,7 @@ export default function EditorPage() {
         </div>
 
         {/* Center: Write / Agents / History Navigation */}
-        {daemon.projectPath ? (
+        {daemon.projectPath || showUsageDashboard ? (
           <div
             aria-label="Workspace"
             role="tablist"
@@ -3595,10 +3556,10 @@ export default function EditorPage() {
               role="tab"
               id="workspace-tab-write"
               aria-controls="workspace-panel-write"
-              tabIndex={workspaceView === "write" ? 0 : -1}
+              tabIndex={workspaceView === "write" && !showUsageDashboard ? 0 : -1}
               aria-selected={isWorkspaceVisible && workspaceView === "write"}
               onClick={() => activateWorkspaceTab("write")}
-              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors ${
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors whitespace-nowrap ${
                 isWorkspaceVisible && workspaceView === "write"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
                   : "text-muted hover:text-foreground"
@@ -3611,11 +3572,13 @@ export default function EditorPage() {
               role="tab"
               id="workspace-tab-agents"
               aria-controls={workspaceView === "agents" ? "workspace-panel-agents" : undefined}
-              tabIndex={workspaceView === "agents" ? 0 : -1}
-              aria-selected={isWorkspaceVisible && workspaceView === "agents"}
+              tabIndex={workspaceView === "agents" || showUsageDashboard ? 0 : -1}
+              aria-selected={
+                (isWorkspaceVisible && workspaceView === "agents") || showUsageDashboard
+              }
               onClick={() => activateWorkspaceTab("agents")}
-              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
-                isWorkspaceVisible && workspaceView === "agents"
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                (isWorkspaceVisible && workspaceView === "agents") || showUsageDashboard
                   ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
                   : "text-muted hover:text-foreground"
               }`}
@@ -3632,10 +3595,10 @@ export default function EditorPage() {
               role="tab"
               id="workspace-tab-history"
               aria-controls={workspaceView === "history" ? "workspace-panel-history" : undefined}
-              tabIndex={workspaceView === "history" ? 0 : -1}
+              tabIndex={workspaceView === "history" && !showUsageDashboard ? 0 : -1}
               aria-selected={isWorkspaceVisible && workspaceView === "history"}
               onClick={() => activateWorkspaceTab("history")}
-              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors ${
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors whitespace-nowrap ${
                 isWorkspaceVisible && workspaceView === "history"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
                   : "text-muted hover:text-foreground"
@@ -3702,43 +3665,54 @@ export default function EditorPage() {
                           >(),
                         )
                         .values(),
-                    ).map((entry) => {
-                      const voice = VOICE_COLORS[entry.provider] ?? VOICE_COLORS["custom-acp"];
-                      const statusLabel = entry.waiting
-                        ? "waiting"
-                        : entry.active
-                          ? "running"
-                          : "idle";
-                      const name =
-                        agent.providers.find((provider) => provider.id === entry.provider)?.name ??
-                        {
-                          claude: "Claude Code",
-                          codex: "Codex",
-                          antigravity: "Antigravity",
-                          "custom-acp": "Custom ACP",
-                        }[entry.provider];
-                      return (
-                        <button
-                          key={entry.provider}
-                          type="button"
-                          onClick={() => {
-                            void agent.loadThread(entry.threadId);
-                            activateWorkspaceTab("agents");
-                          }}
-                          title={`${name} (${entry.count} ${entry.count === 1 ? "thread" : "threads"}) · ${statusLabel}`}
-                          aria-label={`${name} ${statusLabel}`}
-                          style={{
-                            backgroundColor: voice.tint,
-                            color: voice.ink,
-                            borderColor: entry.active || entry.waiting ? voice.ink : "var(--bg)",
-                            borderStyle: entry.waiting ? "dashed" : "solid",
-                          }}
-                          className="size-[22px] rounded-full border-[1.5px] inline-flex items-center justify-center transition-transform hover:scale-105 hover:z-10"
-                        >
-                          <ProviderIcon providerId={entry.provider} className="size-3 shrink-0" />
-                        </button>
-                      );
-                    })}
+                    )
+                      .sort((a, b) => {
+                        const order: Record<string, number> = {
+                          claude: 0,
+                          codex: 1,
+                          antigravity: 2,
+                          "custom-acp": 3,
+                        };
+                        return (order[a.provider] ?? 9) - (order[b.provider] ?? 9);
+                      })
+                      .map((entry) => {
+                        const voice = VOICE_COLORS[entry.provider] ?? VOICE_COLORS["custom-acp"];
+                        const statusLabel = entry.waiting
+                          ? "waiting"
+                          : entry.active
+                            ? "running"
+                            : "idle";
+                        const name =
+                          agent.providers.find((provider) => provider.id === entry.provider)
+                            ?.name ??
+                          {
+                            claude: "Claude Code",
+                            codex: "Codex",
+                            antigravity: "Antigravity",
+                            "custom-acp": "Custom ACP",
+                          }[entry.provider];
+                        return (
+                          <button
+                            key={entry.provider}
+                            type="button"
+                            onClick={() => {
+                              void agent.loadThread(entry.threadId);
+                              activateWorkspaceTab("agents");
+                            }}
+                            title={`${name} (${entry.count} ${entry.count === 1 ? "thread" : "threads"}) · ${statusLabel}`}
+                            aria-label={`${name} ${statusLabel}`}
+                            style={{
+                              backgroundColor: voice.tint,
+                              color: voice.ink,
+                              borderColor: entry.active || entry.waiting ? voice.ink : "var(--bg)",
+                              borderStyle: entry.waiting ? "dashed" : "solid",
+                            }}
+                            className="size-[22px] rounded-full border-[1.5px] inline-flex items-center justify-center transition-transform hover:scale-105 hover:z-10"
+                          >
+                            <ProviderIcon providerId={entry.provider} className="size-3 shrink-0" />
+                          </button>
+                        );
+                      })}
                   </div>
                 )}
 
@@ -3788,15 +3762,20 @@ export default function EditorPage() {
 
                   <button
                     type="button"
-                    onClick={() => setShowLivePreview((prev) => !prev)}
+                    onClick={() => {
+                      if (!showLivePreview && showRightPanel && !canFitThreePanes) {
+                        setShowRightPanel(false);
+                      }
+                      setShowLivePreview((prev) => !prev);
+                    }}
                     className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
-                      showLivePreview
+                      showLivePreviewEffective
                         ? "text-foreground bg-subtle/80"
                         : "text-muted hover:text-foreground hover:bg-subtle"
                     }`}
                     title="Toggle Preview Pane (Cmd+P)"
                     aria-label="Toggle Preview Pane"
-                    aria-pressed={showLivePreview}
+                    aria-pressed={showLivePreviewEffective}
                   >
                     <FilePdfIcon className="size-4" />
                   </button>
@@ -3905,7 +3884,7 @@ export default function EditorPage() {
       </header>
 
       {/* Main Workspace Area: Rail on Warm Paper + White Inset Frames */}
-      <main className="flex-1 min-h-0 flex relative overflow-hidden px-2 pb-2 gap-2">
+      <main className="flex-1 min-h-0 flex relative overflow-hidden px-2 pt-2 pb-2 gap-2">
         {showUsageDashboard ? (
           <div className="min-w-0 flex-1 overflow-auto">
             <UsageDashboard
@@ -3913,7 +3892,7 @@ export default function EditorPage() {
               currentProjectPath={daemon.projectPath}
               recentProjects={recentProjects.projects}
               threadTitles={Object.fromEntries(
-                orchestration.threads.map((thread) => [thread.id, thread.title]),
+                mergedOrchestrationThreads.map((thread) => [thread.id, thread.title]),
               )}
               onTopBarStateChange={setUsageTopBarState}
             />
@@ -3992,7 +3971,7 @@ export default function EditorPage() {
                         onApplyRename={handleApplyRename}
                         onSetMainFile={(node) => void latexSettings.setMainFile(node.path)}
                         onAskAgentOpening={(node) => {
-                          setShowRightPanel(true);
+                          openDockedAgentPanel();
                           setAgentDraftInjection({ id: Date.now(), text: `@${node.path} ` });
                         }}
                         fileOperations={{
@@ -4031,7 +4010,7 @@ export default function EditorPage() {
                           type="button"
                           onClick={() => {
                             agent.createThread();
-                            setShowRightPanel(true);
+                            openDockedAgentPanel();
                           }}
                           className="ml-auto text-[12px] text-foreground hover:bg-subtle px-1.5 py-0.5 rounded-md transition-colors"
                         >
@@ -4073,7 +4052,7 @@ export default function EditorPage() {
                                 type="button"
                                 onClick={() => {
                                   void agent.loadThread(thread.id);
-                                  setShowRightPanel(true);
+                                  openDockedAgentPanel();
                                 }}
                                 className={`w-full text-left px-2 py-1.5 rounded-[8px] flex gap-2.5 transition-colors ${
                                   isActive
@@ -4122,7 +4101,7 @@ export default function EditorPage() {
                                       className="size-3 shrink-0"
                                     />
                                     <span className="truncate">
-                                      {thread.providerId} · {stateLabel}
+                                      {formatProviderDisplayName(thread.providerId)} · {stateLabel}
                                     </span>
                                   </div>
                                 </div>
@@ -4250,7 +4229,7 @@ export default function EditorPage() {
           )}
 
           {/* Primary Write Column: Separate Inset Frames for Editor, Live PDF, and BuildActivityDrawer */}
-          <div className="flex-1 min-w-0 w-0 flex flex-col gap-2 min-h-0">
+          <div className="flex-1 min-w-[360px] w-0 flex flex-col gap-2 min-h-0">
             <div className="flex-1 min-h-0 flex gap-2">
               <div className="flex-1 min-w-0 flex flex-col overflow-hidden ox-frame">
                 {daemon.projectPath && editorPanelItems.length > 0 ? (
@@ -4413,9 +4392,34 @@ export default function EditorPage() {
                 onFixDiagnostics={handleFixDiagnosticsWithAi}
                 fixLabel={
                   agent.activeProviderStatus
-                    ? `Fix with ${agent.activeProviderStatus.name}`
+                    ? `Fix with ${
+                        agent.activeProviderStatus.id === "claude"
+                          ? "Claude"
+                          : agent.activeProviderStatus.id === "codex"
+                            ? "Codex"
+                            : agent.activeProviderStatus.id === "antigravity"
+                              ? "Antigravity"
+                              : "Custom ACP"
+                      }`
                     : undefined
                 }
+                fixProviders={agent.providers
+                  .filter((p) => p.installed)
+                  .map((p) => ({
+                    id: p.id,
+                    label:
+                      p.id === "claude"
+                        ? "Claude"
+                        : p.id === "codex"
+                          ? "Codex"
+                          : p.id === "antigravity"
+                            ? "Antigravity"
+                            : "Custom ACP",
+                  }))}
+                onSelectFixProvider={(providerId, diags) => {
+                  agentSettings.updateSettings({ defaultProvider: providerId });
+                  handleFixDiagnosticsWithAi(diags);
+                }}
                 diagnosticSuggestion={(diagnostic) => {
                   const file = projectRelativePath(daemon.projectPath ?? "", diagnostic.file);
                   const isCurrentFile = file === selectedFile;
@@ -4496,7 +4500,7 @@ export default function EditorPage() {
               }
             >
               {isAgentsView && (
-                <div className="w-[clamp(10rem,22vw,17rem)] shrink-0 overflow-hidden">
+                <div className="w-[284px] max-xl:w-[248px] shrink-0 overflow-hidden">
                   <OrchestrationSidebar
                     threads={mergedOrchestrationThreads}
                     activeThreadId={activeWorkspaceThread?.id}
@@ -4587,7 +4591,7 @@ export default function EditorPage() {
                     threePane={
                       workspaceView === "write" &&
                       showRightPanel &&
-                      Boolean(daemon.projectPath && showLivePreview)
+                      Boolean(daemon.projectPath && showLivePreviewEffective)
                     }
                     onSwitchToPdf={() => {
                       setShowLivePreview(true);
@@ -4595,7 +4599,7 @@ export default function EditorPage() {
                     }}
                     onDockInWrite={() => {
                       setWorkspaceView("write");
-                      setShowRightPanel(true);
+                      openDockedAgentPanel();
                     }}
                     latestBuildLogExcerpt={
                       latexCompiler.compileLog.length > 0
@@ -4616,7 +4620,7 @@ export default function EditorPage() {
                 </AgentErrorBoundary>
               </aside>
               {isAgentsView && (
-                <div className="w-[clamp(11rem,25vw,20rem)] shrink-0 overflow-hidden">
+                <div className="w-[308px] max-xl:w-[264px] shrink-0 overflow-hidden">
                   <ProjectInspector
                     key={activeWorkspaceThread?.id ?? daemon.projectPath}
                     projectPath={daemon.projectPath}
@@ -4728,7 +4732,7 @@ export default function EditorPage() {
 
         {workspaceView === "write" &&
           daemon.projectPath &&
-          showLivePreview &&
+          showLivePreviewEffective &&
           !showUsageDashboard &&
           !showHomeWorkspace && (
             <>
@@ -4816,17 +4820,56 @@ export default function EditorPage() {
               className="flex-1 min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden"
             >
               {activeWorktreePath && (
-                <label className="flex items-center gap-2 text-xs text-muted">
-                  Checkout
-                  <select
-                    className="rounded border border-border bg-panel px-2 py-1 text-foreground"
-                    value={showThreadHistory ? "worktree" : "main"}
-                    onChange={(event) => setShowThreadHistory(event.target.value === "worktree")}
+                <div className="relative flex items-center gap-2 px-1 shrink-0">
+                  <span className="text-[11.5px] text-muted">Checkout</span>
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutMenuOpen((prev) => !prev)}
+                    className="btn btn-secondary btn-sm h-7 px-2.5 text-[12px] inline-flex items-center gap-1.5"
+                    aria-expanded={checkoutMenuOpen}
                   >
-                    <option value="main">Project</option>
-                    <option value="worktree">{activeThreadBranch ?? "Thread worktree"}</option>
-                  </select>
-                </label>
+                    <span className="truncate max-w-[180px]">
+                      {showThreadHistory ? (activeThreadBranch ?? "Thread worktree") : "Project"}
+                    </span>
+                    <span className="text-[10px] text-muted" aria-hidden="true">
+                      ▾
+                    </span>
+                  </button>
+                  {checkoutMenuOpen && (
+                    <div className="absolute left-14 top-8 z-40 min-w-[190px] ox-popover p-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowThreadHistory(false);
+                          setCheckoutMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-[6px] text-[12px] text-left transition-colors ${
+                          !showThreadHistory
+                            ? "bg-subtle text-foreground-strong font-medium"
+                            : "text-foreground hover:bg-subtle"
+                        }`}
+                      >
+                        <span>Project</span>
+                        {!showThreadHistory && <span aria-hidden="true">✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowThreadHistory(true);
+                          setCheckoutMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-[6px] text-[12px] text-left transition-colors ${
+                          showThreadHistory
+                            ? "bg-subtle text-foreground-strong font-medium"
+                            : "text-foreground hover:bg-subtle"
+                        }`}
+                      >
+                        <span className="truncate">{activeThreadBranch ?? "Thread worktree"}</span>
+                        {showThreadHistory && <span aria-hidden="true">✓</span>}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
               <HistoryWorkspace
                 key={
@@ -4837,6 +4880,7 @@ export default function EditorPage() {
                   showThreadHistory && activeWorktreePath ? activeWorktreePath : daemon.projectPath
                 }
                 gitStatus={gitStatus}
+                gitLogEntries={showThreadHistory && activeWorktreePath ? [] : daemon.gitLogEntries}
                 stagedChanges={gitStatus?.changes.filter((c) => c.staged) ?? []}
                 unstagedChanges={gitStatus?.changes.filter((c) => !c.staged) ?? []}
                 fileVoiceByPath={fileVoiceByPath}
@@ -4852,7 +4896,7 @@ export default function EditorPage() {
                 onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
                 isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
                 onPreviewGitFileDiff={(path) => void _handlePreviewGitDiff(path, false)}
-                onPublishToGitHub={() => setShowGitHubPublishDialog(true)}
+                onPublishToGitHub={() => void handlePublishToGitHub()}
                 onOpenThread={(id) => {
                   const thread = orchestration.threads.find((item) => item.id === id);
                   if (thread)
@@ -4892,52 +4936,6 @@ export default function EditorPage() {
                     );
                   }
                 }}
-                gitSidebarPanel={
-                  showThreadHistory && activeWorktreePath ? undefined : (
-                    <GitSidebarPanel
-                      projectPath={daemon.projectPath}
-                      gitStatus={gitStatus}
-                      gitGraph={daemon.gitGraph}
-                      gitLogEntries={daemon.gitLogEntries}
-                      stagedChanges={stagedChanges}
-                      unstagedChanges={unstagedChanges}
-                      showRemoteInput={showRemoteInput}
-                      remoteUrl={remoteUrl}
-                      onRemoteUrlChange={(value) => setRemoteUrl(value)}
-                      onShowRemoteInput={() => setShowRemoteInput(true)}
-                      onHideRemoteInput={() => setShowRemoteInput(false)}
-                      onSubmitRemote={handleRemoteSubmit}
-                      onInitGit={daemon.gitInit}
-                      isInitializingGit={daemon.isInitializingGit}
-                      onRefreshStatus={handleRefreshGitStatus}
-                      onStageAll={handleStageAll}
-                      onDiscardAll={handleDiscardAll}
-                      onDiscardFile={handleDiscardFile}
-                      onStageFile={handleStageFile}
-                      onUnstageFile={handleUnstageFile}
-                      onUnstageAll={handleUnstageAll}
-                      showCommitInput={showCommitInput}
-                      commitMessage={commitMessage}
-                      onCommitMessageChange={(value) => setCommitMessage(value)}
-                      onShowCommitInput={() => setShowCommitInput(true)}
-                      onHideCommitInput={() => setShowCommitInput(false)}
-                      onCommit={handleCommit}
-                      onPush={handleGitPush}
-                      onPull={handleGitPull}
-                      onPreviewDiff={handlePreviewHistoryDiff}
-                      onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
-                      onOpenFile={(path) => {
-                        setWorkspaceView("write");
-                        void handleFileSelect(path);
-                      }}
-                      onPublishToGitHub={handlePublishToGitHub}
-                      isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
-                      isPushing={daemon.isPushing}
-                      isPulling={daemon.isPulling}
-                      isAuthenticatingGh={daemon.isAuthenticatingGh}
-                    />
-                  )
-                }
                 commitDiffPanel={
                   <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-panel">
                     {historyDiffPreview ? (
@@ -5001,6 +4999,9 @@ export default function EditorPage() {
             waiting: waitingThreads,
             scheduled: 0,
           }}
+          cacheSummaryLabel={
+            todayCachePercent != null ? `Cache ${todayCachePercent}% of input today` : null
+          }
         />
       )}
 
