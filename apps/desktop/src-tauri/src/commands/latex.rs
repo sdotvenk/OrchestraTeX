@@ -429,6 +429,7 @@ fn extract_input_line_number(line: &str) -> u32 {
 
 fn try_parse_file_line_error(line: &str) -> Option<LatexDiagnostic> {
     let trimmed = line.trim();
+    let trimmed = trimmed.strip_prefix("error: ").unwrap_or(trimmed);
     // Format: `<file>:<line>: <message>`
     // Ignore warning prefixes or compiler banners that happen to contain colons
     if trimmed.starts_with("LaTeX ")
@@ -486,6 +487,13 @@ fn try_parse_file_line_error(line: &str) -> Option<LatexDiagnostic> {
     None
 }
 
+fn tex_error_text(message: &str) -> &str {
+    message
+        .trim()
+        .trim_start_matches("! ")
+        .trim_end_matches('.')
+}
+
 pub fn parse_latex_diagnostics(
     log_and_output: &str,
     default_file: &str,
@@ -495,6 +503,13 @@ pub fn parse_latex_diagnostics(
     let mut seen: HashSet<(String, String, u32, String)> = HashSet::new();
 
     let lines: Vec<&str> = log_and_output.lines().collect();
+    // Tectonic repeats TeX log errors with a more precise source path on stderr.
+    let tectonic_errors: HashSet<(u32, String)> = lines
+        .iter()
+        .filter(|line| line.trim_start().starts_with("error: "))
+        .filter_map(|line| try_parse_file_line_error(line))
+        .map(|diag| (diag.line, tex_error_text(&diag.message).to_owned()))
+        .collect();
     let mut current_file = default_file.to_string();
 
     let mut push_diag = |diag: LatexDiagnostic| {
@@ -554,6 +569,9 @@ pub fn parse_latex_diagnostics(
                     }
                 }
             }
+            if tectonic_errors.contains(&(err_line, tex_error_text(err_msg).to_owned())) {
+                continue;
+            }
             push_diag(LatexDiagnostic {
                 file: current_file.clone(),
                 line: err_line,
@@ -565,6 +583,15 @@ pub fn parse_latex_diagnostics(
 
         // 3. Tectonic / generic fatal error lines
         if let Some(rest) = trimmed.strip_prefix("error: ") {
+            if !tectonic_errors.is_empty()
+                && matches!(
+                    rest,
+                    "something bad happened inside XeTeX; its output follows:"
+                        | "the XeTeX engine had an unrecoverable error"
+                )
+            {
+                continue;
+            }
             push_diag(LatexDiagnostic {
                 file: current_file.clone(),
                 line: 0,
@@ -2187,6 +2214,32 @@ Overfull \\hbox (12.0pt too wide) in paragraph at lines 70--75
         assert_eq!(warnings.len(), 2);
         assert_eq!(warnings[0].line, 55);
         assert_eq!(warnings[1].line, 70);
+    }
+
+    #[test]
+    fn tectonic_prefers_the_source_diagnostic_for_a_repeated_log_error() {
+        let log = "\
+(main.tex (article.cls
+! ! LaTeX Error: File `sections/results.tex' not found..
+l.11 \\input{sections/results}
+error: main.tex:11: ! LaTeX Error: File `sections/results.tex' not found.
+error: something bad happened inside XeTeX; its output follows:
+error: the XeTeX engine had an unrecoverable error
+";
+        let (errors, _) = parse_latex_diagnostics(log, "main.tex");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].file, "main.tex");
+        assert_eq!(errors[0].line, 11);
+        assert_eq!(
+            errors[0].message,
+            "! LaTeX Error: File `sections/results.tex' not found."
+        );
+
+        let (errors, _) = parse_latex_diagnostics(
+            "error: the XeTeX engine had an unrecoverable error",
+            "main.tex",
+        );
+        assert_eq!(errors.len(), 1);
     }
 
     #[test]
