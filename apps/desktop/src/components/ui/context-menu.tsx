@@ -10,6 +10,10 @@ export interface ContextMenuItem {
   icon?: React.ReactNode;
   disabled?: boolean;
   danger?: boolean;
+  dividerBefore?: boolean;
+  shortcut?: string;
+  voiceColor?: string;
+  active?: boolean;
 }
 
 interface ContextMenuProps {
@@ -96,30 +100,55 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.1 }}
-        className="fixed z-50 min-w-[180px] border border-foreground bg-background text-foreground shadow-[3px_3px_0_var(--foreground)]"
+        className="fixed z-50 min-w-[224px] ox-popover p-[5px] text-foreground"
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
         }}
       >
-        <div className="py-1">
+        <div role="menu">
           {items.map((item) => (
-            <button
-              type="button"
-              key={item.label}
-              onClick={() => handleItemClick(item)}
-              disabled={item.disabled}
-              className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors border-l-2 ${
-                item.disabled
-                  ? "opacity-50 cursor-not-allowed border-transparent"
-                  : item.danger
-                    ? "border-foreground hover:bg-foreground/10"
-                    : "border-transparent hover:bg-foreground/5"
-              }`}
-            >
-              {item.icon && <span className="w-4 h-4">{item.icon}</span>}
-              <span>{item.label}</span>
-            </button>
+            <div key={item.label}>
+              {item.dividerBefore && <div className="my-1 mx-1.5 h-px bg-border" />}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => handleItemClick(item)}
+                disabled={item.disabled}
+                className={`w-full flex items-center gap-2 h-7 px-2.5 rounded-[6px] text-[12.5px] text-left transition-colors whitespace-nowrap ${
+                  item.disabled
+                    ? "opacity-50 cursor-not-allowed"
+                    : item.active
+                      ? "bg-primary text-primary-text"
+                      : item.danger
+                        ? "text-error hover:bg-error-bg/50"
+                        : "hover:bg-subtle"
+                }`}
+              >
+                {item.voiceColor && (
+                  <span
+                    className="size-[7px] rounded-full shrink-0"
+                    style={{ backgroundColor: item.voiceColor }}
+                    aria-hidden="true"
+                  />
+                )}
+                {item.icon && (
+                  <span className="w-4 h-4 shrink-0 flex items-center justify-center">
+                    {item.icon}
+                  </span>
+                )}
+                <span className="truncate">{item.label}</span>
+                {item.shortcut && (
+                  <span
+                    className={`ml-auto font-mono text-[11px] ${
+                      item.active ? "text-primary-text/70" : "text-muted"
+                    }`}
+                  >
+                    {item.shortcut}
+                  </span>
+                )}
+              </button>
+            </div>
           ))}
         </div>
       </motion.div>

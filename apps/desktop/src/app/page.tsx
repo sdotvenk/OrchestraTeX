@@ -7,7 +7,6 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDraftInjection } from "@/components/agent/agent-composer";
-import { AgentStatusCard } from "@/components/agent/agent-status-card";
 import { ProviderIcon } from "@/components/agent/icons";
 import { OrchestrationSidebar } from "@/components/agent/orchestration-sidebar";
 import {
@@ -60,7 +59,8 @@ import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
 import { type AttributedEdit, projectRelativePath } from "@/lib/agent/edit-attribution";
 import type { ScoreMark } from "@/lib/agent/score";
-import type { AgentThread, ThreadSummary } from "@/lib/agent/types";
+import type { AgentProviderId, AgentThread, ThreadSummary } from "@/lib/agent/types";
+import { computeDateRange, queryUsageLog } from "@/lib/agent/usage-dashboard";
 import { useAgentEdits } from "@/lib/agent/use-agent-edits";
 import { useOrchestration } from "@/lib/agent/use-orchestration";
 import { useScore } from "@/lib/agent/use-score";
@@ -386,7 +386,10 @@ export default function EditorPage() {
     if (showTerminal && workspaceView === "write") setBuildActivityCollapsed(true);
     else openBuildActivity("terminal");
   }, [openBuildActivity, showTerminal, workspaceView]);
-  const [sidebarTab, setSidebarTab] = useState<"files" | "outline" | "threads" | "git">("files");
+  const [showSettledThreads, setShowSettledThreads] = useState(false);
+  const [todayUsageByProvider, setTodayUsageByProvider] = useState<
+    Array<{ providerId: AgentProviderId; tokens: number }>
+  >([]);
   const [highlightedFile, _setHighlightedFile] = useState<string | null>(null);
 
   const [commitMessage, setCommitMessage] = useState("");
@@ -2128,24 +2131,63 @@ export default function EditorPage() {
     [fileVoiceDots, openTabs],
   );
 
-  // Sidebar tabs configuration
-  const sidebarTabs = useMemo(
-    (): TabItem[] => [
-      { id: "files", label: "Files" },
-      { id: "outline", label: "Outline" },
-      {
-        id: "threads",
-        label: "Threads",
-        badge: projectThreads.length || undefined,
-      },
-      {
-        id: "git",
-        label: "Git",
-        badge: gitStatus && gitStatus.changes.length > 0 ? gitStatus.changes.length : undefined,
-      },
-    ],
-    [gitStatus, projectThreads.length],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    const { startMs, endMs } = computeDateRange("today");
+    void queryUsageLog({
+      startMs,
+      endMs,
+      projectPath: daemon.projectPath ?? undefined,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setTodayUsageByProvider(
+          res.byProvider
+            .filter((entry) => (entry.summary.inputTokens ?? 0) > 0)
+            .map((entry) => ({
+              providerId: entry.provider,
+              tokens: entry.summary.inputTokens ?? 0,
+            })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setTodayUsageByProvider([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [daemon.projectPath]);
+
+  const gitStatusByPath = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (!gitStatus?.changes) return map;
+    for (const change of gitStatus.changes) {
+      const normalized = change.path.replace(/\\/g, "/").replace(/^\.\//, "");
+      const code =
+        change.status === "modified"
+          ? "M"
+          : change.status === "added"
+            ? "A"
+            : change.status === "deleted"
+              ? "D"
+              : change.status === "renamed"
+                ? "R"
+                : "?";
+      map[normalized] = code;
+    }
+    return map;
+  }, [gitStatus]);
+
+  const errorCountByPath = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const diag of latexCompiler.diagnostics) {
+      if (diag.severity === "error" && diag.file) {
+        const normalized = diag.file.replace(/\\/g, "/").replace(/^\.\//, "");
+        map[normalized] = (map[normalized] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [latexCompiler.diagnostics]);
 
   const handleContentChange = useCallback(
     (content: string) => {
@@ -3716,170 +3758,259 @@ export default function EditorPage() {
                       width: resizing === "sidebar" ? "var(--sidebar-width)" : sidebarWidth,
                       willChange: resizing === "sidebar" ? "width" : undefined,
                     }}
-                    className="flex flex-col flex-shrink-0 overflow-hidden bg-bg pr-1"
+                    className="flex flex-col flex-shrink-0 overflow-hidden bg-bg px-2 pt-2.5 pb-2 gap-1"
                   >
-                    <TabBar
-                      tabs={sidebarTabs}
-                      activeTab={sidebarTab}
-                      onTabSelect={(id) =>
-                        setSidebarTab(id as "files" | "outline" | "threads" | "git")
-                      }
-                      variant="sidebar"
-                    />
-
-                    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                      {sidebarTab === "files" && (
-                        <FileSidebarPanel
-                          projectPath={daemon.projectPath}
-                          files={daemon.files}
-                          selectedFile={selectedFile}
-                          highlightedFile={highlightedFile}
-                          onFileSelect={handleFileSelect}
-                          onCreateFile={() => setCreateDialog({ type: "file" })}
-                          onCreateDirectory={() => setCreateDialog({ type: "directory" })}
-                          onRefreshFiles={daemon.refreshFiles}
-                          fileVoiceDots={fileVoiceDots}
-                          onPlanRename={handlePlanRename}
-                          onApplyRename={handleApplyRename}
-                          onSetMainFile={(node) => void latexSettings.setMainFile(node.path)}
-                          onAskAgentOpening={(node) => {
-                            setShowRightPanel(true);
-                            setAgentDraftInjection({ id: Date.now(), text: `@${node.path} ` });
-                          }}
-                          fileOperations={{
-                            createFile: daemon.createFile,
-                            createDirectory: daemon.createDirectory,
-                            renamePath: daemon.renamePath,
-                            deletePath: daemon.deletePath,
-                            duplicateFile: daemon.duplicateFile,
-                          }}
-                        />
-                      )}
-
-                      {sidebarTab === "outline" && (
-                        <SidebarOutlinePanel
-                          activeFile={selectedFile ?? null}
-                          content={outlineContent}
-                          onJumpToLine={handleOutlineJumpToLine}
-                          onOpenInputFile={handleOutlineOpenInputFile}
-                        />
-                      )}
-
-                      {sidebarTab === "threads" && (
-                        <div className="flex-1 min-h-0 flex flex-col overflow-hidden p-2 gap-2">
-                          <div className="flex items-center justify-between px-1">
-                            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted">
-                              Threads
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                agent.createThread();
-                                setShowRightPanel(true);
-                              }}
-                              className="text-[12px] text-foreground hover:bg-subtle px-2 py-0.5 rounded-md transition-colors"
-                            >
-                              + New
-                            </button>
-                          </div>
-                          <div className="flex-1 overflow-y-auto space-y-1">
-                            {projectThreads.length === 0 ? (
-                              <div className="text-[12px] text-muted px-2 py-4 text-center">
-                                No threads yet
-                              </div>
-                            ) : (
-                              projectThreads.map((thread) => {
-                                const isActive = thread.id === agent.activeThread?.summary.id;
-                                return (
-                                  <button
-                                    key={thread.id}
-                                    type="button"
-                                    onClick={() => {
-                                      void agent.loadThread(thread.id);
-                                      setShowRightPanel(true);
-                                    }}
-                                    className={`w-full text-left px-2.5 py-2 rounded-lg transition-colors flex flex-col gap-0.5 ${
-                                      isActive
-                                        ? "bg-panel border border-border text-foreground-strong shadow-xs"
-                                        : "hover:bg-subtle text-foreground"
-                                    }`}
-                                  >
-                                    <span className="text-[12.5px] font-medium truncate">
-                                      {thread.title || "Untitled thread"}
-                                    </span>
-                                    <span className="flex min-w-0 items-center gap-1 text-[11px] text-muted">
-                                      <ProviderIcon
-                                        providerId={thread.providerId}
-                                        className="size-3 shrink-0"
-                                      />
-                                      <span className="truncate">
-                                        {thread.providerId} · {thread.messageCount} msgs
-                                      </span>
-                                    </span>
-                                  </button>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {sidebarTab === "git" && (
-                        <div className="flex-1 flex flex-col overflow-hidden">
-                          <GitSidebarPanel
-                            projectPath={daemon.projectPath}
-                            gitStatus={gitStatus}
-                            gitGraph={daemon.gitGraph}
-                            gitLogEntries={daemon.gitLogEntries}
-                            stagedChanges={stagedChanges}
-                            unstagedChanges={unstagedChanges}
-                            showRemoteInput={showRemoteInput}
-                            remoteUrl={remoteUrl}
-                            onRemoteUrlChange={(value) => setRemoteUrl(value)}
-                            onShowRemoteInput={() => setShowRemoteInput(true)}
-                            onHideRemoteInput={() => setShowRemoteInput(false)}
-                            onSubmitRemote={handleRemoteSubmit}
-                            onInitGit={daemon.gitInit}
-                            isInitializingGit={daemon.isInitializingGit}
-                            onRefreshStatus={handleRefreshGitStatus}
-                            onStageAll={handleStageAll}
-                            onDiscardAll={handleDiscardAll}
-                            onDiscardFile={handleDiscardFile}
-                            onStageFile={handleStageFile}
-                            onUnstageFile={handleUnstageFile}
-                            onUnstageAll={handleUnstageAll}
-                            showCommitInput={showCommitInput}
-                            commitMessage={commitMessage}
-                            onCommitMessageChange={(value) => setCommitMessage(value)}
-                            onShowCommitInput={() => setShowCommitInput(true)}
-                            onHideCommitInput={() => setShowCommitInput(false)}
-                            onCommit={handleCommit}
-                            onPush={handleGitPush}
-                            onPull={handleGitPull}
-                            onPreviewDiff={handlePreviewGitDiff}
-                            onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
-                            onOpenFile={(path) => {
-                              void handleFileSelect(path);
-                            }}
-                            onPublishToGitHub={handlePublishToGitHub}
-                            isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
-                            isPushing={daemon.isPushing}
-                            isPulling={daemon.isPulling}
-                            isAuthenticatingGh={daemon.isAuthenticatingGh}
-                          />
-                        </div>
-                      )}
+                    {/* 1. FILES */}
+                    <div className="flex-1 min-h-[120px] flex flex-col overflow-hidden">
+                      <FileSidebarPanel
+                        projectPath={daemon.projectPath}
+                        files={daemon.files}
+                        selectedFile={selectedFile}
+                        highlightedFile={highlightedFile}
+                        onFileSelect={handleFileSelect}
+                        onCreateFile={() => setCreateDialog({ type: "file" })}
+                        onCreateDirectory={() => setCreateDialog({ type: "directory" })}
+                        onRefreshFiles={daemon.refreshFiles}
+                        fileVoiceDots={fileVoiceDots}
+                        mainFile={latexSettings.settings.mainFile}
+                        gitStatusByPath={gitStatusByPath}
+                        errorCountByPath={errorCountByPath}
+                        activeProviderId={agent.activeProviderStatus?.id}
+                        onPlanRename={handlePlanRename}
+                        onApplyRename={handleApplyRename}
+                        onSetMainFile={(node) => void latexSettings.setMainFile(node.path)}
+                        onAskAgentOpening={(node) => {
+                          setShowRightPanel(true);
+                          setAgentDraftInjection({ id: Date.now(), text: `@${node.path} ` });
+                        }}
+                        fileOperations={{
+                          createFile: daemon.createFile,
+                          createDirectory: daemon.createDirectory,
+                          renamePath: daemon.renamePath,
+                          deletePath: daemon.deletePath,
+                          duplicateFile: daemon.duplicateFile,
+                        }}
+                      />
                     </div>
 
-                    {/* Silkscreen-style Agent Tools status card pinned to rail footer */}
-                    <div className="pt-2 px-1 shrink-0">
-                      <AgentStatusCard
-                        providers={agent.providers}
-                        loading={agent.loadingProviders}
-                        onRefreshProviders={agent.refreshProviders}
-                        onRefreshRateLimits={agent.refreshRateLimits}
-                        onOpenSettings={handleOpenAgentSettings}
-                      />
+                    {/* 2. OUTLINE */}
+                    {selectedFile && /\.tex$/i.test(selectedFile) && (
+                      <>
+                        <div className="h-px bg-border mx-1.5 my-1.5 shrink-0" />
+                        <div className="max-h-[160px] flex flex-col min-h-0 overflow-hidden">
+                          <SidebarOutlinePanel
+                            compact
+                            cursorLine={cursorPosition.line}
+                            activeFile={selectedFile}
+                            content={outlineContent}
+                            onJumpToLine={handleOutlineJumpToLine}
+                            onOpenInputFile={handleOutlineOpenInputFile}
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {/* 3. THREADS */}
+                    <div className="h-px bg-border mx-1.5 my-1.5 shrink-0" />
+                    <div className="flex flex-col min-h-0 shrink-0">
+                      <div className="h-7 px-1 pl-2 flex items-center">
+                        <span className="ox-sec">Threads</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            agent.createThread();
+                            setShowRightPanel(true);
+                          }}
+                          className="ml-auto text-[12px] text-foreground hover:bg-subtle px-1.5 py-0.5 rounded-md transition-colors"
+                        >
+                          + New
+                        </button>
+                      </div>
+                      <div className="max-h-[210px] overflow-y-auto space-y-0.5">
+                        {projectThreads.length === 0 ? (
+                          <div className="text-[12px] text-muted px-2 py-2 text-center">
+                            No threads yet
+                          </div>
+                        ) : (
+                          projectThreads.map((thread) => {
+                            const isActive = thread.id === agent.activeThread?.summary.id;
+                            const voice =
+                              VOICE_COLORS[thread.providerId] ?? VOICE_COLORS["custom-acp"];
+                            const ageMin = Math.max(
+                              1,
+                              Math.round((Date.now() - thread.updatedAt) / 60000),
+                            );
+                            const ageLabel =
+                              ageMin < 60
+                                ? `${ageMin}m`
+                                : ageMin < 1440
+                                  ? `${Math.floor(ageMin / 60)}h`
+                                  : `${Math.floor(ageMin / 1440)}d`;
+                            const stateLabel =
+                              thread.status === "running"
+                                ? "editing"
+                                : thread.status === "waiting_input"
+                                  ? "waiting"
+                                  : isActive && showRightPanel
+                                    ? "docked →"
+                                    : "done";
+
+                            return (
+                              <button
+                                key={thread.id}
+                                type="button"
+                                onClick={() => {
+                                  void agent.loadThread(thread.id);
+                                  setShowRightPanel(true);
+                                }}
+                                className={`w-full text-left px-2 py-1.5 rounded-[8px] flex gap-2.5 transition-colors ${
+                                  isActive
+                                    ? "bg-panel ring-1 ring-border shadow-xs"
+                                    : "hover:bg-subtle"
+                                }`}
+                              >
+                                <span
+                                  className="w-[3px] rounded-[2px] shrink-0"
+                                  style={{
+                                    backgroundColor: voice.ink,
+                                    opacity: thread.status === "idle" && !isActive ? 0.45 : 1,
+                                  }}
+                                  aria-hidden="true"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-medium text-[12.5px] text-foreground truncate">
+                                      {thread.title || "Untitled thread"}
+                                    </span>
+                                    {thread.status === "running" ? (
+                                      <span
+                                        className="ml-auto flex items-center gap-1 text-[11px] shrink-0"
+                                        style={{ color: voice.text }}
+                                      >
+                                        <span
+                                          className="size-1.5 rounded-full"
+                                          style={{ backgroundColor: voice.ink }}
+                                          aria-hidden="true"
+                                        />
+                                        live
+                                      </span>
+                                    ) : thread.status === "waiting_input" ? (
+                                      <span className="ml-auto bg-warn-bg border border-[var(--warn-line)] text-warn rounded-full px-1.5 text-[10.5px] font-semibold leading-4 shrink-0">
+                                        Approve
+                                      </span>
+                                    ) : (
+                                      <span className="ml-auto text-[11px] text-muted shrink-0">
+                                        {ageLabel}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11.5px] text-muted mt-0.5 flex items-center gap-1 truncate">
+                                    <ProviderIcon
+                                      providerId={thread.providerId}
+                                      className="size-3 shrink-0"
+                                    />
+                                    <span className="truncate">
+                                      {thread.providerId} · {stateLabel}
+                                    </span>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })
+                        )}
+
+                        {(() => {
+                          const archivedThreads = agent.threads.filter((t) => t.archived);
+                          if (archivedThreads.length === 0) return null;
+                          return (
+                            <div className="pt-0.5">
+                              <button
+                                type="button"
+                                onClick={() => setShowSettledThreads((prev) => !prev)}
+                                className="w-full h-[26px] px-2 rounded-[6px] flex items-center text-[12px] text-muted hover:bg-subtle transition-colors"
+                              >
+                                <span className="mr-1.5 text-[10px]" aria-hidden="true">
+                                  {showSettledThreads ? "▾" : "▸"}
+                                </span>
+                                <span>Settled</span>
+                                <span className="ml-auto font-mono text-[11px]">
+                                  {archivedThreads.length}
+                                </span>
+                              </button>
+                              {showSettledThreads && (
+                                <div className="space-y-0.5 mt-0.5 pl-2">
+                                  {archivedThreads.map((t) => (
+                                    <button
+                                      key={t.id}
+                                      type="button"
+                                      onClick={() => {
+                                        void agent.loadThread(t.id);
+                                        setShowRightPanel(true);
+                                      }}
+                                      className="w-full text-left px-2 py-1 rounded-[6px] text-[12px] text-muted hover:text-foreground hover:bg-subtle truncate"
+                                    >
+                                      {t.title || "Untitled thread"}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* 4. Sidebar Footer */}
+                    <div className="mt-auto pt-1.5 flex items-center gap-2 px-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setShowLatexSettings(true)}
+                        className="size-7 rounded-[7px] inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors shrink-0"
+                        title="Settings"
+                        aria-label="Settings"
+                      >
+                        <GearIcon className="size-4" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowUsageDashboard(true)}
+                        className="flex-1 min-w-0 text-left rounded-[8px] px-2 py-1 hover:bg-subtle transition-colors"
+                      >
+                        <div className="flex items-center text-[11.5px] text-muted">
+                          <span>Usage today</span>
+                          {todayUsageByProvider.length > 0 && (
+                            <span className="font-mono text-[11px] text-muted ml-auto">
+                              {(() => {
+                                const total = todayUsageByProvider.reduce(
+                                  (sum, p) => sum + p.tokens,
+                                  0,
+                                );
+                                return total >= 1000 ? `${(total / 1000).toFixed(1)}k` : `${total}`;
+                              })()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-0.5 mt-1 h-[5px]" aria-hidden="true">
+                          {todayUsageByProvider.length === 0 ? (
+                            <span className="flex-1 rounded-[2px] bg-border" />
+                          ) : (
+                            todayUsageByProvider.map((entry) => {
+                              const voice =
+                                VOICE_COLORS[entry.providerId] ?? VOICE_COLORS["custom-acp"];
+                              return (
+                                <span
+                                  key={entry.providerId}
+                                  className="rounded-[2px]"
+                                  style={{
+                                    flex: entry.tokens,
+                                    backgroundColor: voice.ink,
+                                  }}
+                                />
+                              );
+                            })
+                          )}
+                        </div>
+                      </button>
                     </div>
                   </aside>
 
