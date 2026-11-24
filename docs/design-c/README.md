@@ -1,6 +1,6 @@
 # Design C · Score
 
-Agents are voices. You conduct.
+See the [Design C user guide](USER-GUIDE.md) for current workflows.
 
 Canvas with all nine boards: https://claude.ai/artifact/461mLmjFXGvphdB8UkwTyy (private until shared)
 
