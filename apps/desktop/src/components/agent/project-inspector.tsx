@@ -379,7 +379,7 @@ export function ProjectInspector({
               <button
                 type="button"
                 title={branchPr.title}
-                className="mt-2 flex items-center gap-1.5 text-left text-[11.5px]"
+                className="mt-2 flex w-full max-w-full min-w-0 items-center gap-1.5 text-left text-[11.5px]"
                 onClick={() =>
                   void runCheckoutAction(async () => {
                     const { open } = await import("@tauri-apps/plugin-shell");

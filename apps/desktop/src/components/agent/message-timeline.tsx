@@ -372,6 +372,21 @@ export const MessageTimeline = memo(function MessageTimeline({
     requestAnimationFrame(() => scrollToBottom(false));
   }, [scrollTrigger, scrollToBottom]);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedToBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+    observer.observe(el);
+    if (el.firstElementChild) {
+      observer.observe(el.firstElementChild);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   const activeRelFile = activeFile ? toRelativeProjectPath(activeFile, projectPath) : null;
 
   const quickPrompts = [

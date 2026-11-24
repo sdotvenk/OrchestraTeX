@@ -323,7 +323,10 @@ export const AgentPanel = memo(function AgentPanel({
             <span className="font-medium text-foreground shrink-0 whitespace-nowrap">
               {providerDisplayName}
             </span>
-            <span className="font-mono min-w-0 truncate max-w-[220px]" title={currentModelLabel}>
+            <span
+              className="font-mono min-w-0 shrink-[0.2] truncate max-w-[220px]"
+              title={currentModelLabel}
+            >
               {currentModelLabel}
             </span>
             {currentEffort && (
@@ -338,7 +341,9 @@ export const AgentPanel = memo(function AgentPanel({
               ·
             </span>
             <span className="shrink-0 whitespace-nowrap">{runtimeLabel}</span>
-            <span className="ml-auto font-mono min-w-0 truncate">{shortProjectPath}</span>
+            <span className="ml-auto font-mono min-w-0 shrink-[4] truncate">
+              {shortProjectPath}
+            </span>
           </div>
         </>
       ) : mode === "docked" && threePane ? (

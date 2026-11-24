@@ -135,7 +135,7 @@ export function UsagePopover({
             )}
           </svg>
           {showPercent && (
-            <span className="font-mono text-[11.5px] text-muted">
+            <span className="hidden @[320px]:inline font-mono text-[11.5px] text-muted">
               {contextPct != null ? `${contextPct}%` : "0%"}
             </span>
           )}
