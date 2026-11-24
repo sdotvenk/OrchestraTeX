@@ -262,6 +262,7 @@ export function GitSidebarPanel({
                 {STATUS_SHORT[change.status]}
               </span>
               <span
+                title={change.path}
                 className={`truncate text-xs font-mono ${
                   change.status === "deleted" ? "line-through text-muted" : "text-foreground"
                 }`}
@@ -343,6 +344,7 @@ export function GitSidebarPanel({
   }
 
   const changeCount = gitStatus.changes.length;
+  const canCommit = Boolean(commitMessage.trim()) && stagedChanges.length > 0;
   const showPushButton = Boolean(gitStatus.remote);
   const showPullButton = Boolean(gitStatus.remote);
   const canPush = gitStatus.hasUpstream ? gitStatus.ahead > 0 : gitStatus.hasCommits;
@@ -441,13 +443,15 @@ export function GitSidebarPanel({
       <div className="px-3 py-2.5 border-b border-border space-y-2">
         <div className="relative">
           <textarea
+            aria-label="Commit message"
             value={commitMessage}
             onChange={(e) => onCommitMessageChange(e.target.value)}
             placeholder="Message (Ctrl+Enter to commit)"
             className="w-full px-2.5 py-2 text-xs leading-relaxed rounded-lg border border-border resize-none focus:outline-none focus:border-foreground bg-background placeholder:text-muted-foreground transition-colors"
             rows={2}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (canCommit && e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
                 onCommit();
               }
             }}
@@ -457,8 +461,8 @@ export function GitSidebarPanel({
           <button
             type="button"
             onClick={onCommit}
-            disabled={!commitMessage.trim() || stagedChanges.length === 0}
-            className="btn btn-primary flex-1 justify-center gap-1.5 rounded-lg text-xs font-medium disabled:opacity-45 disabled:cursor-not-allowed"
+            disabled={!canCommit}
+            className={`btn ${canCommit ? "btn-primary" : "btn-secondary"} flex-1 justify-center gap-1.5 rounded-lg text-xs font-medium`}
           >
             <CheckIcon className="w-3.5 h-3.5" />
             Commit
@@ -473,7 +477,8 @@ export function GitSidebarPanel({
             }}
             disabled={isGeneratingCommitMessageAI || stagedChanges.length === 0}
             className="btn btn-secondary rounded-lg px-2.5 py-1.5 text-xs font-medium gap-1 disabled:opacity-45 disabled:cursor-not-allowed"
-            title="AI Draft"
+            aria-label="Generate commit message"
+            title="Generate commit message"
           >
             <SparkleIcon className="w-3.5 h-3.5" />
             {isGeneratingCommitMessageAI ? "..." : "AI"}
