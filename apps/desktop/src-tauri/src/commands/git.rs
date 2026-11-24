@@ -17,6 +17,8 @@ pub struct GhRepoResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GitFileChange {
     pub path: String,
+    #[serde(rename = "originalPath", skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<String>,
     pub status: String,
     pub staged: bool,
 }
@@ -229,10 +231,15 @@ fn parse_porcelain_v1_z(output: &str) -> Vec<GitFileChange> {
         let staged = x != ' ' && x != '?';
         let status_char = if staged { x } else { y };
 
-        if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
-            // Porcelain v1 -z emits `XY <new_path>\0<orig_path>\0`; consume <orig_path>.
-            let _ = parts.next();
-        }
+        let original_path = if matches!(x, 'R' | 'C') || matches!(y, 'R' | 'C') {
+            // A rename has two paths to reset when unstaging. A copy only changes its destination.
+            parts
+                .next()
+                .filter(|_| status_char == 'R')
+                .map(str::to_owned)
+        } else {
+            None
+        };
 
         let status = match status_char {
             'M' => "modified",
@@ -247,6 +254,7 @@ fn parse_porcelain_v1_z(output: &str) -> Vec<GitFileChange> {
         let path = record[3..].to_string();
         changes.push(GitFileChange {
             path,
+            original_path,
             status,
             staged,
         });
@@ -435,7 +443,7 @@ pub async fn git_diff(
     file: Option<String>,
     staged: Option<bool>,
 ) -> Result<String, String> {
-    let mut args = vec!["diff"];
+    let mut args = vec!["--literal-pathspecs", "diff"];
     if staged.unwrap_or(false) {
         args.push("--staged");
     }
@@ -458,7 +466,11 @@ pub async fn git_discard_all(dir: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn git_discard_file(dir: String, file: String) -> Result<(), String> {
     // Check if it's an untracked file by looking at git status
-    let status = run_git(&dir, &["status", "--porcelain", "--", &file]).await?;
+    let status = run_git(
+        &dir,
+        &["--literal-pathspecs", "status", "--porcelain", "--", &file],
+    )
+    .await?;
     if status.starts_with("??") {
         // Untracked file: delete it
         let path = std::path::Path::new(&dir).join(&file);
@@ -470,14 +482,14 @@ pub async fn git_discard_file(dir: String, file: String) -> Result<(), String> {
         }
     } else {
         // Tracked file: restore it
-        run_git(&dir, &["checkout", "--", &file]).await?;
+        run_git(&dir, &["--literal-pathspecs", "checkout", "--", &file]).await?;
     }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn git_unstage(dir: String, files: Vec<String>) -> Result<(), String> {
-    let mut args = vec!["reset", "HEAD", "--"];
+    let mut args = vec!["--literal-pathspecs", "reset", "HEAD", "--"];
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     args.extend(file_refs);
     run_git(&dir, &args).await?;
@@ -486,7 +498,7 @@ pub async fn git_unstage(dir: String, files: Vec<String>) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn git_add(dir: String, files: Vec<String>) -> Result<(), String> {
-    let mut args = vec!["add", "--"];
+    let mut args = vec!["--literal-pathspecs", "add", "--"];
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     args.extend(file_refs);
     run_git(&dir, &args).await?;
@@ -1202,6 +1214,7 @@ mod tests {
         assert_eq!(changes[5].path, "figures/modes.pdf");
         assert_eq!(changes[5].status, "renamed");
         assert!(changes[5].staged);
+        assert_eq!(changes[5].original_path.as_deref(), Some("old/modes.pdf"));
 
         assert_eq!(changes[6].path, "deleted.tex");
         assert_eq!(changes[6].status, "deleted");

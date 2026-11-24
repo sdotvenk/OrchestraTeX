@@ -270,7 +270,7 @@ export function GitSidebarPanel({
               </span>
             </div>
           </button>
-          <div className="flex items-stretch opacity-0 group-hover:opacity-100 transition-opacity duration-100">
+          <div className="flex items-stretch opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-100">
             {!staged && (
               <button
                 type="button"

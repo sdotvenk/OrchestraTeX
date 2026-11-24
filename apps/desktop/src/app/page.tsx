@@ -2648,19 +2648,20 @@ export default function EditorPage() {
   );
 
   const handleUnstageAll = useCallback(() => {
-    const stagedPaths = (daemon.gitStatus?.changes ?? [])
-      .filter((c: { staged: boolean }) => c.staged)
-      .map((c: { path: string }) => c.path);
+    const stagedPaths = stagedChanges.flatMap(({ path, originalPath }) =>
+      originalPath ? [path, originalPath] : [path],
+    );
     if (stagedPaths.length > 0) {
       daemon.gitUnstage(stagedPaths);
     }
-  }, [daemon]);
+  }, [daemon, stagedChanges]);
 
   const handleUnstageFile = useCallback(
     (path: string) => {
-      daemon.gitUnstage([path]);
+      const originalPath = stagedChanges.find((change) => change.path === path)?.originalPath;
+      daemon.gitUnstage(originalPath ? [path, originalPath] : [path]);
     },
-    [daemon],
+    [daemon, stagedChanges],
   );
 
   const handleRemoteSubmit = useCallback(() => {
