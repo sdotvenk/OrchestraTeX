@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Score visual language</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;family=Instrument+Serif:ital@0;1&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.ui{font-family:'Geist',system-ui,sans-serif;font-size:13px;color:#1B1F33;-webkit-font-smoothing:antialiased}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+.sec{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5A5E70}
+.card{background:#FCFAF5;border:1px solid #DCD4C4;border-radius:12px;box-shadow:0 1px 2px rgba(27,31,51,.06);padding:20px;box-sizing:border-box}
+.h{font-size:15px;font-weight:600;margin:0 0 6px}
+.p{font-size:13px;line-height:1.5;color:#3A3E52;margin:0}
+.sw{display:flex;flex-direction:column;gap:6px;font-size:11.5px}
+.chip{height:56px;border-radius:9px;border:1px solid rgba(27,31,51,.12)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+</style>
+</helmet>
+<div class="ui" style="width:1440px;height:1180px;background:#ECE7DC;padding:56px 64px;box-sizing:border-box;display:flex;flex-direction:column;gap:28px">
+
+  <div style="display:flex;align-items:flex-end;gap:40px">
+    <div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <svg width="54" height="42" viewBox="0 0 20 16" aria-hidden="true"><g stroke="#1B1F33" stroke-width="1"><line x1="0" y1="3" x2="20" y2="3"></line><line x1="0" y1="6.5" x2="20" y2="6.5"></line><line x1="0" y1="10" x2="20" y2="10"></line><line x1="0" y1="13.5" x2="20" y2="13.5"></line></g><line x1="6" y1="1" x2="14" y2="15" stroke="#E2622A" stroke-width="2.2" stroke-linecap="round"></line></svg>
+        <span style="font-family:'Instrument Serif',serif;font-size:64px;line-height:1;letter-spacing:-.02em">Score</span>
+      </div>
+    </div>
+    <p class="p" style="max-width:560px;margin-left:auto;font-size:14px">Design C treats OrchestraTeX as an Overleaf-grade LaTeX IDE where agents behave like co-authors: they show up in the file tree, the source, the PDF and a shared timeline, each in its own ink. Chat is a flowing transcript; only decisions get a raised surface.</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px">
+    <div class="card"><div class="sec" style="margin-bottom:10px">01</div><p class="h">Colour means who</p><p class="p">Every harness gets one ink and a soft tint. That ink marks its thread, its live cursor, its gutter edits, its PDF changes and its lane in the Score. State never borrows a voice colour: waiting is amber with a lock glyph, errors red with a label.</p></div>
+    <div class="card"><div class="sec" style="margin-bottom:10px">02</div><p class="h">Work happens in the document</p><p class="p">Agents edit with a named cursor and a tinted range, like a collaborator in Overleaf. Keep or undo sits next to the lines. The preview says how many edits it is behind; ⌘↵ rebuilds it.</p></div>
+    <div class="card"><div class="sec" style="margin-bottom:10px">03</div><p class="h">The Score shows the ensemble</p><p class="p">The bottom drawer has lanes for every active thread and for you: reads, edits, compiles and waits plotted over time. Click a mark to open the file or diff. Problems, the build log and the terminal share the drawer.</p></div>
+    <div class="card"><div class="sec" style="margin-bottom:10px">04</div><p class="h">Chat flows, decisions stand</p><p class="p">The transcript is one reading column with a thin voice line. Tool activity hangs off that line as small marks and folds to a summary. Permission requests are the only raised cards, compact and amber, with exact command and cwd.</p></div>
+    <div class="card"><div class="sec" style="margin-bottom:10px">05</div><p class="h">Overleaf where it already works</p><p class="p">File tree with create, upload and rename beside it. Code and Visual modes. Recompile on the preview. SyncTeX jumps both ways. History of labelled versions. T3 adds threads, approvals, queues and the project inspector.</p></div>
+    <div class="card"><div class="sec" style="margin-bottom:10px">06</div><p class="h">Depth from print</p><p class="p">Warm frame, inset sheets with hairlines and a 1 px lift. Floating items cast a soft shadow. The one primary action per view is solid ink with an offset tangerine shadow, like a misregistered press print.</p></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1.25fr 1fr 0.8fr;gap:16px">
+    <div class="card">
+      <div class="sec" style="margin-bottom:14px">Stock &amp; ink</div>
+      <div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px">
+        <div class="sw"><div class="chip" style="background:#ECE7DC"></div><b style="font-weight:500">Frame</b><span class="mono">#ECE7DC</span></div>
+        <div class="sw"><div class="chip" style="background:#E3DDD0"></div><b style="font-weight:500">Desk</b><span class="mono">#E3DDD0</span></div>
+        <div class="sw"><div class="chip" style="background:#FCFAF5"></div><b style="font-weight:500">Sheet</b><span class="mono">#FCFAF5</span></div>
+        <div class="sw"><div class="chip" style="background:#FFFFFF"></div><b style="font-weight:500">Page</b><span class="mono">#FFFFFF</span></div>
+        <div class="sw"><div class="chip" style="background:#DCD4C4"></div><b style="font-weight:500">Rule</b><span class="mono">#DCD4C4</span></div>
+        <div class="sw"><div class="chip" style="background:#1B1F33"></div><b style="font-weight:500">Ink</b><span class="mono">#1B1F33</span></div>
+      </div>
+      <div class="sec" style="margin:18px 0 10px">State</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:12px">
+        <span style="display:flex;align-items:center;gap:6px;background:#F8E3A6;border:1px solid #E0B847;color:#4D3500;border-radius:999px;padding:2px 10px"><svg width="10" height="10" aria-hidden="true"><path d="M1 9V3a4 4 0 0 1 8 0v6" fill="none" stroke="#8A5A00" stroke-width="1.6"></path></svg>Waiting for you</span>
+        <span style="display:flex;align-items:center;gap:6px;background:#F6DAD5;border:1px solid #E3A398;color:#7A1F14;border-radius:999px;padding:2px 10px">✕ Error</span>
+        <span style="display:flex;align-items:center;gap:6px;background:#DCEBDD;border:1px solid #A9CBAE;color:#1F5233;border-radius:999px;padding:2px 10px">✓ Built</span>
+        <span style="display:flex;align-items:center;gap:6px;background:#FCFAF5;border:1px solid #C9BFAD;color:#3A3E52;border-radius:999px;padding:2px 10px">◌ Stale preview</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec" style="margin-bottom:14px">Voices</div>
+      <div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px">
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:44px;height:22px;border-radius:6px;background:#D9541A"></span><span style="width:44px;height:22px;border-radius:6px;background:#FCE5D8;border:1px solid #F1B898"></span><b style="font-weight:500">Claude Code</b><span class="mono" style="margin-left:auto;color:#5A5E70">#D9541A</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:44px;height:22px;border-radius:6px;background:#2F5BD3"></span><span style="width:44px;height:22px;border-radius:6px;background:#DFE7FB;border:1px solid #AFC0EE"></span><b style="font-weight:500">Codex</b><span class="mono" style="margin-left:auto;color:#5A5E70">#2F5BD3</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:44px;height:22px;border-radius:6px;background:#0E8597"></span><span style="width:44px;height:22px;border-radius:6px;background:#D7EEF1;border:1px solid #9BD0D8"></span><b style="font-weight:500">Antigravity</b><span class="mono" style="margin-left:auto;color:#5A5E70">#0E8597</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:44px;height:22px;border-radius:6px;background:#8E4CC4"></span><span style="width:44px;height:22px;border-radius:6px;background:#EEE0F7;border:1px solid #CDAEE6"></span><b style="font-weight:500">Custom ACP</b><span class="mono" style="margin-left:auto;color:#5A5E70">#8E4CC4</span></div>
+        <div style="display:flex;align-items:center;gap:10px"><span style="width:44px;height:22px;border-radius:6px;background:#1B1F33"></span><span style="width:44px;height:22px;border-radius:6px;background:#E3DED2;border:1px solid #C9BFAD"></span><b style="font-weight:500">You</b><span class="mono" style="margin-left:auto;color:#5A5E70">ink</span></div>
+      </div>
+      <p class="p" style="font-size:12px;margin-top:12px">Two threads on one harness use the same ink; the thread name tells them apart. Users can reassign inks per harness.</p>
+    </div>
+    <div class="card">
+      <div class="sec" style="margin-bottom:14px">Type</div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div><div style="font-size:16px;font-weight:600">Geist · interface</div><div style="font-size:11.5px;color:#5A5E70">13 / 12 / 11 caps labels</div></div>
+        <div><div class="mono" style="font-size:14px">Geist Mono · \source</div><div style="font-size:11.5px;color:#5A5E70">12.5 / 20, paths, metrics</div></div>
+        <div><div style="font-family:'Source Serif 4',serif;font-size:16px">Source Serif · page</div><div style="font-size:11.5px;color:#5A5E70">Mock stand-in; PDFs keep their own fonts</div></div>
+        <div><div style="font-family:'Instrument Serif',serif;font-size:22px;line-height:1">Instrument Serif</div><div style="font-size:11.5px;color:#5A5E70">Brand moments only</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:28px;padding:22px 24px">
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="sec">Controls</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button style="font:inherit;font-weight:600;font-size:12.5px;border:1.5px solid #1B1F33;background:#1B1F33;color:#FCFAF5;border-radius:8px;padding:5px 12px;box-shadow:2px 2px 0 #E2622A">Recompile</button>
+        <button style="font:inherit;font-weight:500;font-size:12.5px;border:1px solid #C9BFAD;background:#FCFAF5;color:#1B1F33;border-radius:8px;padding:5px 12px">Export</button>
+        <button style="font:inherit;font-size:12.5px;border:0;background:#E2DCCF;color:#1B1F33;border-radius:8px;padding:5px 12px">Ghost · hover</button>
+      </div>
+      <p class="p" style="font-size:12px">One offset-shadow button per view: Recompile in Write, Send in a thread, Commit in History.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="sec">Presence in source</div>
+      <div class="mono" style="font-size:12px;background:#FCFAF5;border:1px solid #E6DFD1;border-radius:8px;padding:10px 0;position:relative">
+        <div style="display:flex;height:20px;line-height:20px"><span style="width:34px;text-align:right;padding-right:12px;color:#707383">36</span>as shown in Figure~\ref</div>
+        <div style="display:flex;height:20px;line-height:20px;background:#FCE5D8"><span style="width:34px;text-align:right;padding-right:12px;color:#B8460F;box-shadow:inset -3px 0 0 #D9541A">37</span>Higher modes split the<span style="display:inline-block;width:2px;height:16px;background:#D9541A;margin-top:2px"></span></div>
+        <span style="position:absolute;left:150px;top:-4px;background:#D9541A;color:#fff;font-family:'Geist';font-size:10.5px;padding:1px 6px;border-radius:4px 4px 4px 0;box-shadow:2px 2px 0 #1B1F33">Claude · writing</span>
+      </div>
+      <p class="p" style="font-size:12px">Live range tinted, gutter bar in ink. After the turn, the bar fades to a lighter ink with “Codex · 4 min ago”.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="sec">Transcript</div>
+      <div style="display:flex;gap:12px">
+        <div style="width:2px;background:#D9541A;border-radius:2px;position:relative"></div>
+        <div style="font-size:12.5px;line-height:1.5;color:#2F3347">
+          <div style="font-weight:600;font-size:12px;color:#B8460F;margin-bottom:2px">Claude</div>
+          I tightened the opening and added the checkerboard sentence.
+          <div style="display:flex;align-items:center;gap:6px;color:#5A5E70;font-size:11.5px;margin-top:6px"><svg width="9" height="9" aria-hidden="true"><rect x="1" y="1" width="7" height="7" fill="none" stroke="#D9541A" stroke-width="1.4"></rect></svg>Read 2 files<span>·</span><svg width="9" height="9" aria-hidden="true"><circle cx="4.5" cy="4.5" r="3.5" fill="#D9541A"></circle></svg>Edited wave-field.tex <span class="mono">+2 −1</span></div>
+        </div>
+      </div>
+      <p class="p" style="font-size:12px">No bubbles, no cards. You type in ink; agents speak beside their voice line.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="sec">Decision</div>
+      <div style="background:#FBEFC9;border:1.5px solid #1B1F33;border-radius:10px;padding:10px 12px;box-shadow:3px 3px 0 #E0B847;display:flex;flex-direction:column;gap:7px">
+        <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600"><span class="dot" style="background:#2F5BD3"></span>Codex wants to run</div>
+        <div class="mono" style="font-size:11.5px">latexmk -pdf main.tex</div>
+        <div style="display:flex;gap:6px"><button style="font:inherit;font-size:11.5px;font-weight:600;border:0;background:#1B1F33;color:#FCFAF5;border-radius:6px;padding:3px 9px">Allow once</button><button style="font:inherit;font-size:11.5px;border:1px solid #C9A63A;background:transparent;border-radius:6px;padding:3px 9px">Always here</button><button style="font:inherit;font-size:11.5px;border:0;background:transparent;padding:3px 6px">Deny</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

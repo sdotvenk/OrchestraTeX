@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowsClockwise, GearSix, Plugs } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowsClockwise, CaretUp, GearSix, Plugs } from "@phosphor-icons/react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ProviderStatus, RateLimitWindow } from "@/lib/agent/types";
 import { ProviderIcon } from "./icons";
 import { formatResetCountdown } from "./utils";
@@ -62,6 +62,8 @@ export function AgentStatusCard({
   const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
 
   const connectedProviders = providers.filter((p) => p.installed && p.authenticated);
   const installedProviders = providers.filter((p) => p.installed);
@@ -75,7 +77,10 @@ export function AgentStatusCard({
       }
     };
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     window.addEventListener("keydown", handleEsc);
@@ -112,11 +117,14 @@ export function AgentStatusCard({
     <div ref={containerRef} className="relative">
       {collapsed ? (
         <button
+          ref={triggerRef}
           type="button"
           onClick={() => setOpen((v) => !v)}
+          aria-controls={open ? popoverId : undefined}
           className="relative size-9 rounded-lg inline-flex items-center justify-center hover:bg-subtle transition-colors text-foreground"
           title={`Agents · ${stateLabel}`}
-          aria-label="Agent tools"
+          aria-expanded={open}
+          aria-label={`Agent tools, ${stateLabel}`}
         >
           {activeList.length > 0 ? (
             <span className="inline-flex items-center -space-x-1">
@@ -127,59 +135,41 @@ export function AgentStatusCard({
           ) : (
             <Plugs className="size-4 text-muted" aria-hidden="true" />
           )}
-          <span
-            className={`absolute top-1.5 right-1.5 size-1.5 rounded-full ${
-              connectedProviders.length > 0
-                ? "bg-success"
-                : installedProviders.length > 0
-                  ? "bg-warn"
-                  : "bg-muted-foreground"
-            }`}
-          />
         </button>
       ) : (
         <button
+          ref={triggerRef}
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="w-full p-2.5 rounded-[10px] border border-border bg-panel hover:border-border-dark transition-colors text-left flex flex-col gap-2"
-          style={{ boxShadow: "var(--shadow-1)" }}
+          aria-controls={open ? popoverId : undefined}
+          className="flex min-h-9 w-full items-center gap-2 rounded-lg border border-border px-2.5 text-left transition-colors hover:bg-subtle hover:border-border-dark"
           aria-expanded={open}
-          aria-label="Agent tools status"
+          aria-label={`Agent tools, ${stateLabel}`}
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[11.5px] font-medium text-muted">Agents</span>
-            <span
-              className={`px-2 py-0.5 rounded-full text-[10.5px] font-medium ${
-                connectedProviders.length > 0
-                  ? "bg-success-bg text-success"
-                  : installedProviders.length > 0
-                    ? "bg-warn-bg text-warn"
-                    : "bg-subtle text-muted"
-              }`}
-            >
-              {stateLabel}
-            </span>
-          </div>
-
-          {activeList.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {activeList.map((p) => (
-                <span
-                  key={p.id}
-                  className="inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-full bg-subtle text-[11px] font-medium text-foreground-strong"
-                >
-                  <ProviderIcon providerId={p.id} className="size-3 shrink-0" />
-                  <span>{p.name}</span>
-                </span>
-              ))}
-            </div>
-          )}
+          <Plugs className="size-4 shrink-0 text-muted" aria-hidden="true" />
+          <span className="truncate text-[12px] font-medium text-foreground">Agents</span>
+          <span
+            className={`ml-auto min-w-0 truncate text-[11px] ${
+              connectedProviders.length > 0
+                ? "text-success"
+                : installedProviders.length > 0
+                  ? "text-warn"
+                  : "text-muted"
+            }`}
+          >
+            {stateLabel}
+          </span>
+          <CaretUp
+            className={`size-3 shrink-0 text-muted transition-transform ${open ? "rotate-180" : ""}`}
+            aria-hidden="true"
+          />
         </button>
       )}
 
       {open && (
         <div
-          className="fixed sm:absolute left-2 sm:left-0 bottom-14 sm:bottom-full sm:mb-2 w-[310px] max-w-[calc(100vw-16px)] z-50 rounded-xl border border-border bg-panel p-3.5 flex flex-col gap-3"
+          id={popoverId}
+          className="fixed sm:absolute left-2 sm:left-0 bottom-14 sm:bottom-full sm:mb-2 w-[310px] max-w-[calc(100vw-16px)] max-h-[calc(100dvh-100px)] overflow-y-auto z-50 rounded-xl border border-border bg-panel p-3.5 flex flex-col gap-3"
           style={{ boxShadow: "var(--shadow-2)" }}
         >
           <div className="flex items-center justify-between">

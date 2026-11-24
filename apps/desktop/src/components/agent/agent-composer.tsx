@@ -18,7 +18,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
   AgentProviderId,
   AgentThread,
@@ -146,7 +146,14 @@ export function AgentComposer({
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const menuContainerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const modesButtonRef = useRef<HTMLButtonElement>(null);
+  const modelButtonRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
+  const closeMenu = useCallback((menu: "modes" | "model") => {
+    setOpenMenu(null);
+    (menu === "modes" ? modesButtonRef : modelButtonRef).current?.focus();
+  }, []);
 
   const adjustTextareaHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -158,13 +165,19 @@ export function AgentComposer({
   // Close mode/model popovers on outside click or Escape
   useEffect(() => {
     if (!openMenu) return;
+    menuRef.current?.querySelector("button")?.focus();
     const handleOutside = (e: MouseEvent) => {
-      if (menuContainerRef.current && !menuContainerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        !menuRef.current?.contains(target) &&
+        !modesButtonRef.current?.contains(target) &&
+        !modelButtonRef.current?.contains(target)
+      ) {
         setOpenMenu(null);
       }
     };
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpenMenu(null);
+      if (e.key === "Escape") closeMenu(openMenu);
     };
     document.addEventListener("mousedown", handleOutside);
     window.addEventListener("keydown", handleEsc);
@@ -172,7 +185,7 @@ export function AgentComposer({
       document.removeEventListener("mousedown", handleOutside);
       window.removeEventListener("keydown", handleEsc);
     };
-  }, [openMenu]);
+  }, [closeMenu, openMenu]);
 
   // Inject external selection as a connected context chip (or plain draft)
   useEffect(() => {
@@ -420,15 +433,13 @@ export function AgentComposer({
     Boolean(projectPath) &&
     (text.trim().length > 0 || attachments.length > 0 || Boolean(contextChip));
   const modelLabel = selectedModelInfo?.name ?? currentModel ?? providerObj?.name ?? "Default";
-  const folderShort = projectPath ? projectPath.split(/[\\/]/).filter(Boolean).pop() : null;
   const runtimeLabel =
     RUNTIME_OPTIONS.find((r) => r.id === runtimeMode)?.label ?? "Auto-accept edits";
 
   return (
     <section
-      ref={menuContainerRef}
       aria-label="Message composer"
-      className="px-3 pb-2.5 pt-1 bg-panel relative shrink-0"
+      className="relative mx-auto w-full max-w-[720px] shrink-0 bg-panel px-3 pt-1 pb-3"
       onDragOver={(e) => {
         e.preventDefault();
         setDragOver(true);
@@ -502,10 +513,12 @@ export function AgentComposer({
       {/* Silkscreen-style Consolidated Chat Modes Popover */}
       {openMenu === "modes" && (
         <div
-          className="absolute bottom-full left-3 mb-2 w-[290px] max-w-[calc(100%-24px)] z-40 rounded-xl border border-border bg-panel p-2.5 space-y-2.5"
+          id={menuId}
+          ref={menuRef}
+          className="absolute bottom-full left-3 mb-2 w-[290px] max-w-[calc(100%-24px)] max-h-[min(320px,40dvh)] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-2.5 space-y-2.5"
           style={{ boxShadow: "var(--shadow-2)" }}
           role="dialog"
-          aria-label="Chat settings"
+          aria-label={`Chat settings, ${runtimeLabel}${interactionMode === "plan" ? ", plan mode" : ""}`}
         >
           <div className="space-y-1">
             {RUNTIME_OPTIONS.map((opt) => {
@@ -589,7 +602,9 @@ export function AgentComposer({
       {/* Silkscreen-style Grouped Provider & Model Popover */}
       {openMenu === "model" && (
         <div
-          className="absolute bottom-full right-3 mb-2 w-[270px] max-w-[calc(100%-24px)] max-h-[320px] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-1.5 space-y-2"
+          id={menuId}
+          ref={menuRef}
+          className="absolute bottom-full right-3 mb-2 w-[270px] max-w-[calc(100%-24px)] max-h-[min(320px,40dvh)] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-1.5 space-y-2"
           style={{ boxShadow: "var(--shadow-2)" }}
           role="dialog"
           aria-label="Choose provider and model"
@@ -602,7 +617,7 @@ export function AgentComposer({
                   type="button"
                   onClick={() => {
                     void onChangeProvider(p.id);
-                    if (p.models.length === 0) setOpenMenu(null);
+                    if (p.models.length === 0) closeMenu("model");
                   }}
                   className="w-full px-2 py-1 rounded-md flex items-center gap-2 text-left hover:bg-subtle transition-colors"
                 >
@@ -627,7 +642,7 @@ export function AgentComposer({
                               await onChangeProvider(p.id);
                             }
                             await onChangeModel(m.id);
-                            setOpenMenu(null);
+                            closeMenu("model");
                           }}
                           className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] transition-colors ${
                             isSelected
@@ -714,12 +729,11 @@ export function AgentComposer({
 
       {/* Raised Rounded Composer Card */}
       <div
-        className={`rounded-[14px] border bg-panel transition-all ${
+        className={`rounded-xl border bg-panel transition-colors ${
           dragOver
             ? "border-accent ring-2 ring-accent/20"
             : "border-border-dark focus-within:border-accent"
         }`}
-        style={{ boxShadow: "var(--shadow-1)" }}
       >
         {/* Connected Context Chip & Image Attachments */}
         {(contextChip || attachments.length > 0) && (
@@ -777,7 +791,7 @@ export function AgentComposer({
         )}
 
         {/* Textarea */}
-        <div className="px-3 pt-2.5 pb-1">
+        <div className="px-3 pt-2.5 pb-1.5">
           <textarea
             ref={textareaRef}
             value={text}
@@ -789,26 +803,26 @@ export function AgentComposer({
             }}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            rows={2}
+            rows={1}
             disabled={!projectPath}
             placeholder={
               !projectPath
-                ? "Open a paper folder to start..."
+                ? "Open a folder to start"
                 : isRunning
                   ? providerObj?.supportsSteer
-                    ? "Type to steer this turn..."
-                    : "Type to queue next message..."
-                  : "Ask anything, @ a file, / for commands..."
+                    ? "Steer this turn…"
+                    : "Queue a message…"
+                  : "Ask about your paper…  @ files  / commands"
             }
             aria-label="Agent prompt input"
-            className="w-full resize-none bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed max-h-[180px]"
+            className="block w-full min-h-8 resize-none bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none leading-relaxed max-h-[180px]"
           />
         </div>
 
         {/* Bottom Control Row (Silkscreen v1.3.1 compact layout) */}
-        <div className="px-2 pb-2 pt-1 flex items-center justify-between gap-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-1 border-t border-border bg-subtle/35 rounded-b-xl p-1.5">
           {/* Left: Attach + Consolidated ChatModes button */}
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0">
             <input
               ref={fileInputRef}
               type="file"
@@ -835,7 +849,9 @@ export function AgentComposer({
             </button>
 
             <button
+              ref={modesButtonRef}
               type="button"
+              aria-controls={openMenu === "modes" ? menuId : undefined}
               onClick={() => setOpenMenu((m) => (m === "modes" ? null : "modes"))}
               className={`h-7 px-2 rounded-lg inline-flex items-center gap-1 text-[11.5px] transition-colors ${
                 openMenu === "modes" || interactionMode === "plan"
@@ -843,7 +859,7 @@ export function AgentComposer({
                   : "text-muted hover:text-foreground hover:bg-subtle"
               }`}
               title={`${runtimeLabel}${interactionMode === "plan" ? " · Plan mode" : ""}${currentEffort ? ` · ${currentEffort} effort` : ""}`}
-              aria-label="Chat settings"
+              aria-label={`Chat settings, ${runtimeLabel}${interactionMode === "plan" ? ", plan mode" : ""}`}
               aria-expanded={openMenu === "modes"}
             >
               {isAutoRuntime ? (
@@ -859,19 +875,25 @@ export function AgentComposer({
           </div>
 
           {/* Right: ModelChip + Send/Stop */}
-          <div className="flex items-center gap-1.5 min-w-0">
+          <div className="ml-auto flex flex-1 basis-32 items-center justify-end gap-1 min-w-0">
             <button
+              ref={modelButtonRef}
               type="button"
+              aria-controls={openMenu === "model" ? menuId : undefined}
               onClick={() => setOpenMenu((m) => (m === "model" ? null : "model"))}
-              className="h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-[12px] text-muted hover:text-foreground hover:bg-subtle transition-colors min-w-0 max-w-[175px]"
-              title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}`}
-              aria-label="Choose agent and model"
+              className={`h-7 px-1.5 rounded-lg inline-flex items-center gap-1 text-[12px] transition-colors min-w-0 ${
+                openMenu === "model"
+                  ? "bg-accent-soft text-accent"
+                  : "text-muted hover:text-foreground hover:bg-subtle"
+              }`}
+              title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}${currentEffort ? ` · ${currentEffort} effort` : ""}`}
+              aria-label={`Choose agent and model, currently ${modelLabel}${currentEffort ? ` with ${currentEffort} effort` : ""}`}
               aria-expanded={openMenu === "model"}
             >
               <ProviderIcon providerId={currentProviderId} className="size-3.5 shrink-0" />
               <span className="truncate font-medium text-foreground">{modelLabel}</span>
               {currentEffort && (
-                <span className="text-[11px] text-muted-foreground shrink-0 capitalize">
+                <span className="min-w-0 truncate text-[11px] text-muted-foreground capitalize">
                   {currentEffort}
                 </span>
               )}
@@ -927,12 +949,6 @@ export function AgentComposer({
             )}
           </div>
         </div>
-      </div>
-
-      {/* Quiet Context Strip below composer */}
-      <div className="px-1 pt-1.5 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-        <span className="truncate font-mono text-[10.5px]">{folderShort ?? "No folder open"}</span>
-        <span className="shrink-0">{runtimeLabel}</span>
       </div>
 
       {/* Image Lightbox Preview */}

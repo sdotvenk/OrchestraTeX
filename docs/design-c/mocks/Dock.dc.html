@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Thread docked beside source</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;family=Instrument+Serif:ital@0;1&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.ui{font-family:'Geist',system-ui,sans-serif;font-size:13px;color:#1B1F33;-webkit-font-smoothing:antialiased}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+.ico{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ib{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;border-radius:7px;color:#4A4F63;padding:0}
+.row{display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;border-radius:6px;white-space:nowrap}
+.ln{display:flex;height:20px;line-height:20px;font-family:'Geist Mono',monospace;font-size:12.5px;white-space:pre;position:relative}
+.ln .n{width:46px;text-align:right;padding-right:16px;color:#707383;flex:none;box-sizing:border-box}
+.c{color:#2B4C7E}.a{color:#7A5B1E}.m{color:#8E3B6B}
+.sec{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#5A5E70}
+.tab{display:flex;align-items:center;gap:7px;height:36px;padding:0 14px;font-family:'Geist Mono',monospace;font-size:12px;color:#5A5E70;border-right:1px solid #E6DFD1;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.tr{display:flex;align-items:center;gap:8px;height:22px;font-size:12px;color:#4A4F63;white-space:nowrap}
+.say{font-size:13.5px;line-height:1.6;color:#23273A;margin:0 0 10px}
+</style>
+</helmet>
+<div class="ui" style="width:1440px;height:900px;background:#ECE7DC;display:flex;flex-direction:column;overflow:hidden">
+
+  <header style="height:40px;display:flex;align-items:center;gap:14px;padding:0 12px 0 14px;border-bottom:1px solid #DCD4C4;flex:none">
+    <div style="display:flex;gap:8px" aria-hidden="true"><span style="width:12px;height:12px;border-radius:50%;background:#EE6A5F"></span><span style="width:12px;height:12px;border-radius:50%;background:#F5BF4F"></span><span style="width:12px;height:12px;border-radius:50%;background:#62C655"></span></div>
+    <div style="display:flex;align-items:center;gap:7px;margin-left:10px">
+      <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true"><g stroke="#1B1F33" stroke-width="1.3"><line x1="0" y1="3" x2="20" y2="3"></line><line x1="0" y1="6.5" x2="20" y2="6.5"></line><line x1="0" y1="10" x2="20" y2="10"></line><line x1="0" y1="13.5" x2="20" y2="13.5"></line></g><line x1="6" y1="1" x2="14" y2="15" stroke="#E2622A" stroke-width="2.4" stroke-linecap="round"></line></svg>
+      <span style="font-family:'Instrument Serif',serif;font-size:19px">OrchestraTeX</span>
+    </div>
+    <span style="width:1px;height:18px;background:#D3CABA"></span>
+    <span style="font-weight:500">membrane-atlas</span>
+    <span class="mono" style="font-size:11.5px;color:#4A4F63;border:1px solid #D3CABA;border-radius:999px;padding:2px 8px">⑂ main ↑1</span>
+    <nav aria-label="Workspace" style="margin-left:auto;margin-right:auto;display:flex;background:#E2DCCF;border-radius:9px;padding:3px;gap:2px">
+      <button style="border:0;font:inherit;font-weight:500;padding:4px 14px;border-radius:7px;background:#FCFAF5;box-shadow:0 1px 0 rgba(27,31,51,.12),0 0 0 1px rgba(27,31,51,.08)">Write</button>
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63;display:flex;align-items:center;gap:6px">Agents<span style="font-size:10.5px;font-weight:600;background:#F2C14E;border-radius:999px;padding:0 6px;line-height:16px">1</span></button>
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63">History</button>
+    </nav>
+    <span style="font-size:12px;color:#4A4F63">1 editing · 1 waiting</span>
+    <button style="font:inherit;font-weight:500;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:8px;padding:4px 11px">Export</button>
+  </header>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <aside style="width:260px;flex:none;display:flex;flex-direction:column;padding:10px 8px 8px 10px;box-sizing:border-box;gap:4px">
+      <div style="display:flex;align-items:center;height:28px;padding:0 4px 0 8px"><span class="sec">Files</span></div>
+      <div class="mono" style="font-size:12px;display:flex;flex-direction:column">
+        <div class="row" style="color:#4A4F63">▾ sections</div>
+        <div class="row" style="padding-left:28px">introduction.tex</div>
+        <div class="row" style="padding-left:28px;background:#FCFAF5;box-shadow:0 0 0 1px #DCD4C4;font-weight:500">wave-field.tex<span style="margin-left:auto;display:flex;gap:6px;align-items:center"><span class="dot" style="background:#D9541A"></span><span class="dot" style="background:#2F5BD3"></span></span></div>
+        <div class="row" style="padding-left:28px">discussion.tex</div>
+        <div class="row" style="color:#4A4F63">▾ figures</div>
+        <div class="row" style="padding-left:28px">modes.pdf<span style="margin-left:auto;color:#2F7D4F">R</span></div>
+        <div class="row" style="padding-left:28px">apparatus.png</div>
+        <div class="row">main.tex</div>
+        <div class="row">references.bib</div>
+      </div>
+      <div style="height:1px;background:#DCD4C4;margin:8px 6px"></div>
+      <div style="display:flex;align-items:center;height:28px;padding:0 4px 0 8px"><span class="sec">Threads</span><span style="margin-left:auto;font-size:12px">+ New</span></div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="padding:7px 9px;border-radius:8px;display:flex;gap:9px">
+          <span style="width:3px;border-radius:2px;background:#D9541A;flex:none"></span>
+          <div style="flex:1"><div style="display:flex;font-weight:500">Tighten §2 prose<span style="margin-left:auto;font-size:11px;color:#B8460F">live</span></div><div style="font-size:11.5px;color:#5A5E70;margin-top:2px">Claude Code · editing</div></div>
+        </div>
+        <div style="padding:7px 9px;border-radius:8px;background:#FCFAF5;box-shadow:0 0 0 1px #DCD4C4,0 1px 2px rgba(27,31,51,.06);display:flex;gap:9px">
+          <span style="width:3px;border-radius:2px;background:#2F5BD3;flex:none"></span>
+          <div style="flex:1"><div style="display:flex;align-items:center;font-weight:500">Repair figure paths<span style="margin-left:auto;font-size:10.5px;font-weight:600;color:#6B4A00;background:#F8E3A6;border:1px solid #E0B847;border-radius:999px;padding:0 6px;line-height:16px">Approve</span></div><div style="font-size:11.5px;color:#5A5E70;margin-top:2px">Codex · docked →</div></div>
+        </div>
+        <div style="padding:7px 9px;border-radius:8px;display:flex;gap:9px">
+          <span style="width:3px;border-radius:2px;background:#0E8597;opacity:.45;flex:none"></span>
+          <div style="flex:1"><div style="display:flex;font-weight:500;color:#2F3347">Audit bibliography<span style="margin-left:auto;font-size:11px;color:#5A5E70">12m</span></div><div style="font-size:11.5px;color:#5A5E70;margin-top:2px">Antigravity · done</div></div>
+        </div>
+      </div>
+    </aside>
+
+    <main style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;padding:8px 8px 8px 0;box-sizing:border-box">
+      <div style="flex:1;display:flex;gap:8px;min-height:0">
+
+        <section aria-label="Source editor" style="flex:1;min-width:0;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;box-shadow:0 1px 2px rgba(27,31,51,.06);display:flex;flex-direction:column;overflow:hidden">
+          <div style="display:flex;height:36px;border-bottom:1px solid #E6DFD1;flex:none;background:#F6F2EA">
+            <div class="tab" style="background:#FCFAF5;color:#1B1F33;box-shadow:inset 0 -2px 0 #1B1F33">wave-field.tex<span class="dot" style="background:#D9541A"></span></div>
+            <div class="tab">main.tex</div>
+            <div class="tab">references.bib</div>
+          </div>
+          <div style="flex:1;padding-top:8px;position:relative;overflow:hidden">
+            <div class="ln"><span class="n">25</span><span class="c">\subsection</span>{Modal response}</div>
+            <div class="ln"><span class="n">26</span><span class="c">\label</span><span class="a">{sec:response}</span></div>
+            <div class="ln"><span class="n">27</span></div>
+            <div class="ln"><span class="n">28</span>For a square membrane of side <span class="m">$L$</span>, the normal modes</div>
+            <div class="ln"><span class="n">29</span>separate along each axis:</div>
+            <div class="ln"><span class="n">30</span><span class="c">\begin</span><span class="a">{equation}</span></div>
+            <div class="ln"><span class="n">31</span><span class="m">  f_{mn} = </span><span class="c">\frac</span><span class="m">{c}{2L}</span><span class="c">\sqrt</span><span class="m">{m^2+n^2}.</span></div>
+            <div class="ln"><span class="n">32</span><span class="c">\end</span><span class="a">{equation}</span></div>
+            <div class="ln"><span class="n">33</span></div>
+            <div class="ln"><span class="n">34</span>The nodal lines divide the surface into regions of</div>
+            <div class="ln"><span class="n">35</span>alternating phase, as shown in Figure~<span class="c">\ref</span><span class="a">{fig:modes}</span>.</div>
+            <div class="ln" style="background:#FCE5D8"><span class="n" style="color:#B8460F;box-shadow:inset -3px 0 0 #D9541A">36</span>Higher modes split the plate into a checkerboard,</div>
+            <div class="ln" style="background:#FCE5D8"><span class="n" style="color:#B8460F;box-shadow:inset -3px 0 0 #D9541A">37</span>so the <span class="m">$(2,2)$</span> response nearly vanishes at the centre.</div>
+            <div class="ln"><span class="n">38</span></div>
+            <div class="ln" style="background:#DCE4F8"><span class="n" style="color:#2448B0;box-shadow:inset -3px 0 0 #2F5BD3">39</span><span class="c">\begin</span><span class="a">{figure}</span>[t]</div>
+            <div class="ln" style="background:#DCE4F8"><span class="n" style="color:#2448B0;box-shadow:inset -3px 0 0 #2F5BD3">40</span>  <span class="c">\centering</span></div>
+            <div class="ln" style="background:#DCE4F8"><span class="n" style="color:#2448B0;box-shadow:inset -3px 0 0 #2F5BD3">41</span><span style="text-decoration:line-through;color:#8A5A4A">  \includegraphics[width=\linewidth]{modes.pdf}</span></div>
+            <div class="ln" style="background:#CFE6D3"><span class="n" style="color:#1F5233;box-shadow:inset -3px 0 0 #2F7D4F">41</span>  <span class="c">\includegraphics</span>[width=<span class="c">\linewidth</span>]<span class="a">{figures/modes.pdf}</span></div>
+            <div class="ln" style="background:#DCE4F8"><span class="n" style="color:#2448B0;box-shadow:inset -3px 0 0 #2F5BD3">42</span>  <span class="c">\caption</span>{Transverse displacement fields.}</div>
+            <div class="ln" style="background:#DCE4F8"><span class="n" style="color:#2448B0;box-shadow:inset -3px 0 0 #2F5BD3">43</span>  <span class="c">\label</span><span class="a">{fig:modes}</span></div>
+            <div class="ln" style="background:#DCE4F8"><span class="n" style="color:#2448B0;box-shadow:inset -3px 0 0 #2F5BD3">44</span><span class="c">\end</span><span class="a">{figure}</span></div>
+            <div class="ln"><span class="n">45</span></div>
+            <div class="ln"><span class="n">46</span><span class="c">\subsection</span>{Boundary conditions}</div>
+            <div class="ln"><span class="n">47</span><span class="c">\label</span><span class="a">{sec:boundary}</span></div>
+            <div class="ln"><span class="n">48</span></div>
+            <div class="ln"><span class="n">49</span>At the clamped edge the displacement vanishes, and</div>
+            <div class="ln"><span class="n">50</span>the slope is free only along the diagonal supports.</div>
+            <div class="ln"><span class="n">51</span></div>
+            <div class="ln"><span class="n">52</span><span class="c">\paragraph</span>{Spectral estimate.}</div>
+
+            <div style="position:absolute;left:330px;top:250px;display:flex;align-items:center;gap:2px;background:#1B1F33;color:#FCFAF5;border-radius:8px;padding:3px;box-shadow:0 4px 12px rgba(27,31,51,.22);font-size:12px">
+              <span style="padding:0 6px;color:#B9BCCB">L39–44</span>
+              <button style="font:inherit;font-size:12px;border:0;background:#2F3450;color:#FCFAF5;border-radius:5px;padding:3px 8px;display:flex;align-items:center;gap:5px"><span class="dot" style="background:#7E9BEA"></span>Ask Codex</button>
+              <button style="font:inherit;font-size:12px;border:0;background:transparent;color:#FCFAF5;border-radius:5px;padding:3px 8px">New thread…</button>
+              <button style="font:inherit;font-size:12px;border:0;background:transparent;color:#FCFAF5;border-radius:5px;padding:3px 8px">Explain</button>
+            </div>
+            <div style="position:absolute;right:14px;top:330px;display:flex;align-items:center;gap:6px;background:#FCFAF5;border:1px solid #AFC0EE;border-radius:8px;padding:3px 4px 3px 9px;font-size:11.5px;color:#4A4F63;box-shadow:0 2px 6px rgba(27,31,51,.08)">
+              <span class="dot" style="background:#2F5BD3"></span>Codex · 1 change
+              <button style="font:inherit;font-size:11.5px;border:0;background:transparent;color:#1B1F33;padding:2px 6px">Keep</button>
+              <button style="font:inherit;font-size:11.5px;border:0;background:transparent;color:#1B1F33;padding:2px 6px">Undo</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Docked thread -->
+        <section aria-label="Docked thread" style="width:560px;flex:none;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;box-shadow:0 1px 2px rgba(27,31,51,.06);display:flex;flex-direction:column;overflow:hidden">
+          <div style="display:flex;align-items:center;height:36px;border-bottom:1px solid #E6DFD1;background:#F6F2EA;flex:none;padding-right:6px">
+            <div class="tab" style="font-family:'Geist';font-size:12.5px">PDF<span style="font-size:10.5px;color:#5A5E70">p.3</span></div>
+            <div class="tab" style="font-family:'Geist';font-size:12.5px;background:#FCFAF5;color:#1B1F33;box-shadow:inset 0 -2px 0 #2F5BD3"><span class="dot" style="background:#2F5BD3"></span>Repair figure paths</div>
+            <div class="tab" style="font-family:'Geist';font-size:12.5px;border-right:0"><span class="dot" style="background:#D9541A"></span>Tighten §2</div>
+            <button style="margin-left:auto;font:inherit;font-size:12px;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:7px;padding:3px 9px;display:flex;align-items:center;gap:5px"><svg class="ico" style="width:12px" viewBox="0 0 16 16"><path d="M9 3h4v4M13 3L7 9M11 9.5V13H3V5h3.5"></path></svg>Open in Agents</button>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 18px;border-bottom:1px solid #EEE8DC;font-size:12px;color:#4A4F63;flex:none">
+            <span style="color:#1B1F33;font-weight:500">Codex</span><span class="mono">gpt-6.2 · high</span><span>·</span><span>Ask before commands</span><span style="margin-left:auto" class="mono">~/papers/membrane-atlas</span>
+          </div>
+
+          <div style="flex:1;overflow:hidden;padding:18px 22px 0;display:flex;flex-direction:column">
+            <div style="margin-bottom:18px">
+              <div style="font-size:11.5px;font-weight:600;color:#1B1F33;margin-bottom:3px">You</div>
+              <p class="say" style="margin:0">Move the mode plots into <span class="mono" style="font-size:12.5px">figures/</span> and fix every include path. Compile when you're done.</p>
+            </div>
+
+            <div style="display:flex;gap:14px">
+              <div style="width:2px;background:#2F5BD3;border-radius:2px;flex:none"></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:11.5px;font-weight:600;color:#2448B0;margin-bottom:3px">Codex</div>
+                <p class="say">Found one include that still points at the project root. I'll move the file with Git so history follows it, then update the path.</p>
+                <div style="margin:2px 0 12px;display:flex;flex-direction:column">
+                  <div class="tr"><svg width="9" height="9" aria-hidden="true"><rect x="1" y="1" width="7" height="7" fill="none" stroke="#2F5BD3" stroke-width="1.4"></rect></svg>Searched <span class="mono">\includegraphics</span> in 6 files<span style="margin-left:auto;color:#707383">1 match</span></div>
+                  <div class="tr"><svg width="9" height="9" aria-hidden="true"><circle cx="4.5" cy="4.5" r="3.5" fill="#2F5BD3"></circle></svg><span class="mono" style="font-size:11.5px">git mv modes.pdf figures/modes.pdf</span><span style="margin-left:auto;color:#707383">exit 0</span></div>
+                  <div class="tr"><svg width="9" height="9" aria-hidden="true"><circle cx="4.5" cy="4.5" r="3.5" fill="#2F5BD3"></circle></svg>Edited <span class="mono" style="color:#1B1F33;text-decoration:underline;text-decoration-color:#AFC0EE;text-underline-offset:3px">wave-field.tex:41</span><span class="mono" style="margin-left:auto"><span style="color:#2F7D4F">+1</span> <span style="color:#B4352A">−1</span></span></div>
+                </div>
+                <p class="say">The path is fixed and the figure resolves. Ready to rebuild the PDF.</p>
+              </div>
+            </div>
+
+            <div style="margin:6px 0 0 16px;background:#FBEFC9;border:1.5px solid #1B1F33;border-radius:10px;padding:11px 13px;box-shadow:3px 3px 0 #E0B847;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600"><svg width="11" height="11" aria-hidden="true"><path d="M1.5 10V4a4 4 0 0 1 8 0v6" fill="none" stroke="#8A5A00" stroke-width="1.7"></path></svg>Codex wants to run a command<span style="margin-left:auto;font-weight:400;font-size:11.5px;color:#5C4A1A" class="mono">in ./</span></div>
+              <div class="mono" style="font-size:12px;background:#FFF8E1;border:1px solid #EBD38A;border-radius:6px;padding:6px 8px">latexmk -pdf -interaction=nonstopmode main.tex</div>
+              <div style="display:flex;gap:6px;align-items:center">
+                <button style="font:inherit;font-size:12px;font-weight:600;border:0;background:#1B1F33;color:#FCFAF5;border-radius:6px;padding:4px 11px">Allow once</button>
+                <button style="font:inherit;font-size:12px;border:1px solid #C9A63A;background:transparent;border-radius:6px;padding:4px 11px">Always allow latexmk</button>
+                <button style="font:inherit;font-size:12px;border:0;background:transparent;padding:4px 8px">Deny</button>
+                <span style="margin-left:auto;font-size:11px;color:#5C4A1A">⌘Y · ⌘N</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="padding:10px 14px 14px;flex:none">
+            <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#4A4F63;padding:0 4px 8px">
+              <span style="font-weight:600;color:#1B1F33;font-size:11px;letter-spacing:.04em;text-transform:uppercase">Queued</span>Check the appendix figures too.<span style="margin-left:auto;display:flex;gap:10px"><span>Steer now</span><span>Edit</span><span>✕</span></span>
+            </div>
+            <div style="background:#FFFFFF;border:1.5px solid #1B1F33;border-radius:12px;box-shadow:0 2px 0 rgba(27,31,51,.9);padding:10px 12px 8px">
+              <div style="display:flex;gap:6px;margin-bottom:8px">
+                <span class="mono" style="font-size:11.5px;background:#DFE7FB;border:1px solid #AFC0EE;color:#1E3C8F;border-radius:6px;padding:1px 7px">wave-field.tex L39–44</span>
+                <span class="mono" style="font-size:11.5px;background:#EEE8DC;border:1px solid #DCD4C4;border-radius:6px;padding:1px 7px">build log</span>
+              </div>
+              <div style="font-size:13.5px;color:#707383;height:34px">Reply to Codex, or steer the next step…</div>
+              <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:#4A4F63">
+                <button class="ib" aria-label="Attach"><svg class="ico" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"></path></svg></button>
+                <span style="padding:2px 6px;border-radius:6px">@ file</span><span style="padding:2px 6px">/ command</span>
+                <span style="margin-left:auto;display:flex;align-items:center;gap:6px" class="mono"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="#DCD4C4" stroke-width="2.5"></circle><path d="M8 2a6 6 0 0 1 5.2 9" fill="none" stroke="#2F5BD3" stroke-width="2.5"></path></svg>28%</span>
+                <button style="margin-left:8px;font:inherit;font-weight:600;font-size:12.5px;border:1.5px solid #1B1F33;background:#1B1F33;color:#FCFAF5;border-radius:8px;padding:4px 12px;box-shadow:2px 2px 0 #E2622A">Send</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div style="height:32px;flex:none;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;display:flex;align-items:center;gap:16px;padding:0 12px;font-size:12px;color:#4A4F63">
+        <span style="font-weight:500;color:#1B1F33">▸ Score</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="dot" style="background:#D9541A"></span>Claude editing wave-field.tex</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="dot" style="background:#2F5BD3"></span>Codex waiting on you</span>
+        <span style="display:flex;align-items:center;gap:6px"><span class="dot" style="background:#0E8597"></span>Antigravity done</span>
+        <span style="margin-left:auto">Problems 1 · Build log · Terminal</span>
+      </div>
+    </main>
+  </div>
+
+  <footer style="height:24px;flex:none;display:flex;align-items:center;gap:16px;padding:0 14px;font-size:11.5px;color:#4A4F63;border-top:1px solid #DCD4C4">
+    <span class="mono">⑂ main ↑1</span><span>2 files changed by agents</span>
+    <span style="margin-left:auto" class="mono">Ln 41, Col 9 · 6 lines selected</span><span>UTF-8</span><span>LaTeX</span>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

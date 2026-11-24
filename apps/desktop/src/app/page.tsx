@@ -84,17 +84,6 @@ import {
   TerminalIcon,
 } from "@phosphor-icons/react";
 
-function throttle<T extends (...args: Parameters<T>) => void>(fn: T, limit: number): T {
-  let lastCall = 0;
-  return ((...args: Parameters<T>) => {
-    const now = Date.now();
-    if (now - lastCall >= limit) {
-      lastCall = now;
-      fn(...args);
-    }
-  }) as T;
-}
-
 type EditorViewMode = "file" | "git-diff";
 type GitDiffPreviewState = {
   path: string;
@@ -699,20 +688,6 @@ export default function EditorPage() {
     document.documentElement.style.removeProperty("--right-panel-width");
     document.documentElement.style.removeProperty("--preview-panel-width");
     setResizing(null);
-  }, []);
-
-  useEffect(() => {
-    const COMPACT_THRESHOLD = 1100;
-
-    const handleResize = throttle(() => {
-      if (window.innerWidth < COMPACT_THRESHOLD) {
-        setShowRightPanel(false);
-      }
-    }, 100);
-
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   const getFileType = useCallback((path: string): "text" | "image" | "pdf" => {
@@ -2603,29 +2578,35 @@ export default function EditorPage() {
           <button
             type="button"
             onClick={() => setShowCommandPalette(true)}
-            className="hidden md:inline-flex items-center gap-2 h-8 w-[280px] lg:w-[320px] px-3 rounded-full bg-subtle hover:bg-sunken text-muted text-[12.5px] transition-colors shrink-0"
+            className="inline-flex items-center gap-2 h-8 md:w-[clamp(8rem,18vw,20rem)] px-3 rounded-full bg-subtle hover:bg-sunken text-muted text-[12.5px] transition-colors shrink-0"
             title="Find files, sections, citations, or commands (Cmd+K)"
           >
             <MagnifyingGlassIcon className="size-3.5 text-muted-foreground shrink-0" />
-            <span className="truncate flex-1 text-left">Find files, \labels, @cites...</span>
-            <kbd className="bg-panel">⌘K</kbd>
+            <span className="hidden md:block truncate flex-1 text-left">
+              Find files, \labels, @cites...
+            </span>
+            <kbd className="hidden lg:block bg-panel">⌘K</kbd>
           </button>
         )}
 
         {/* Right: Quiet Workspace Controls + Single Primary Compile Action */}
         <div className="flex items-center justify-end gap-1 flex-1 shrink-0">
           {daemon.projectPath && (
-            <>
+            <fieldset
+              aria-label="Workspace panels"
+              className="flex items-center rounded-lg border border-border bg-panel p-0.5 gap-px"
+            >
               <button
                 type="button"
                 onClick={() => setShowSidebar((prev) => !prev)}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
+                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
                   showSidebar
                     ? "bg-accent-soft text-accent"
                     : "text-muted hover:text-foreground hover:bg-subtle"
                 }`}
                 title="Toggle Sidebar (Cmd+\)"
                 aria-label="Toggle Sidebar"
+                aria-pressed={showSidebar}
               >
                 <SidebarSimpleIcon className="size-4" />
               </button>
@@ -2633,13 +2614,14 @@ export default function EditorPage() {
               <button
                 type="button"
                 onClick={() => setShowLivePreview((prev) => !prev)}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
+                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
                   showLivePreview
                     ? "bg-accent-soft text-accent"
                     : "text-muted hover:text-foreground hover:bg-subtle"
                 }`}
                 title="Toggle Live PDF Preview (Cmd+P)"
                 aria-label="Toggle Live PDF Preview"
+                aria-pressed={showLivePreview}
               >
                 <FilePdfIcon className="size-4" />
               </button>
@@ -2647,13 +2629,14 @@ export default function EditorPage() {
               <button
                 type="button"
                 onClick={() => setShowTerminal((prev) => !prev)}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
+                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
                   showTerminal
                     ? "bg-accent-soft text-accent"
                     : "text-muted hover:text-foreground hover:bg-subtle"
                 }`}
                 title="Toggle Terminal"
                 aria-label="Toggle Terminal"
+                aria-pressed={showTerminal}
               >
                 <TerminalIcon className="size-4" />
               </button>
@@ -2661,17 +2644,18 @@ export default function EditorPage() {
               <button
                 type="button"
                 onClick={handleToggleRightPanel}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
+                className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
                   showRightPanel
                     ? "bg-accent-soft text-accent"
                     : "text-muted hover:text-foreground hover:bg-subtle"
                 }`}
                 title="Toggle Agent Panel (Cmd+L)"
                 aria-label="Toggle Agent Panel"
+                aria-pressed={showRightPanel}
               >
                 <RobotIcon className="size-4" />
               </button>
-            </>
+            </fieldset>
           )}
 
           <button
@@ -2751,7 +2735,7 @@ export default function EditorPage() {
         {/* Overleaf-style Project Sidebar (or Home Rail when no project is open) */}
         {!daemon.projectPath ? (
           <aside className="hidden md:flex w-[224px] flex-col shrink-0 justify-between px-1 pb-1">
-            <div className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1 min-h-0 overflow-y-auto mb-3">
               <div className="space-y-1">
                 <button
                   type="button"
@@ -2763,38 +2747,12 @@ export default function EditorPage() {
                 </button>
               </div>
 
-              <div className="space-y-1.5 px-1">
-                <div className="text-[11px] font-medium text-muted px-2">Theme palette</div>
-                <div className="space-y-1">
-                  {UI_PALETTES.map((p) => {
-                    const active = editorSettings.settings.uiPalette === p.id;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => editorSettings.updateSettings({ uiPalette: p.id })}
-                        className={`w-full h-8 px-2.5 rounded-lg flex items-center gap-2.5 text-[12.5px] transition-colors ${
-                          active
-                            ? "bg-panel text-foreground-strong font-medium border border-border shadow-xs"
-                            : "text-muted hover:text-foreground hover:bg-subtle"
-                        }`}
-                      >
-                        <span className="inline-flex items-center gap-1 shrink-0">
-                          <span
-                            className="size-2.5 rounded-full border border-black/15"
-                            style={{ backgroundColor: p.swatches[1] }}
-                          />
-                          <span
-                            className="size-2.5 rounded-full border border-black/15"
-                            style={{ backgroundColor: p.swatches[2] }}
-                          />
-                        </span>
-                        <span>{p.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <RecentProjects
+                projects={recentProjects.projects}
+                onSelect={handleOpenRecentProject}
+                onRemove={recentProjects.removeProject}
+                onClearAll={recentProjects.clearAll}
+              />
             </div>
 
             <AgentStatusCard
@@ -2971,10 +2929,14 @@ export default function EditorPage() {
                       <div className="text-[15px] font-semibold text-foreground-strong">
                         No file open
                       </div>
-                      <p className="text-[13px] text-muted max-w-sm">
-                        Select a <code className="font-mono">.tex</code> file from the sidebar,
-                        press <kbd>⌘K</kbd> to jump anywhere, or ask the Agent.
-                      </p>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setShowCommandPalette(true)}
+                      >
+                        <MagnifyingGlassIcon className="size-4" />
+                        Find a file
+                      </button>
                     </div>
                   ) : (
                     <div className="min-h-full flex flex-col items-center justify-center px-6 py-12 relative z-10 space-y-10">
@@ -3002,17 +2964,19 @@ export default function EditorPage() {
                             className="btn btn-secondary h-10 px-4 rounded-full text-[13px]"
                           >
                             <GearIcon className="size-4 text-muted" />
-                            <span>Configure LaTeX &amp; Agents</span>
+                            <span>Agent settings</span>
                           </button>
                         </div>
                       </div>
 
-                      <RecentProjects
-                        projects={recentProjects.projects}
-                        onSelect={handleOpenRecentProject}
-                        onRemove={recentProjects.removeProject}
-                        onClearAll={recentProjects.clearAll}
-                      />
+                      <div className="w-full max-w-md md:hidden">
+                        <RecentProjects
+                          projects={recentProjects.projects}
+                          onSelect={handleOpenRecentProject}
+                          onRemove={recentProjects.removeProject}
+                          onClearAll={recentProjects.clearAll}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3043,7 +3007,7 @@ export default function EditorPage() {
                   style={{
                     width: resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
                   }}
-                  className="flex-shrink-0 min-w-0 h-full overflow-hidden"
+                  className="flex-shrink-0 min-w-0 max-w-[60%] h-full overflow-hidden"
                 >
                   <LivePdfPreview
                     projectPath={daemon.projectPath}
@@ -3173,7 +3137,7 @@ export default function EditorPage() {
               }}
               exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
               transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
-              className="flex flex-shrink-0 overflow-hidden"
+              className="flex flex-shrink-0 overflow-hidden max-[1100px]:absolute max-[1100px]:inset-y-0 max-[1100px]:right-2 max-[1100px]:bottom-2 max-[1100px]:z-20"
               style={{
                 willChange: prefersReducedMotion ? undefined : "width, opacity",
               }}
@@ -3202,7 +3166,7 @@ export default function EditorPage() {
                     resizing === "right" ? "var(--right-panel-width)" : effectiveRightPanelWidth,
                   willChange: resizing === "right" ? "width" : undefined,
                 }}
-                className="ox-frame flex flex-col flex-shrink-0"
+                className="ox-frame flex flex-col flex-shrink-0 max-[1100px]:shadow-md"
               >
                 <AgentErrorBoundary onReset={handleResetAgentBoundary}>
                   <AgentPanel

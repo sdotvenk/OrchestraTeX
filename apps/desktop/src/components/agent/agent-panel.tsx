@@ -5,12 +5,13 @@ import {
   ArrowsInSimple,
   ArrowsOutSimple,
   CaretDown,
+  Chats,
   GitFork,
   Plus,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentProviderId,
   AgentSettings,
@@ -70,6 +71,7 @@ export function AgentPanel({
   onToggleExpand,
   onClose,
 }: AgentPanelProps) {
+  const chatToggleRef = useRef<HTMLButtonElement>(null);
   const [view, setView] = useState<"chat" | "threads" | "providers">("chat");
 
   const projectFiles = useMemo(() => flattenFileNodes(files, projectPath), [files, projectPath]);
@@ -171,7 +173,10 @@ export function AgentPanel({
   };
 
   const queuedForActive = activeThread ? (agent.queuesByThread[activeThread.summary.id] ?? []) : [];
-  const isRunning = activeThread?.summary.status === "running";
+  const closeThreads = () => {
+    setView("chat");
+    chatToggleRef.current?.focus();
+  };
 
   return (
     <div className="h-full w-full flex flex-col bg-panel min-w-0">
@@ -179,7 +184,9 @@ export function AgentPanel({
       <div className="h-10 px-3 border-b border-border flex items-center justify-between gap-2 bg-panel shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
           <button
+            ref={chatToggleRef}
             type="button"
+            aria-expanded={view === "threads"}
             onClick={() => setView((v) => (v === "threads" ? "chat" : "threads"))}
             className={`inline-flex items-center gap-1.5 h-7 px-2 -ml-1 rounded-lg text-[13px] font-semibold transition-colors min-w-0 ${
               view === "threads"
@@ -188,17 +195,12 @@ export function AgentPanel({
             }`}
             title="Switch or manage chats"
           >
-            <span className="truncate max-w-[165px]">
-              {activeThread?.summary.title || "New chat"}
+            <Chats className="size-4 shrink-0 text-muted" aria-hidden="true" />
+            <span className="truncate">
+              {view === "threads" ? "Chats" : activeThread?.summary.title || "New chat"}
             </span>
             <CaretDown className="size-3 text-muted shrink-0" aria-hidden="true" />
           </button>
-
-          {isRunning && (
-            <span className="px-2 py-0.5 rounded-full bg-success-bg text-success text-[10.5px] font-medium shrink-0">
-              Working
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">
@@ -293,7 +295,6 @@ export function AgentPanel({
           activeThreadId={activeThread?.summary.id}
           providers={agent.providers}
           onSelectThread={(id) => void agent.loadThread(id)}
-          onCreateThread={() => void agent.createThread()}
           onRenameThread={async (id, title) => {
             await agent.updateThread(id, { title });
           }}
@@ -304,7 +305,7 @@ export function AgentPanel({
             await agent.forkThread(id);
           }}
           onDeleteThread={agent.deleteThread}
-          onClose={() => setView("chat")}
+          onClose={closeThreads}
         />
       ) : view === "providers" || needsOnboarding ? (
         <ProviderOnboarding

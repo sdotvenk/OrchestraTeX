@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowsClockwise, ArrowsInSimple, Gauge, X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ProviderStatus, TokenUsageSnapshot } from "@/lib/agent/types";
 import { formatCostUsd, formatResetCountdown, formatTokenCount } from "./utils";
 
@@ -27,6 +27,8 @@ export function UsagePopover({
   onCompact,
 }: UsagePopoverProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
   const [refreshing, setRefreshing] = useState(false);
   const [compacting, setCompacting] = useState(false);
 
@@ -38,7 +40,10 @@ export function UsagePopover({
       }
     };
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onOpenChange(false);
+      if (e.key === "Escape") {
+        onOpenChange(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener("mousedown", handleOutside);
     window.addEventListener("keydown", handleEsc);
@@ -84,12 +89,15 @@ export function UsagePopover({
     contextPct != null ? ringCircumference * (1 - contextPct / 100) : ringCircumference;
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className={compactRing ? undefined : "relative"}>
       {compactRing ? (
         <button
+          ref={triggerRef}
           type="button"
+          aria-expanded={open}
+          aria-controls={open ? popoverId : undefined}
           onClick={() => onOpenChange(!open)}
-          className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+          className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle aria-expanded:bg-accent-soft aria-expanded:text-accent transition-colors"
           title={
             contextWindow
               ? `Context: ${formatTokenCount(contextUsed)} / ${formatTokenCount(contextWindow)} (${contextPct}%)`
@@ -125,7 +133,10 @@ export function UsagePopover({
         </button>
       ) : (
         <button
+          ref={triggerRef}
           type="button"
+          aria-expanded={open}
+          aria-controls={open ? popoverId : undefined}
           onClick={() => onOpenChange(!open)}
           className="inline-flex items-center gap-1.5 h-7 px-2 rounded-lg text-[11.5px] font-mono text-muted hover:text-foreground hover:bg-subtle transition-colors"
           title="Context usage & provider limits"
@@ -148,9 +159,12 @@ export function UsagePopover({
 
       {open && (
         <div
-          className={`fixed sm:absolute ${
-            compactRing ? "left-0 bottom-full mb-2" : "right-0 top-full mt-1.5"
-          } w-[min(320px,calc(100vw-1rem))] z-50 rounded-xl border border-border bg-panel p-3.5 space-y-3`}
+          id={popoverId}
+          className={`absolute ${
+            compactRing
+              ? "left-3 bottom-full mb-2 w-[calc(100%-24px)] max-w-[320px]"
+              : "right-0 top-full mt-1.5 w-[min(320px,calc(100vw-1rem))]"
+          } max-h-[min(420px,60dvh)] overflow-y-auto z-50 rounded-xl border border-border bg-panel p-3.5 space-y-3`}
           style={{ boxShadow: "var(--shadow-2)" }}
         >
           <div className="flex items-center justify-between gap-2 pb-2 border-b border-border">
@@ -159,7 +173,10 @@ export function UsagePopover({
             </span>
             <button
               type="button"
-              onClick={() => onOpenChange(false)}
+              onClick={() => {
+                onOpenChange(false);
+                triggerRef.current?.focus();
+              }}
               className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle"
               aria-label="Close usage popover"
             >

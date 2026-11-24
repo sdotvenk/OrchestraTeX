@@ -18,7 +18,11 @@
       "!**/*.d.ts",
       "!**/Cargo.lock",
       "!**/pnpm-lock.yaml",
-      "!archive"
+      "!archive",
+      "!docs/design-c/mocks",
+      "!docs/design-studies/studio-palette/index.html",
+      "!output",
+      "!work"
     ]
   },
   "formatter": {
