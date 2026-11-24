@@ -2,6 +2,7 @@
 
 import { ArrowsClockwise, CaretUp, GearSix, Plugs } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ProviderStatus, RateLimitWindow } from "@/lib/agent/types";
 import { ProviderIcon } from "./icons";
 import { formatResetCountdown } from "./utils";
@@ -23,10 +24,13 @@ function WindowMeter({ window: win }: { window: RateLimitWindow }) {
   const resetText = win.resetsAt ? formatResetCountdown(win.resetsAt) : "";
 
   return (
-    <div className="flex items-center gap-2 text-[11px] leading-4">
-      <span className="text-muted w-14 shrink-0 truncate">{win.label}</span>
+    <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] leading-4">
+      <span className="text-muted whitespace-nowrap">{win.label}</span>
       {pct != null ? (
-        <div className="flex-1 h-1.5 rounded-full bg-sunken overflow-hidden" aria-hidden="true">
+        <div
+          className="col-span-2 row-start-2 h-1.5 rounded-full bg-sunken overflow-hidden"
+          aria-hidden="true"
+        >
           <div
             className={`h-full rounded-full transition-all ${
               isDanger ? "bg-error" : isWarn ? "bg-warn" : "bg-success"
@@ -37,7 +41,7 @@ function WindowMeter({ window: win }: { window: RateLimitWindow }) {
       ) : (
         <span className="flex-1 text-muted">Available</span>
       )}
-      <span className="text-muted-foreground tabular-nums shrink-0 text-[10.5px]">
+      <span className="text-muted-foreground tabular-nums text-[10.5px] text-right">
         {pct != null ? `${pct}%` : ""}
         {pct != null && resetText ? " · " : ""}
         {resetText ? `resets ${resetText}` : ""}
@@ -61,6 +65,18 @@ export function AgentStatusCard({
 }: AgentStatusCardProps) {
   const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [position, setPosition] = useState({ left: 8, bottom: 8 });
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const toggleOpen = () => {
+    if (!open && triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPosition({
+        left: Math.max(8, Math.min(rect.left, window.innerWidth - 318)),
+        bottom: Math.max(8, window.innerHeight - rect.top + 8),
+      });
+    }
+    setOpen((value) => !value);
+  };
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverId = useId();
@@ -72,7 +88,11 @@ export function AgentStatusCard({
   useEffect(() => {
     if (!open) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node) &&
+        !popoverRef.current?.contains(e.target as Node)
+      ) {
         setOpen(false);
       }
     };
@@ -119,7 +139,7 @@ export function AgentStatusCard({
         <button
           ref={triggerRef}
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggleOpen}
           aria-controls={open ? popoverId : undefined}
           className="relative size-9 rounded-lg inline-flex items-center justify-center hover:bg-subtle transition-colors text-foreground"
           title={`Agents · ${stateLabel}`}
@@ -140,7 +160,7 @@ export function AgentStatusCard({
         <button
           ref={triggerRef}
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={toggleOpen}
           aria-controls={open ? popoverId : undefined}
           className="flex min-h-9 w-full items-center gap-2 rounded-lg border border-border px-2.5 text-left transition-colors hover:bg-subtle hover:border-border-dark"
           aria-expanded={open}
@@ -166,118 +186,126 @@ export function AgentStatusCard({
         </button>
       )}
 
-      {open && (
-        <div
-          id={popoverId}
-          className="fixed sm:absolute left-2 sm:left-0 bottom-14 sm:bottom-full sm:mb-2 w-[310px] max-w-[calc(100vw-16px)] max-h-[calc(100dvh-100px)] overflow-y-auto z-50 rounded-xl border border-border bg-panel p-3.5 flex flex-col gap-3"
-          style={{ boxShadow: "var(--shadow-2)" }}
-        >
-          <div className="flex items-center justify-between">
-            <h3 className="text-[13.5px] font-semibold text-foreground-strong">Agent tools</h3>
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onOpenSettings();
-              }}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] text-muted hover:text-foreground hover:bg-subtle transition-colors"
-            >
-              <GearSix className="size-3.5" aria-hidden="true" />
-              <span>Configure</span>
-            </button>
-          </div>
+      {open &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            id={popoverId}
+            className="fixed w-[310px] max-w-[calc(100vw-16px)] max-h-[calc(100dvh-16px)] overflow-y-auto z-50 rounded-xl border border-border bg-panel p-3.5 flex flex-col gap-3"
+            style={{
+              boxShadow: "var(--shadow-2)",
+              left: position.left,
+              bottom: position.bottom,
+              maxHeight: `calc(100dvh - ${position.bottom + 8}px)`,
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-[13.5px] font-semibold text-foreground-strong">Agent tools</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onOpenSettings();
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] text-muted hover:text-foreground hover:bg-subtle transition-colors"
+              >
+                <GearSix className="size-3.5" aria-hidden="true" />
+                <span>Configure</span>
+              </button>
+            </div>
 
-          <ul className="divide-y divide-border">
-            {providers.map((p) => {
-              const isConnected = p.installed && p.authenticated;
-              const needsAuth = p.installed && !p.authenticated;
-              const windows = p.rateLimits?.windows ?? [];
-              return (
-                <li key={p.id} className="py-2.5 first:pt-0 last:pb-0 flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2">
-                    <ProviderIcon providerId={p.id} className="size-4 shrink-0" />
-                    <span className="text-[12.5px] font-medium text-foreground-strong truncate">
-                      {p.name}
-                    </span>
-                    <span
-                      className={`ml-auto text-[11px] font-medium ${
-                        isConnected
-                          ? "text-success"
-                          : needsAuth
-                            ? "text-warn"
-                            : "text-muted-foreground"
-                      }`}
-                    >
-                      {isConnected ? "Connected" : needsAuth ? "Sign in" : "Not found"}
-                    </span>
-                  </div>
-
-                  {isConnected && (
-                    <div className="pl-6 flex flex-col gap-1.5">
-                      {(p.rateLimits?.planType ||
-                        p.account?.planType ||
-                        p.account?.subscriptionType) && (
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-1.5 py-0.5 rounded-md border border-border bg-subtle text-[10.5px] text-muted font-medium">
-                            {p.rateLimits?.planType ||
-                              p.account?.planType ||
-                              p.account?.subscriptionType}
-                          </span>
-                          {p.version && (
-                            <span className="text-[10.5px] font-mono text-muted-foreground">
-                              v{p.version}
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {windows.length > 0 && (
-                        <div className="flex flex-col gap-1">
-                          {windows.map((w) => (
-                            <WindowMeter key={w.id} window={w} />
-                          ))}
-                        </div>
-                      )}
-
-                      {p.rateLimits?.creditsBalance && (
-                        <span className="text-[11px] text-muted tabular-nums">
-                          Credits: {p.rateLimits.creditsBalance}
-                        </span>
-                      )}
+            <ul className="divide-y divide-border">
+              {providers.map((p) => {
+                const isConnected = p.installed && p.authenticated;
+                const needsAuth = p.installed && !p.authenticated;
+                const windows = p.rateLimits?.windows ?? [];
+                return (
+                  <li key={p.id} className="py-2.5 first:pt-0 last:pb-0 flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <ProviderIcon providerId={p.id} className="size-4 shrink-0" />
+                      <span className="text-[12.5px] font-medium text-foreground-strong truncate">
+                        {p.name}
+                      </span>
+                      <span
+                        className={`ml-auto text-[11px] font-medium ${
+                          isConnected
+                            ? "text-success"
+                            : needsAuth
+                              ? "text-warn"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {isConnected ? "Connected" : needsAuth ? "Sign in" : "Not found"}
+                      </span>
                     </div>
-                  )}
 
-                  {needsAuth && (
-                    <p className="pl-6 text-[11px] text-muted leading-snug">
-                      CLI found{p.version ? ` (v${p.version})` : ""}. Sign in via terminal or
-                      configure in Settings.
-                    </p>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+                    {isConnected && (
+                      <div className="pl-6 flex flex-col gap-1.5">
+                        {(p.rateLimits?.planType ||
+                          p.account?.planType ||
+                          p.account?.subscriptionType) && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded-md border border-border bg-subtle text-[10.5px] text-muted font-medium">
+                              {p.rateLimits?.planType ||
+                                p.account?.planType ||
+                                p.account?.subscriptionType}
+                            </span>
+                            {p.version && (
+                              <span className="text-[10.5px] font-mono text-muted-foreground">
+                                v{p.version}
+                              </span>
+                            )}
+                          </div>
+                        )}
 
-          <p className="text-[11px] text-muted leading-relaxed">
-            Install a tool&apos;s command line and sign in, then check again.
-          </p>
+                        {windows.length > 0 && (
+                          <div className="flex flex-col gap-1">
+                            {windows.map((w) => (
+                              <WindowMeter key={w.id} window={w} />
+                            ))}
+                          </div>
+                        )}
 
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={checking}
-              onClick={() => void handleCheckAgain()}
-              className="btn btn-secondary btn-sm flex-1"
-            >
-              <ArrowsClockwise
-                className={`size-3.5 ${checking ? "animate-spin" : ""}`}
-                aria-hidden="true"
-              />
-              <span>{checking ? "Checking..." : "Check again"}</span>
-            </button>
-          </div>
-        </div>
-      )}
+                        {p.rateLimits?.creditsBalance && (
+                          <span className="text-[11px] text-muted tabular-nums">
+                            Credits: {p.rateLimits.creditsBalance}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {needsAuth && (
+                      <p className="pl-6 text-[11px] text-muted leading-snug">
+                        CLI found{p.version ? ` (v${p.version})` : ""}. Sign in via terminal or
+                        configure in Settings.
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            <p className="text-[11px] text-muted leading-relaxed">
+              Install a tool&apos;s command line and sign in, then check again.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={checking}
+                onClick={() => void handleCheckAgain()}
+                className="btn btn-secondary btn-sm flex-1"
+              >
+                <ArrowsClockwise
+                  className={`size-3.5 ${checking ? "animate-spin" : ""}`}
+                  aria-hidden="true"
+                />
+                <span>{checking ? "Checking..." : "Check again"}</span>
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

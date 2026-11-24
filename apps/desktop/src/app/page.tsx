@@ -3348,9 +3348,6 @@ export default function EditorPage() {
             title="OrchestraTeX on GitHub"
             aria-label="Open OrchestraTeX repository"
           >
-            <span className="size-6 rounded-md bg-primary text-primary-text font-display italic text-[17px] inline-flex items-center justify-center shrink-0">
-              O
-            </span>
             <span className="font-display text-[19px] tracking-tight text-foreground-strong">
               OrchestraTeX
             </span>
