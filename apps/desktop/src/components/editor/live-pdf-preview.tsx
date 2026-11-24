@@ -212,7 +212,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   return (
     <div className="h-full w-full flex flex-col bg-stage min-w-0">
       {/* Unified 44px PDF Header Strip */}
-      <div className="h-11 px-2.5 border-b border-border bg-bg flex items-center gap-1.5 shrink-0">
+      <div className="@container h-11 px-2.5 border-b border-border bg-bg flex items-center gap-1.5 shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
           {compileStatus === "compiling" ? (
             <button
@@ -459,25 +459,28 @@ export const LivePdfPreview = memo(function LivePdfPreview({
 
           {pdfState.numPages > 0 && compileStatus !== "error" && errorDiags.length === 0 && (
             <>
-              <span className="w-px h-4 bg-border mx-0.5 shrink-0" aria-hidden="true" />
+              <span
+                className="hidden @[410px]:inline-block w-px h-4 bg-border mx-0.5 shrink-0"
+                aria-hidden="true"
+              />
               <div className="flex items-center gap-0.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => pdfControlRef.current?.prevPage()}
                   disabled={pdfState.currentPage <= 1}
-                  className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+                  className="hidden @[410px]:inline-flex size-6 rounded-md items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
                   aria-label="Previous page"
                 >
                   <CaretLeft className="size-3.5" aria-hidden="true" />
                 </button>
-                <span className="font-mono text-[12px] text-foreground tabular-nums px-1">
+                <span className="font-mono text-[12px] text-foreground tabular-nums px-1 whitespace-nowrap">
                   {pdfState.currentPage} / {pdfState.numPages}
                 </span>
                 <button
                   type="button"
                   onClick={() => pdfControlRef.current?.nextPage()}
                   disabled={pdfState.currentPage >= pdfState.numPages}
-                  className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+                  className="hidden @[410px]:inline-flex size-6 rounded-md items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
                   aria-label="Next page"
                 >
                   <CaretRight className="size-3.5" aria-hidden="true" />
@@ -489,7 +492,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
 
         <div className="ml-auto flex items-center gap-1 shrink-0">
           {pdfData && (
-            <div ref={fitMenuRef} className="relative">
+            <div ref={fitMenuRef} className="relative hidden @[440px]:block">
               <button
                 type="button"
                 onClick={() => setFitMenuOpen((p) => !p)}

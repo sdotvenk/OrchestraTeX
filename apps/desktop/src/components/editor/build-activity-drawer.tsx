@@ -85,7 +85,7 @@ export function BuildActivityDrawer({
       className="ox-frame flex shrink-0 flex-col overflow-hidden"
     >
       {collapsed ? (
-        <div className="flex h-8 items-center gap-3 px-3 text-[12px] text-muted min-w-0">
+        <div className="@container flex h-8 items-center gap-3 px-3 text-[12px] text-muted min-w-0">
           <button
             type="button"
             onClick={() => onChange("score")}
@@ -94,7 +94,7 @@ export function BuildActivityDrawer({
           >
             ▸ Score
           </button>
-          <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
+          <div className="hidden @[520px]:flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
             {threadStatuses?.slice(0, 3).map((thread, index) => {
               const voice = VOICE_COLORS[thread.providerId] ?? VOICE_COLORS["custom-acp"];
               return (
@@ -353,9 +353,9 @@ export function BuildActivityDrawer({
                                   e.stopPropagation();
                                   setOpenFixPickerIndex((prev) => (prev === index ? null : index));
                                 }}
-                                className="btn btn-secondary btn-sm h-[23px] w-[20px] px-0 rounded-l-none inline-flex items-center justify-center"
+                                className="h-[23px] w-[22px] rounded-r-[7px] border border-border-dark bg-panel text-muted hover:text-foreground hover:bg-subtle inline-flex items-center justify-center transition-colors shrink-0"
                               >
-                                <CaretDown className="size-2.5" aria-hidden="true" />
+                                <CaretDown className="size-3" aria-hidden="true" />
                               </button>
                             )}
                             {openFixPickerIndex === index && fixProviders && (

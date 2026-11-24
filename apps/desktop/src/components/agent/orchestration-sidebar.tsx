@@ -175,8 +175,8 @@ export function OrchestrationSidebar({
         type="button"
         onClick={() => onOpenThread(thread)}
         aria-current={isActive ? "true" : undefined}
-        className={`group relative flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-          isChild ? "ml-4 w-[calc(100%-1rem)]" : ""
+        className={`group relative flex items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
+          isChild ? "ml-4 w-[calc(100%-1rem)]" : "w-full"
         } ${
           isActive
             ? "bg-[var(--panel)] ring-1 ring-[var(--border)] shadow-xs"
@@ -308,7 +308,7 @@ export function OrchestrationSidebar({
           <button
             type="button"
             onClick={onNewThread}
-            className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border-[1.5px] border-[var(--popover-border)] bg-panel px-2.5 py-1 text-[12.5px] font-semibold text-foreground-strong shadow-[2px_2px_0_var(--popover-border)] hover:bg-subtle"
+            className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border border-border-dark bg-panel px-2.5 py-1 text-[12.5px] font-medium text-foreground-strong hover:bg-subtle transition-colors"
           >
             + New
           </button>
