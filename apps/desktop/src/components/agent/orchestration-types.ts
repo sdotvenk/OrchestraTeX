@@ -29,10 +29,10 @@ export interface ProviderMeta {
 }
 
 export const PROVIDER_META: Record<AgentProviderId, ProviderMeta> = {
-  claude: { label: "Claude Code", colorVar: "var(--primary-bg)" },
-  codex: { label: "Codex", colorVar: "var(--accent)" },
-  antigravity: { label: "Antigravity", colorVar: "var(--ok)" },
-  "custom-acp": { label: "Custom ACP", colorVar: "var(--warn)" },
+  claude: { label: "Claude Code", colorVar: "var(--voice-claude-ink)" },
+  codex: { label: "Codex", colorVar: "var(--voice-codex-ink)" },
+  antigravity: { label: "Antigravity", colorVar: "var(--voice-antigravity-ink)" },
+  "custom-acp": { label: "Custom ACP", colorVar: "var(--voice-custom-ink)" },
 };
 
 export function getProviderMeta(providerId: AgentProviderId | string): ProviderMeta {

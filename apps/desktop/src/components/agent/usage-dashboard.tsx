@@ -1,6 +1,5 @@
 "use client";
 
-import { ArrowsClockwise, DownloadSimple, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AgentProviderId, ProviderStatus } from "@/lib/agent/types";
 import {
@@ -17,13 +16,24 @@ import {
 import { ProviderIcon } from "./icons";
 import { formatResetCountdown, formatTokenCount } from "./utils";
 
+export interface UsageDashboardTopBarState {
+  refreshedAt: string | null;
+  loading: boolean;
+  canExport: boolean;
+  exportStatus: string | null;
+  onRefresh: () => void;
+  onExportCsv: () => void;
+}
+
 interface UsageDashboardProps {
   providers: ProviderStatus[];
   currentProjectPath?: string | null;
   recentProjects?: UsageProjectOption[];
   threadTitles?: Record<string, string>;
-  onClose?: () => void;
+  onTopBarStateChange?: (state: UsageDashboardTopBarState) => void;
 }
+
+const HARNESS_ORDER: AgentProviderId[] = ["claude", "codex", "antigravity", "custom-acp"];
 
 const DATE_PRESETS: { id: UsageDatePreset; label: string }[] = [
   { id: "today", label: "Today" },
@@ -47,7 +57,7 @@ export function UsageDashboard({
   currentProjectPath,
   recentProjects = [],
   threadTitles,
-  onClose,
+  onTopBarStateChange,
 }: UsageDashboardProps) {
   const [datePreset, setDatePreset] = useState<UsageDatePreset>("7d");
   const [selectedProject, setSelectedProject] = useState<string>(currentProjectPath ?? "__all__");
@@ -94,7 +104,7 @@ export function UsageDashboard({
     void loadUsage();
   }, [loadUsage]);
 
-  const handleExportCsv = async () => {
+  const handleExportCsv = useCallback(async () => {
     if (!result) return;
     setExportStatus(null);
     try {
@@ -116,7 +126,18 @@ export function UsageDashboard({
     } catch (err) {
       setExportStatus(err instanceof Error ? err.message : "Export failed");
     }
-  };
+  }, [result, datePreset, selectedProject, projectOptions]);
+
+  useEffect(() => {
+    onTopBarStateChange?.({
+      refreshedAt,
+      loading,
+      canExport: Boolean(result) && !loading,
+      exportStatus,
+      onRefresh: () => void loadUsage(),
+      onExportCsv: () => void handleExportCsv(),
+    });
+  }, [onTopBarStateChange, refreshedAt, loading, result, exportStatus, loadUsage, handleExportCsv]);
 
   const groupedBreakdown = useMemo(() => {
     if (!result) return [];
@@ -134,41 +155,67 @@ export function UsageDashboard({
   }, [result]);
 
   const dailyBuckets = useMemo(() => {
-    if (!result) return { days: [], maxTotal: 0, totalInput: 0 };
     const map = new Map<string, UsageDailyRow[]>();
-    for (const row of result.byDay) {
-      const list = map.get(row.date) ?? [];
-      list.push(row);
-      map.set(row.date, list);
+    if (result) {
+      for (const row of result.byDay) {
+        const list = map.get(row.date) ?? [];
+        list.push(row);
+        map.set(row.date, list);
+      }
     }
-    const sortedDates = Array.from(map.keys()).sort();
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let dates: string[];
+    if (datePreset === "7d") {
+      dates = [];
+      for (let i = 6; i >= 0; i -= 1) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        dates.push(d.toISOString().slice(0, 10));
+      }
+    } else {
+      dates = Array.from(map.keys()).sort();
+    }
+
     let maxTotal = 0;
     let totalInput = 0;
-    const days = sortedDates.map((date) => {
+    const days = dates.map((date) => {
       const rows = map.get(date) ?? [];
       const dayTotal = rows.reduce((acc, r) => acc + (r.inputTokens ?? 0), 0);
       if (dayTotal > maxTotal) maxTotal = dayTotal;
       totalInput += dayTotal;
-      return { date, rows, dayTotal };
+      const d = new Date(`${date}T12:00:00`);
+      const weekdayInitial = ["S", "M", "T", "W", "T", "F", "S"][d.getDay()] ?? "";
+      return {
+        date,
+        rows,
+        dayTotal,
+        weekdayInitial,
+        isToday: date === todayStr,
+      };
     });
     return { days, maxTotal, totalInput };
-  }, [result]);
+  }, [result, datePreset]);
+
+  const orderedProviders = useMemo(() => {
+    const byId = new Map(providers.map((p) => [p.id, p]));
+    return HARNESS_ORDER.map((id) => ({
+      id,
+      provider: byId.get(id) ?? null,
+    }));
+  }, [providers]);
 
   return (
-    <div className="flex flex-col gap-3 p-4 bg-[var(--bg)] text-[var(--text)] min-h-0">
-      {/* Header */}
-      <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-[15px] font-semibold tracking-tight">Usage &amp; limits</h2>
+    <div className="flex flex-col gap-3.5 px-7 py-5 bg-bg text-foreground min-h-full">
+      {/* Subheader */}
+      <div className="flex flex-wrap items-end gap-4">
+        <h1 className="font-display text-[34px] leading-none text-foreground">
+          Usage &amp; limits
+        </h1>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {refreshedAt && (
-            <span className="text-[11.5px] text-[var(--muted)] tabular-nums">
-              Refreshed {refreshedAt}
-            </span>
-          )}
-
           <fieldset
-            className="inline-flex rounded-lg bg-[var(--sunken)] p-0.5 border border-[var(--line)]"
+            className="inline-flex rounded-[9px] bg-sunken p-[3px] gap-0.5 text-[12.5px]"
             aria-label="Date range"
           >
             {DATE_PRESETS.map((preset) => {
@@ -178,10 +225,10 @@ export function UsageDashboard({
                   key={preset.id}
                   type="button"
                   onClick={() => setDatePreset(preset.id)}
-                  className={`px-2.5 py-1 text-[12px] rounded-md transition-colors ${
+                  className={`px-3 py-1 rounded-[7px] transition-colors ${
                     active
-                      ? "bg-[var(--panel)] text-[var(--text)] font-medium shadow-sm"
-                      : "text-[var(--muted)] hover:text-[var(--text)]"
+                      ? "bg-panel text-foreground font-medium shadow-xs ring-1 ring-border"
+                      : "text-muted hover:text-foreground"
                   }`}
                 >
                   {preset.label}
@@ -194,7 +241,7 @@ export function UsageDashboard({
             aria-label="Project scope"
             value={selectedProject}
             onChange={(e) => setSelectedProject(e.target.value)}
-            className="h-7 rounded-lg border border-[var(--line-strong)] bg-[var(--panel)] px-2 text-[12px] text-[var(--text)]"
+            className="rounded-[8px] border border-border-dark bg-panel px-2.5 py-1 text-[12.5px] text-foreground"
           >
             <option value="__all__">All projects</option>
             {projectOptions.map((proj) => (
@@ -203,93 +250,76 @@ export function UsageDashboard({
               </option>
             ))}
           </select>
-
-          <button
-            type="button"
-            onClick={() => void loadUsage()}
-            disabled={loading}
-            className="btn-secondary h-7 px-2.5 text-[12px] inline-flex items-center gap-1.5 rounded-lg"
-            title="Refresh usage"
-          >
-            <ArrowsClockwise
-              className={`size-3.5 ${loading ? "animate-spin" : ""}`}
-              aria-hidden="true"
-            />
-            <span>Refresh</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void handleExportCsv()}
-            disabled={!result || loading}
-            className="btn-secondary h-7 px-2.5 text-[12px] inline-flex items-center gap-1.5 rounded-lg"
-          >
-            <DownloadSimple className="size-3.5" aria-hidden="true" />
-            <span>{exportStatus ?? "Export CSV"}</span>
-          </button>
-
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-ghost h-7 w-7 inline-flex items-center justify-center rounded-lg"
-              aria-label="Close usage dashboard"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
-          )}
         </div>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-[var(--error)] bg-[var(--error-bg)] px-3 py-2 text-[12px] text-[var(--error)]">
+        <div className="rounded-lg border border-error bg-error-bg px-3 py-2 text-[12px] text-error">
           {error}
         </div>
       )}
 
-      {/* Quota windows */}
+      {/* 4 Harness Quota Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {providers.map((provider) => {
-          const voice = VOICE_TOKENS[provider.id];
-          const primaryWindow = provider.rateLimits?.windows[0] ?? null;
-          const secondaryWindow = provider.rateLimits?.windows[1] ?? null;
+        {orderedProviders.map(({ id, provider }) => {
+          const voice = VOICE_TOKENS[id];
+          const primaryWindow = provider?.rateLimits?.windows[0] ?? null;
+          const secondaryWindow = provider?.rateLimits?.windows[1] ?? null;
           const usedPct = primaryWindow?.usedPercent;
           const hasQuota = usedPct !== null && usedPct !== undefined;
+          const isCustomLocal = id === "custom-acp" && !hasQuota;
           const resetText = formatResetCountdown(primaryWindow?.resetsAt);
 
           return (
             <div
-              key={provider.id}
-              className="rounded-[10px] border border-[var(--line)] bg-[var(--panel)] p-3.5 flex flex-col"
+              key={id}
+              className="ox-frame p-3.5 flex flex-col"
               style={{ borderTopWidth: "3px", borderTopColor: voice.ink }}
             >
               <div className="flex items-center gap-2 text-[13px] font-semibold">
-                <ProviderIcon providerId={provider.id} className="size-3.5 shrink-0" />
-                <span className="truncate">{provider.name || voice.label}</span>
-                <span className="ml-auto text-[11px] font-normal text-[var(--muted)] truncate">
-                  {provider.account?.planType ??
-                    provider.rateLimits?.planType ??
-                    provider.transport}
+                <span style={{ color: voice.ink }} className="inline-flex shrink-0">
+                  <ProviderIcon providerId={id} className="size-3.5 shrink-0" />
+                </span>
+                <span className="truncate">{provider?.name || voice.label}</span>
+                <span className="ml-auto text-[11.5px] font-normal text-muted truncate">
+                  {provider?.account?.planType ??
+                    provider?.rateLimits?.planType ??
+                    provider?.transport ??
+                    (id === "custom-acp" ? "local-llm" : "ACP")}
                 </span>
               </div>
 
-              <div className="mt-2.5 flex items-baseline gap-1.5">
+              <div className="mt-3 flex items-baseline gap-1.5">
                 <span
-                  className={`text-[24px] font-semibold tracking-tight tabular-nums ${
-                    hasQuota ? "text-[var(--text)]" : "text-[var(--muted)]"
+                  className={`text-[28px] leading-none font-semibold tracking-tight tabular-nums ${
+                    hasQuota || isCustomLocal ? "text-foreground" : "text-muted"
                   }`}
                 >
-                  {hasQuota ? `${Math.round(usedPct)}%` : "—"}
+                  {hasQuota ? `${Math.round(usedPct)}%` : isCustomLocal ? "0" : "—"}
                 </span>
-                <span className="text-[11.5px] text-[var(--muted)] truncate">
-                  {hasQuota ? `of ${primaryWindow?.label ?? "window"}` : "quota not reported"}
+                <span className="text-[12px] text-muted truncate">
+                  {hasQuota
+                    ? `of ${primaryWindow?.label ?? "5-hour window"}`
+                    : isCustomLocal
+                      ? "limits · runs locally"
+                      : "quota not reported"}
                 </span>
               </div>
 
-              <div className="mt-2 h-2 rounded bg-[var(--sunken)] overflow-hidden relative">
+              <div
+                className="mt-2 h-2 rounded-[4px] bg-sunken overflow-hidden relative"
+                style={
+                  !hasQuota && !isCustomLocal
+                    ? {
+                        backgroundImage:
+                          "repeating-linear-gradient(135deg, var(--hatch-a) 0 4px, var(--hatch-b) 4px 8px)",
+                      }
+                    : undefined
+                }
+              >
                 {hasQuota && (
                   <span
-                    className="absolute inset-y-0 left-0 rounded"
+                    className="absolute inset-y-0 left-0 rounded-[4px]"
                     style={{
                       width: `${Math.min(100, Math.max(0, usedPct))}%`,
                       backgroundColor: voice.ink,
@@ -298,11 +328,13 @@ export function UsageDashboard({
                 )}
               </div>
 
-              <div className="mt-2 flex items-center text-[11px] text-[var(--muted)] gap-2">
+              <div className="mt-2 flex items-center text-[11.5px] text-muted gap-2">
                 <span className="truncate">
                   {hasQuota
                     ? (resetText ?? primaryWindow?.status ?? "Active")
-                    : (provider.rateLimits?.note ?? "Token counts only")}
+                    : isCustomLocal
+                      ? "Measured zero, not missing"
+                      : (provider?.rateLimits?.note ?? "Token counts only")}
                 </span>
                 {secondaryWindow?.usedPercent !== null &&
                   secondaryWindow?.usedPercent !== undefined && (
@@ -316,19 +348,21 @@ export function UsageDashboard({
         })}
       </div>
 
-      {/* Main content: Breakdown table + Daily chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 min-h-0">
-        {/* Tokens by provider and model */}
-        <div className="rounded-[10px] border border-[var(--line)] bg-[var(--panel)] p-3.5 overflow-x-auto">
-          <div className="flex items-center justify-between gap-2 pb-2.5">
-            <span className="text-[13px] font-semibold">Tokens by provider and model</span>
-            <span className="text-[11px] text-[var(--muted)]">— = not reported</span>
+      {/* Bottom 2-column Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-3 flex-1 min-h-0">
+        {/* Tokens by harness and model */}
+        <div className="ox-frame p-3.5 overflow-x-auto">
+          <div className="flex items-center justify-between gap-2 pb-3">
+            <span className="text-[13px] font-semibold">Tokens by harness and model</span>
+            <span className="text-[11.5px] text-muted">
+              Input includes cache reads once · — = not reported
+            </span>
           </div>
 
           <table className="w-full border-collapse text-right">
             <thead>
-              <tr className="border-b border-[var(--line)] text-[11px] font-semibold text-[var(--muted)]">
-                <th className="text-left pb-2 pr-2 font-semibold">Provider / model</th>
+              <tr className="border-b border-border text-[11px] font-semibold text-muted">
+                <th className="text-left pb-2 pr-2 font-semibold">Harness / model</th>
                 <th className="pb-2 px-2 font-semibold">Input</th>
                 <th className="pb-2 px-2 font-semibold">Cache read</th>
                 <th className="pb-2 px-2 font-semibold">Cache write</th>
@@ -341,10 +375,7 @@ export function UsageDashboard({
             <tbody className="font-mono text-[12px] tabular-nums">
               {groupedBreakdown.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="py-6 text-center font-sans text-[12px] text-[var(--muted)]"
-                  >
+                  <td colSpan={8} className="py-6 text-center font-sans text-[12px] text-muted">
                     {loading ? "Loading usage…" : "No usage recorded for this scope."}
                   </td>
                 </tr>
@@ -356,8 +387,8 @@ export function UsageDashboard({
               )}
 
               {result && groupedBreakdown.length > 0 && (
-                <tr className="font-semibold text-[var(--text)]">
-                  <td className="py-2 pr-2 text-left font-sans">All providers</td>
+                <tr className="font-semibold text-foreground">
+                  <td className="py-2 pr-2 text-left font-sans">All harnesses</td>
                   <td className="py-2 px-2">{formatNullableTokens(result.total.inputTokens)}</td>
                   <td className="py-2 px-2">
                     {formatNullableTokens(result.total.cacheReadTokens)}
@@ -367,7 +398,7 @@ export function UsageDashboard({
                   </td>
                   <td className="py-2 px-2">{formatNullableTokens(result.total.outputTokens)}</td>
                   <td className="py-2 px-2">{formatRatioPercent(result.total.cacheShare)}</td>
-                  <td className="py-2 px-2 text-[var(--muted)]">
+                  <td className="py-2 px-2 text-muted">
                     {formatRatioPercent(result.total.hitRate)}
                   </td>
                   <td className="py-2 pl-2">{result.total.threadsCount}</td>
@@ -376,49 +407,54 @@ export function UsageDashboard({
             </tbody>
           </table>
 
-          <p className="mt-2.5 text-[11px] text-[var(--muted)] leading-relaxed">
+          <p className="mt-2.5 text-[11.5px] text-muted leading-relaxed">
             Cache share is computed over entries reporting both cache read and input tokens. Hit
-            rate requires request-level counts.
+            rate requires request-level counts, so it isn&apos;t totalled.
           </p>
         </div>
 
-        {/* Daily input chart + limitations */}
+        {/* Right stack: Input tokens per day + Heaviest threads */}
         <div className="flex flex-col gap-3 min-h-0">
-          <div className="rounded-[10px] border border-[var(--line)] bg-[var(--panel)] p-3.5">
+          <div className="ox-frame p-3.5">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[13px] font-semibold">Input tokens per day</span>
-              <span className="text-[11.5px] font-mono text-[var(--muted)] tabular-nums">
+              <span className="text-[11.5px] font-mono text-muted tabular-nums">
                 Total {formatTokenCount(dailyBuckets.totalInput)}
               </span>
             </div>
 
             {dailyBuckets.days.length === 0 ? (
-              <div className="h-[132px] flex items-center justify-center text-[12px] text-[var(--muted)] border-b border-[var(--line)]">
+              <div className="h-[132px] flex items-center justify-center text-[12px] text-muted border-b border-border">
                 No daily data
               </div>
             ) : (
               <>
                 <div
-                  className="flex h-[132px] items-end justify-center gap-1.5 border-b border-[var(--line-strong)] px-1"
+                  className="flex h-[132px] items-end justify-center gap-3 border-b border-border-dark px-1"
                   role="img"
                   aria-label={`Daily input tokens across ${dailyBuckets.days.length} days, totaling ${formatTokenCount(dailyBuckets.totalInput)}`}
                 >
                   {dailyBuckets.days.map((day) => {
                     const max = dailyBuckets.maxTotal || 1;
+                    const nonZeroRows = day.rows.filter((r) => (r.inputTokens ?? 0) > 0);
                     return (
                       <div
                         key={day.date}
                         className="flex h-full min-w-[6px] flex-1 flex-col items-center justify-end gap-0.5"
                         title={`${day.date}: ${formatTokenCount(day.dayTotal)}`}
                       >
-                        {day.rows.map((r) => {
+                        {nonZeroRows.map((r, idx) => {
                           const tokens = r.inputTokens ?? 0;
-                          if (tokens <= 0) return null;
-                          const pct = Math.max(2, (tokens / max) * 100);
+                          const pct = Math.max(3, (tokens / max) * 100);
+                          const isTopOfToday = day.isToday && idx === 0;
                           return (
                             <span
                               key={`${day.date}-${r.provider}`}
-                              className="w-full max-w-10 rounded-[2px]"
+                              className={`w-full max-w-10 rounded-[2px] ${
+                                isTopOfToday
+                                  ? "outline outline-[1.5px] outline-foreground outline-offset-1"
+                                  : ""
+                              }`}
                               style={{
                                 height: `${pct}%`,
                                 backgroundColor: VOICE_TOKENS[r.provider].ink,
@@ -430,45 +466,63 @@ export function UsageDashboard({
                     );
                   })}
                 </div>
-                <div
-                  className={`mt-1.5 flex font-mono text-[10.5px] text-[var(--muted)] ${
-                    dailyBuckets.days.length === 1 ? "justify-center" : "justify-between"
-                  }`}
-                >
-                  <span>{dailyBuckets.days[0]?.date.slice(5)}</span>
-                  {dailyBuckets.days.length > 1 && (
-                    <span>{dailyBuckets.days.at(-1)?.date.slice(5)}</span>
-                  )}
-                </div>
+                {datePreset === "7d" ? (
+                  <div className="mt-1.5 flex justify-around font-mono text-[10.5px] text-muted">
+                    {dailyBuckets.days.map((day) => (
+                      <span
+                        key={`lbl-${day.date}`}
+                        className={day.isToday ? "font-semibold text-foreground" : ""}
+                      >
+                        {day.weekdayInitial}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div
+                    className={`mt-1.5 flex font-mono text-[10.5px] text-muted ${
+                      dailyBuckets.days.length === 1 ? "justify-center" : "justify-between"
+                    }`}
+                  >
+                    <span>{dailyBuckets.days[0]?.date.slice(5)}</span>
+                    {dailyBuckets.days.length > 1 && (
+                      <span>{dailyBuckets.days.at(-1)?.date.slice(5)}</span>
+                    )}
+                  </div>
+                )}
               </>
             )}
           </div>
 
-          {result && result.topThreads.length > 0 && (
-            <section className="rounded-[10px] border border-border bg-panel p-3.5 text-xs">
-              <h3 className="mb-1 font-semibold">Threads by input tokens</h3>
-              <ul className="divide-y divide-border">
-                {result.topThreads.map((thread) => (
-                  <li
-                    key={`${thread.projectPath}:${thread.threadId}`}
-                    className="flex items-center gap-2 py-1.5"
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="size-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: VOICE_TOKENS[thread.provider].ink }}
-                    />
-                    <span className="min-w-0 flex-1 truncate" title={thread.projectPath}>
-                      {threadTitles?.[thread.threadId] ?? `Thread ${thread.threadId.slice(0, 8)}`}
-                    </span>
-                    <span className="shrink-0 font-mono text-muted">
-                      {formatNullableTokens(thread.summary.inputTokens)}
-                    </span>
-                  </li>
-                ))}
+          <section className="ox-frame p-3.5 flex-1 text-[12.5px]">
+            <h3 className="mb-2 font-semibold text-[13px]">Heaviest threads</h3>
+            {!result || result.topThreads.length === 0 ? (
+              <div className="py-4 text-center text-[12px] text-muted">No threads recorded</div>
+            ) : (
+              <ul className="space-y-0.5">
+                {result.topThreads.map((thread) => {
+                  const cachePct = formatRatioPercent(thread.summary.cacheShare);
+                  return (
+                    <li
+                      key={`${thread.projectPath}:${thread.threadId}`}
+                      className="flex items-center gap-2 h-[28px]"
+                    >
+                      <span
+                        aria-hidden="true"
+                        className="size-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: VOICE_TOKENS[thread.provider].ink }}
+                      />
+                      <span className="min-w-0 flex-1 truncate" title={thread.projectPath}>
+                        {threadTitles?.[thread.threadId] ?? `Thread ${thread.threadId.slice(0, 8)}`}
+                      </span>
+                      <span className="shrink-0 font-mono text-[12px] text-muted">
+                        {formatNullableTokens(thread.summary.inputTokens)} · {cachePct}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
-            </section>
-          )}
+            )}
+          </section>
         </div>
       </div>
     </div>
@@ -498,10 +552,9 @@ function ProviderGroupRows({
     <>
       <tr className="bg-[var(--sunken)] font-sans font-semibold text-[12.5px] border-b border-[var(--line)]">
         <td className="py-1.5 pr-2 text-left">
-          <ProviderIcon
-            providerId={group.provider}
-            className="mr-2 inline-block size-3 align-text-bottom"
-          />
+          <span style={{ color: voice.ink }} className="mr-2 inline-flex align-text-bottom">
+            <ProviderIcon providerId={group.provider} className="size-3" />
+          </span>
           {voice.label}
         </td>
         <td className="py-1.5 px-2 font-mono font-normal">

@@ -1,12 +1,10 @@
 "use client";
 
+import type { GitStatus } from "@orchestratex/shared";
 import {
   ArrowCounterClockwiseIcon,
-  BookmarkSimpleIcon,
-  ColumnsIcon,
   GitCommitIcon,
   PlusIcon,
-  RowsIcon,
   ShieldCheckIcon,
   TagIcon,
   TrashIcon,
@@ -14,9 +12,11 @@ import {
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { getProviderMeta } from "@/components/agent/orchestration-types";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
+import type { AgentProviderId } from "@/lib/agent/types";
 import {
   type CheckpointAuthorKind,
   type DiffHunk,
@@ -61,6 +61,12 @@ export type LabelInfo = {
   createdAt: string;
 };
 
+export type GitChangeItem = {
+  path: string;
+  status: string;
+  staged?: boolean;
+};
+
 export type HistoryWorkspaceProps = {
   projectDir: string;
   gitSidebarPanel?: ReactNode;
@@ -68,6 +74,21 @@ export type HistoryWorkspaceProps = {
   beforeMutation?: () => void;
   onFilesChanged?: () => void;
   onOpenThread?: (threadId: string) => void;
+  gitStatus?: GitStatus | null;
+  stagedChanges?: GitChangeItem[];
+  unstagedChanges?: GitChangeItem[];
+  commitMessage?: string;
+  onCommitMessageChange?: (msg: string) => void;
+  onStageFile?: (path: string) => void;
+  onUnstageFile?: (path: string) => void;
+  onCommit?: (message: string) => Promise<void> | void;
+  onCommitAndPush?: (message: string) => Promise<void> | void;
+  onGenerateCommitMessageAI?: () => Promise<void> | void;
+  isGeneratingCommitMessageAI?: boolean;
+  onPreviewGitFileDiff?: (path: string) => void;
+  onPublishToGitHub?: () => void;
+  isPushing?: boolean;
+  fileVoiceByPath?: Record<string, AgentProviderId>;
   className?: string;
 };
 
@@ -76,7 +97,7 @@ type DiffMode = "inline" | "split";
 type AuthorFilter = "all" | CheckpointAuthorKind;
 
 const AUTHOR_FILTERS: { id: AuthorFilter; label: string }[] = [
-  { id: "all", label: "All" },
+  { id: "all", label: "Everyone" },
   { id: "you", label: "You" },
   { id: "claude", label: "Claude" },
   { id: "codex", label: "Codex" },
@@ -100,79 +121,70 @@ function getErrorMessage(err: unknown): string {
 
 function HunkDiffView({
   hunk,
+  hunkIndex,
   mode,
   canRevert,
   reverting,
   onRevert,
 }: {
   hunk: DiffHunk;
+  hunkIndex: number;
   mode: DiffMode;
   canRevert: boolean;
   reverting: boolean;
   onRevert: () => void;
 }) {
   return (
-    <div className="border border-border rounded-md overflow-hidden bg-background">
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-surface-tertiary border-b border-border">
-        <span className="text-[11px] font-mono text-muted truncate">{hunk.header}</span>
-        {canRevert && (
-          <button
-            type="button"
-            disabled={reverting}
-            onClick={onRevert}
-            className="btn-secondary px-2 py-0.5 text-[11px] rounded flex items-center gap-1 flex-shrink-0 disabled:opacity-50"
-          >
-            <ArrowCounterClockwiseIcon className="w-3 h-3" aria-hidden="true" />
-            <span>{reverting ? "Reverting..." : "Revert hunk"}</span>
-          </button>
-        )}
+    <div className="py-1">
+      <div className="flex h-5 items-center font-mono text-[12px] text-muted">
+        <span className="w-[40px] shrink-0 pr-3 text-right select-none" />
+        <span className="truncate">{hunk.header}</span>
       </div>
 
       {mode === "inline" ? (
-        <div className="font-mono text-xs leading-5 overflow-x-auto">
+        <div className="font-mono text-[12px] leading-5 overflow-x-auto">
           {hunk.lines.map((line) => {
             const rowBg =
               line.type === "add"
-                ? "bg-success/10 text-foreground"
+                ? "bg-[var(--diff-add-bg)] text-[var(--diff-add-text)]"
                 : line.type === "del"
-                  ? "bg-destructive/10 text-foreground"
+                  ? "bg-[var(--diff-del-bg)] text-[var(--diff-del-text)]"
                   : "text-foreground-secondary";
-            const prefix = line.type === "add" ? "+" : line.type === "del" ? "-" : " ";
+            const prefix = line.type === "add" ? "+" : line.type === "del" ? "−" : " ";
+            const lineNum =
+              line.type === "del" ? line.oldLineNumber : (line.newLineNumber ?? line.oldLineNumber);
             return (
               <div
                 key={`${hunk.id}-inline-${line.type}-${line.oldLineNumber ?? "n"}-${line.newLineNumber ?? "n"}`}
-                className={`flex px-2 ${rowBg}`}
+                className={`flex h-5 leading-5 whitespace-pre ${rowBg}`}
               >
-                <span className="w-9 flex-shrink-0 text-right pr-2 text-muted select-none text-[11px]">
-                  {line.oldLineNumber ?? ""}
+                <span className="w-[40px] shrink-0 pr-3 text-right select-none opacity-75">
+                  {lineNum ?? ""}
                 </span>
-                <span className="w-9 flex-shrink-0 text-right pr-2 text-muted select-none text-[11px]">
-                  {line.newLineNumber ?? ""}
-                </span>
-                <span className="w-4 flex-shrink-0 select-none text-muted">{prefix}</span>
-                <span className="whitespace-pre flex-1">{line.content}</span>
+                <span className="w-4 shrink-0 select-none">{prefix}</span>
+                <span className="flex-1 pr-4">{line.content}</span>
               </div>
             );
           })}
         </div>
       ) : (
-        <div className="grid grid-cols-2 divide-x divide-border font-mono text-xs leading-5 overflow-x-auto">
+        <div className="grid grid-cols-2 divide-x divide-border font-mono text-[12px] leading-5 overflow-x-auto">
           <div>
             {hunk.lines
               .filter((l) => l.type !== "add")
               .map((line) => (
                 <div
                   key={`${hunk.id}-old-${line.type}-${line.oldLineNumber ?? "n"}`}
-                  className={`flex px-2 ${
+                  className={`flex h-5 leading-5 whitespace-pre ${
                     line.type === "del"
-                      ? "bg-destructive/10 text-foreground"
+                      ? "bg-[var(--diff-del-bg)] text-[var(--diff-del-text)]"
                       : "text-foreground-secondary"
                   }`}
                 >
-                  <span className="w-8 flex-shrink-0 text-right pr-2 text-muted select-none text-[11px]">
+                  <span className="w-[40px] shrink-0 pr-3 text-right select-none opacity-75">
                     {line.oldLineNumber ?? ""}
                   </span>
-                  <span className="whitespace-pre flex-1">{line.content}</span>
+                  <span className="flex-1 pr-2">{line.content}</span>
                 </div>
               ))}
           </div>
@@ -182,18 +194,35 @@ function HunkDiffView({
               .map((line) => (
                 <div
                   key={`${hunk.id}-new-${line.type}-${line.newLineNumber ?? "n"}`}
-                  className={`flex px-2 ${
+                  className={`flex h-5 leading-5 whitespace-pre ${
                     line.type === "add"
-                      ? "bg-success/10 text-foreground"
+                      ? "bg-[var(--diff-add-bg)] text-[var(--diff-add-text)]"
                       : "text-foreground-secondary"
                   }`}
                 >
-                  <span className="w-8 flex-shrink-0 text-right pr-2 text-muted select-none text-[11px]">
+                  <span className="w-[40px] shrink-0 pr-3 text-right select-none opacity-75">
                     {line.newLineNumber ?? ""}
                   </span>
-                  <span className="whitespace-pre flex-1">{line.content}</span>
+                  <span className="flex-1 pr-2">{line.content}</span>
                 </div>
               ))}
+          </div>
+        </div>
+      )}
+
+      {canRevert && (
+        <div className="mx-[18px] mt-3 mb-2">
+          <div className="h-px bg-border/70" />
+          <div className="mt-2.5 flex justify-center">
+            <button
+              type="button"
+              disabled={reverting}
+              onClick={onRevert}
+              className="btn btn-secondary btn-sm inline-flex items-center gap-1 disabled:opacity-50"
+            >
+              <ArrowCounterClockwiseIcon className="w-3 h-3" aria-hidden="true" />
+              <span>{reverting ? "Reverting…" : `Revert hunk ${hunkIndex + 1}`}</span>
+            </button>
           </div>
         </div>
       )}
@@ -208,6 +237,21 @@ export function HistoryWorkspace({
   beforeMutation,
   onFilesChanged,
   onOpenThread,
+  gitStatus,
+  stagedChanges = [],
+  unstagedChanges = [],
+  commitMessage = "",
+  onCommitMessageChange,
+  onStageFile,
+  onUnstageFile,
+  onCommit,
+  onCommitAndPush,
+  onGenerateCommitMessageAI,
+  isGeneratingCommitMessageAI = false,
+  onPreviewGitFileDiff,
+  onPublishToGitHub,
+  isPushing = false,
+  fileVoiceByPath,
   className = "",
 }: HistoryWorkspaceProps) {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("timeline");
@@ -230,11 +274,11 @@ export function HistoryWorkspace({
   const [restoring, setRestoring] = useState(false);
   const [revertingHunkId, setRevertingHunkId] = useState<string | null>(null);
 
-  const [showLabelForm, setShowLabelForm] = useState(false);
-  const [labelName, setLabelName] = useState("");
-  const [labelMessage, setLabelMessage] = useState("");
   const [savingLabel, setSavingLabel] = useState(false);
   const [creatingCheckpoint, setCreatingCheckpoint] = useState(false);
+  const [addAgentTrailers, setAddAgentTrailers] = useState(true);
+  const [committing, setCommitting] = useState(false);
+  const [quickLabelName, setQuickLabelName] = useState("");
 
   const loadHistory = useCallback(async () => {
     if (!projectDir) return;
@@ -303,6 +347,16 @@ export function HistoryWorkspace({
       parsed: parseCheckpointMessage(cp.id, cp.message),
     }));
   }, [checkpoints]);
+
+  const hasCustomCheckpoints = useMemo(
+    () => parsedCheckpoints.some((item) => item.parsed.author === "custom"),
+    [parsedCheckpoints],
+  );
+
+  const visibleAuthorFilters = useMemo(
+    () => AUTHOR_FILTERS.filter((f) => f.id !== "custom" || hasCustomCheckpoints),
+    [hasCustomCheckpoints],
+  );
 
   const filteredCheckpoints = useMemo(() => {
     if (authorFilter === "all") return parsedCheckpoints;
@@ -406,34 +460,6 @@ export function HistoryWorkspace({
     [projectDir, selectedCheckpointId, diffResult, loadDiff, beforeMutation, onFilesChanged],
   );
 
-  const handleCreateLabel = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!projectDir || !selectedCheckpointId || !labelName.trim()) return;
-      setSavingLabel(true);
-      setErrorMsg(null);
-      setStatusNotice(null);
-      try {
-        const created = await invoke<LabelInfo>("checkpoint_create_label", {
-          dir: projectDir,
-          name: labelName.trim(),
-          checkpointId: selectedCheckpointId,
-          message: labelMessage.trim() || null,
-        });
-        setLabelName("");
-        setLabelMessage("");
-        setShowLabelForm(false);
-        await loadHistory();
-        setStatusNotice(`Created label ${created.name}`);
-      } catch (err) {
-        setErrorMsg(getErrorMessage(err));
-      } finally {
-        setSavingLabel(false);
-      }
-    },
-    [projectDir, selectedCheckpointId, labelName, labelMessage, loadHistory],
-  );
-
   const handleDeleteLabel = useCallback(
     async (name: string) => {
       if (!projectDir) return;
@@ -450,14 +476,84 @@ export function HistoryWorkspace({
     [projectDir, loadHistory],
   );
 
+  const handleQuickLabelSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const targetId = selectedCheckpointId ?? checkpoints[0]?.id;
+      if (!projectDir || !targetId || !quickLabelName.trim()) return;
+      setSavingLabel(true);
+      setErrorMsg(null);
+      setStatusNotice(null);
+      try {
+        const created = await invoke<LabelInfo>("checkpoint_create_label", {
+          dir: projectDir,
+          name: quickLabelName.trim(),
+          checkpointId: targetId,
+          message: null,
+        });
+        setQuickLabelName("");
+        await loadHistory();
+        setStatusNotice(`Created label ${created.name}`);
+      } catch (err) {
+        setErrorMsg(getErrorMessage(err));
+      } finally {
+        setSavingLabel(false);
+      }
+    },
+    [projectDir, selectedCheckpointId, checkpoints, quickLabelName, loadHistory],
+  );
+
+  const buildFinalCommitMessage = useCallback(() => {
+    const trimmed = commitMessage.trim();
+    if (!addAgentTrailers || stagedChanges.length === 0 || !fileVoiceByPath) {
+      return trimmed;
+    }
+    const providers = new Set<AgentProviderId>();
+    for (const file of stagedChanges) {
+      const p = fileVoiceByPath[file.path];
+      if (p) providers.add(p);
+    }
+    if (providers.size === 0) return trimmed;
+    const labels = Array.from(providers).map((p) => getProviderMeta(p).label);
+    const trailer = `Co-authored with ${labels.join(" and ")} threads.`;
+    if (trimmed.includes(trailer)) return trimmed;
+    return trimmed ? `${trimmed}\n\n${trailer}` : trailer;
+  }, [commitMessage, addAgentTrailers, stagedChanges, fileVoiceByPath]);
+
+  const handleCommitAction = useCallback(
+    async (andPush: boolean) => {
+      const finalMsg = buildFinalCommitMessage();
+      if (!finalMsg || stagedChanges.length === 0) return;
+      setCommitting(true);
+      try {
+        if (andPush && onCommitAndPush) {
+          await onCommitAndPush(finalMsg);
+        } else if (onCommit) {
+          await onCommit(finalMsg);
+        }
+      } finally {
+        setCommitting(false);
+      }
+    },
+    [buildFinalCommitMessage, stagedChanges.length, onCommit, onCommitAndPush],
+  );
+
+  const totalGitChanges = stagedChanges.length + unstagedChanges.length;
+  const shortRemote = gitStatus?.remote
+    ? gitStatus.remote
+        .replace(/^https?:\/\//, "")
+        .replace(/^git@([^:]+):/, "$1/")
+        .replace(/\.git$/, "")
+    : null;
+
   return (
-    <div className={`flex h-full min-h-0 gap-3 bg-background text-foreground ${className}`}>
-      {/* Left sidebar: Timeline / Commits / Labels */}
+    <div className={`flex h-full min-h-0 gap-2 bg-bg p-2 text-foreground ${className}`}>
+      {/* Left column: Timeline / Commits / Labels directly on bg-bg */}
       <aside
         aria-label="Project history"
-        className="w-80 flex-shrink-0 flex flex-col min-h-0 border border-border rounded-lg bg-panel overflow-hidden"
+        className="w-[300px] shrink-0 flex flex-col gap-1.5 min-h-0"
       >
-        <div className="p-2 border-b border-border flex items-center gap-1 bg-surface-tertiary">
+        <div className="flex bg-sunken rounded-[9px] p-[3px] gap-0.5 text-[12.5px]">
           {(["timeline", "commits", "labels"] as const)
             .filter((tab) => tab !== "commits" || gitSidebarPanel != null)
             .map((tab) => (
@@ -465,9 +561,9 @@ export function HistoryWorkspace({
                 key={tab}
                 type="button"
                 onClick={() => setSidebarTab(tab)}
-                className={`flex-1 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${
+                className={`flex-1 py-1 rounded-[7px] capitalize transition-colors ${
                   sidebarTab === tab
-                    ? "bg-background text-foreground shadow-sm border border-border"
+                    ? "bg-panel text-foreground font-medium shadow-xs ring-1 ring-border"
                     : "text-muted hover:text-foreground"
                 }`}
               >
@@ -478,21 +574,21 @@ export function HistoryWorkspace({
 
         {sidebarTab === "timeline" && (
           <>
-            <div className="px-2.5 py-2 border-b border-border flex flex-wrap items-center gap-1">
-              {AUTHOR_FILTERS.map((filter) => (
+            <div className="flex flex-wrap items-center gap-1 px-0.5 py-0.5 text-[11.5px]">
+              {visibleAuthorFilters.map((filter) => (
                 <button
                   key={filter.id}
                   type="button"
                   onClick={() => setAuthorFilter(filter.id)}
-                  className={`px-2 py-0.5 rounded-full text-[11px] border transition-colors flex items-center gap-1.5 ${
+                  className={`px-2 py-0.5 rounded-full border transition-colors flex items-center gap-1.5 ${
                     authorFilter === filter.id
                       ? "bg-foreground text-background border-foreground"
-                      : "bg-background text-foreground-secondary border-border hover:bg-accent-hover"
+                      : "bg-transparent text-foreground-secondary border-border-dark hover:bg-subtle"
                   }`}
                 >
                   {filter.id !== "all" && (
                     <span
-                      className={`w-1.5 h-1.5 rounded-full ${AUTHOR_DOT_CLASS[filter.id]}`}
+                      className={`w-[7px] h-[7px] rounded-full ${AUTHOR_DOT_CLASS[filter.id]}`}
                       aria-hidden="true"
                     />
                   )}
@@ -503,7 +599,7 @@ export function HistoryWorkspace({
                 type="button"
                 disabled={creatingCheckpoint}
                 onClick={() => void handleCreateManualCheckpoint()}
-                className="ml-auto btn-secondary px-2 py-0.5 text-[11px] rounded flex items-center gap-1 disabled:opacity-50"
+                className="ml-auto btn btn-secondary btn-sm px-2 py-0.5 text-[11px] flex items-center gap-1 disabled:opacity-50"
                 title="Create manual checkpoint"
               >
                 <PlusIcon className="w-3 h-3" aria-hidden="true" />
@@ -521,7 +617,8 @@ export function HistoryWorkspace({
                   No checkpoints found.
                 </div>
               ) : (
-                <div className="p-2 space-y-1">
+                <div className="space-y-0.5 pr-1">
+                  <div className="ox-sec px-2.5 py-1.5">Checkpoints</div>
                   {filteredCheckpoints.map(({ checkpoint, parsed }) => {
                     const isSelected = checkpoint.id === selectedCheckpointId;
                     return (
@@ -529,31 +626,31 @@ export function HistoryWorkspace({
                         key={checkpoint.id}
                         type="button"
                         onClick={() => setSelectedCheckpointId(checkpoint.id)}
-                        className={`w-full text-left px-2.5 py-2 rounded-md border transition-colors flex items-start gap-2 ${
+                        className={`w-full text-left px-2.5 py-2 rounded-[8px] transition-colors flex items-start gap-2.5 ${
                           isSelected
-                            ? "bg-background border-border shadow-sm"
-                            : "bg-transparent border-transparent hover:bg-accent-hover"
+                            ? "bg-panel ring-1 ring-border shadow-xs"
+                            : "bg-transparent hover:bg-subtle"
                         }`}
                       >
-                        <span className="text-[11px] font-mono text-muted w-11 flex-shrink-0 pt-0.5">
+                        <span className="text-[11px] font-mono text-muted w-[38px] shrink-0 pt-0.5">
                           {formatCheckpointTime(checkpoint.createdAt)}
                         </span>
                         {parsed.kind === "safety" ? (
                           <ShieldCheckIcon
-                            className="w-3.5 h-3.5 text-warning flex-shrink-0 mt-0.5"
+                            className="w-3.5 h-3.5 text-warn shrink-0 mt-0.5"
                             aria-hidden="true"
                           />
                         ) : (
                           <span
-                            className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${AUTHOR_DOT_CLASS[parsed.author]}`}
+                            className={`w-[7px] h-[7px] rounded-full shrink-0 mt-1.5 ${AUTHOR_DOT_CLASS[parsed.author]}`}
                             aria-hidden="true"
                           />
                         )}
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs font-medium text-foreground truncate">
+                          <div className="text-[12.5px] font-medium text-foreground truncate">
                             {parsed.authorLabel} · {parsed.title}
                           </div>
-                          <div className="text-[11px] font-mono text-muted truncate mt-0.5">
+                          <div className="text-[11.5px] font-mono text-muted truncate mt-0.5">
                             {checkpoint.commitOid.slice(0, 7)}
                             {parsed.phase ? ` · ${parsed.phase}` : ""}
                           </div>
@@ -568,7 +665,7 @@ export function HistoryWorkspace({
         )}
 
         {sidebarTab === "commits" && (
-          <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 flex flex-col ox-frame overflow-hidden">
             {gitSidebarPanel ?? (
               <div className="p-4 text-xs text-muted flex items-center gap-2">
                 <GitCommitIcon className="w-4 h-4" aria-hidden="true" />
@@ -583,18 +680,15 @@ export function HistoryWorkspace({
             {labels.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-muted">No labels yet.</div>
             ) : (
-              <div className="p-2 space-y-1">
+              <div className="space-y-1 pr-1">
                 {labels.map((label) => (
                   <div
                     key={label.name}
-                    className="flex items-start justify-between gap-2 px-2.5 py-2 rounded-md border border-border bg-background"
+                    className="flex items-start justify-between gap-2 px-2.5 py-2 rounded-[8px] bg-panel ring-1 ring-border shadow-xs"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                        <TagIcon
-                          className="w-3.5 h-3.5 text-warning flex-shrink-0"
-                          aria-hidden="true"
-                        />
+                        <TagIcon className="w-3.5 h-3.5 text-warn shrink-0" aria-hidden="true" />
                         <span className="truncate">{label.name}</span>
                       </div>
                       <div className="text-[11px] font-mono text-muted truncate mt-0.5">
@@ -604,7 +698,7 @@ export function HistoryWorkspace({
                     <button
                       type="button"
                       onClick={() => void handleDeleteLabel(label.name)}
-                      className="btn-ghost p-1 rounded text-muted hover:text-destructive"
+                      className="btn-ghost p-1 rounded text-muted hover:text-error"
                       aria-label={`Delete label ${label.name}`}
                     >
                       <TrashIcon className="w-3.5 h-3.5" aria-hidden="true" />
@@ -617,134 +711,91 @@ export function HistoryWorkspace({
         )}
       </aside>
 
-      {/* Main diff & action detail */}
+      {/* Center Diff Sheet */}
       {sidebarTab === "commits" && commitDiffPanel ? (
         commitDiffPanel
       ) : (
         <section
           aria-label="Change detail"
-          className="flex-1 min-w-0 flex flex-col min-h-0 border border-border rounded-lg bg-panel overflow-hidden"
+          className="flex-1 min-w-0 ox-frame flex flex-col overflow-hidden"
         >
           {/* Header */}
-          <div className="px-4 py-2.5 border-b border-border flex flex-wrap items-center justify-between gap-2 bg-background">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="px-[18px] py-3 border-b border-border flex flex-wrap items-center gap-2.5 bg-panel">
+            <div className="flex items-center gap-2.5 min-w-0">
               {selectedEntry ? (
                 <>
                   <span
-                    className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${AUTHOR_DOT_CLASS[selectedEntry.parsed.author]}`}
+                    className={`w-[9px] h-[9px] rounded-full shrink-0 ${AUTHOR_DOT_CLASS[selectedEntry.parsed.author]}`}
                     aria-hidden="true"
                   />
-                  <span className="text-sm font-medium text-foreground truncate">
-                    {selectedEntry.parsed.authorLabel} · {selectedEntry.parsed.title}
-                  </span>
-                  <span className="text-xs font-mono text-muted flex-shrink-0">
-                    {selectedEntry.checkpoint.commitOid.slice(0, 7)}
-                  </span>
+                  <div className="min-w-0">
+                    <div className="text-[15px] font-semibold text-foreground truncate">
+                      {selectedEntry.parsed.authorLabel} · {selectedEntry.parsed.title}
+                    </div>
+                    <div className="text-[12px] text-muted font-mono truncate">
+                      {formatCheckpointTime(selectedEntry.checkpoint.createdAt)} ·{" "}
+                      {selectedEntry.checkpoint.commitOid.slice(0, 7)}
+                    </div>
+                  </div>
                 </>
               ) : (
                 <span className="text-sm text-muted">Select a checkpoint</span>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-1.5">
               {selectedEntry?.parsed.threadId && onOpenThread && (
                 <button
                   type="button"
                   onClick={() => onOpenThread(selectedEntry.parsed.threadId ?? "")}
-                  className="btn-secondary px-2.5 py-1 text-xs rounded-md"
+                  className="btn btn-secondary btn-sm"
                 >
                   Open thread
                 </button>
               )}
 
-              <div className="flex items-center border border-border rounded-md overflow-hidden bg-surface-tertiary">
+              {selectedCheckpointId && (
                 <button
                   type="button"
-                  onClick={() => setDiffMode("inline")}
-                  className={`px-2 py-1 text-xs flex items-center gap-1 ${
-                    diffMode === "inline" ? "bg-background text-foreground" : "text-muted"
-                  }`}
+                  disabled={!diffResult || restoring}
+                  onClick={() => setRestoreConfirmOpen(true)}
+                  className="btn btn-secondary btn-sm disabled:opacity-50"
                 >
-                  <RowsIcon className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Inline</span>
+                  Restore before this
                 </button>
+              )}
+
+              <div className="flex bg-sunken rounded-[7px] p-0.5">
                 <button
                   type="button"
                   onClick={() => setDiffMode("split")}
-                  className={`px-2 py-1 text-xs flex items-center gap-1 ${
-                    diffMode === "split" ? "bg-background text-foreground" : "text-muted"
+                  className={`px-2.5 py-0.5 text-[12px] rounded-[5px] transition-colors ${
+                    diffMode === "split"
+                      ? "bg-panel text-foreground font-medium shadow-xs ring-1 ring-border"
+                      : "text-muted hover:text-foreground"
                   }`}
                 >
-                  <ColumnsIcon className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>Split</span>
+                  Split
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiffMode("inline")}
+                  className={`px-2.5 py-0.5 text-[12px] rounded-[5px] transition-colors ${
+                    diffMode === "inline"
+                      ? "bg-panel text-foreground font-medium shadow-xs ring-1 ring-border"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  Inline
                 </button>
               </div>
-
-              {selectedCheckpointId && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setShowLabelForm((prev) => !prev)}
-                    className="btn-secondary px-2.5 py-1 text-xs rounded-md flex items-center gap-1"
-                  >
-                    <BookmarkSimpleIcon className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>Label</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!diffResult || restoring}
-                    onClick={() => setRestoreConfirmOpen(true)}
-                    className="btn-primary px-3 py-1 text-xs rounded-md disabled:opacity-50"
-                  >
-                    Restore
-                  </button>
-                </>
-              )}
             </div>
           </div>
 
-          {/* Inline label creation form */}
-          {showLabelForm && selectedCheckpointId && (
-            <form
-              onSubmit={(e) => void handleCreateLabel(e)}
-              className="px-4 py-2 border-b border-border bg-surface-tertiary flex flex-wrap items-center gap-2"
-            >
-              <input
-                type="text"
-                value={labelName}
-                onChange={(e) => setLabelName(e.target.value)}
-                placeholder="Label name (e.g. draft-v3)"
-                className="px-2.5 py-1 text-xs rounded border border-border bg-background text-foreground w-48"
-                required
-              />
-              <input
-                type="text"
-                value={labelMessage}
-                onChange={(e) => setLabelMessage(e.target.value)}
-                placeholder="Optional note"
-                className="px-2.5 py-1 text-xs rounded border border-border bg-background text-foreground flex-1 min-w-40"
-              />
-              <button
-                type="submit"
-                disabled={savingLabel || !labelName.trim()}
-                className="btn-primary px-3 py-1 text-xs rounded disabled:opacity-50"
-              >
-                {savingLabel ? "Saving..." : "Save label"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowLabelForm(false)}
-                className="btn-ghost px-2 py-1 text-xs rounded"
-              >
-                Cancel
-              </button>
-            </form>
-          )}
-
           {/* Inline anomaly / status banners */}
           {errorMsg && (
-            <div className="px-4 py-2 border-b border-destructive/30 bg-destructive/10 text-destructive text-xs flex items-center gap-2">
-              <WarningCircleIcon className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
+            <div className="px-[18px] py-2 border-b border-error/30 bg-error-bg text-error text-xs flex items-center gap-2">
+              <WarningCircleIcon className="w-4 h-4 shrink-0" aria-hidden="true" />
               <span className="flex-1">{errorMsg}</span>
               <button type="button" onClick={() => setErrorMsg(null)} className="text-xs underline">
                 Dismiss
@@ -753,7 +804,7 @@ export function HistoryWorkspace({
           )}
 
           {statusNotice && !errorMsg && (
-            <div className="px-4 py-1.5 border-b border-border bg-surface-tertiary text-foreground-secondary text-xs flex items-center justify-between gap-2">
+            <div className="px-[18px] py-1.5 border-b border-border bg-subtle text-foreground-secondary text-xs flex items-center justify-between gap-2">
               <span>{statusNotice}</span>
               <button
                 type="button"
@@ -765,69 +816,303 @@ export function HistoryWorkspace({
             </div>
           )}
 
-          {/* File list + Diff body */}
-          <div className="flex-1 min-h-0 flex">
-            {loadingDiff ? (
-              <div className="flex-1 flex items-center justify-center text-muted">
-                <Spinner className="w-5 h-5" />
-              </div>
-            ) : !diffResult || diffResult.files.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-xs text-muted">
-                No differences between this checkpoint and the working tree.
-              </div>
-            ) : (
-              <>
-                {/* Changed files list */}
-                <div className="w-60 flex-shrink-0 border-r border-border bg-background overflow-y-auto p-2 space-y-1">
-                  {diffResult.files.map((file) => {
-                    const active = activeParsedFile?.path === file.path;
-                    return (
-                      <button
-                        key={file.path}
-                        type="button"
-                        onClick={() => setSelectedFilePath(file.path)}
-                        className={`w-full text-left px-2.5 py-1.5 rounded text-xs font-mono flex items-center justify-between gap-2 ${
-                          active
-                            ? "bg-surface-tertiary text-foreground font-medium"
-                            : "text-foreground-secondary hover:bg-accent-hover"
-                        }`}
-                      >
-                        <span className="truncate">{file.path}</span>
-                        <span className="flex-shrink-0 text-[11px] text-muted">
-                          <span className="text-success">+{file.additions}</span>{" "}
-                          <span className="text-destructive">-{file.deletions}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Hunk diff view */}
-                <ScrollArea className="flex-1 min-w-0">
-                  <div className="p-4 space-y-3">
-                    {activeParsedFile && activeParsedFile.hunks.length > 0 ? (
-                      activeParsedFile.hunks.map((hunk) => (
-                        <HunkDiffView
-                          key={hunk.id}
-                          hunk={hunk}
-                          mode={diffMode}
-                          canRevert={diffResult.toId === null}
-                          reverting={revertingHunkId === hunk.id}
-                          onRevert={() => void handleRevertHunk(hunk)}
-                        />
-                      ))
-                    ) : (
-                      <div className="text-xs text-muted">
-                        No textual hunks available for this file.
-                      </div>
-                    )}
+          {/* File header strip + Full-bleed diff body */}
+          {loadingDiff ? (
+            <div className="flex-1 flex items-center justify-center text-muted">
+              <Spinner className="w-5 h-5" />
+            </div>
+          ) : !diffResult || diffResult.files.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-xs text-muted">
+              No differences between this checkpoint and the working tree.
+            </div>
+          ) : (
+            <>
+              <div className="h-[34px] px-[18px] bg-[var(--tab-strip-bg)] border-b border-border flex items-center gap-2 text-[12px] shrink-0 overflow-x-auto">
+                {diffResult.files.length === 1 ? (
+                  <>
+                    <span className="font-mono font-medium text-foreground">
+                      {activeParsedFile?.path ?? diffResult.files[0]?.path}
+                    </span>
+                    <span className="font-mono text-muted">
+                      <span className="text-success">+{diffResult.files[0]?.additions ?? 0}</span>{" "}
+                      <span className="text-error">−{diffResult.files[0]?.deletions ?? 0}</span>
+                    </span>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    {diffResult.files.map((file) => {
+                      const active = activeParsedFile?.path === file.path;
+                      return (
+                        <button
+                          key={file.path}
+                          type="button"
+                          onClick={() => setSelectedFilePath(file.path)}
+                          className={`px-2 py-0.5 rounded-[5px] font-mono text-[11.5px] flex items-center gap-1.5 transition-colors ${
+                            active
+                              ? "bg-panel text-foreground font-medium ring-1 ring-border shadow-xs"
+                              : "text-muted hover:text-foreground hover:bg-subtle"
+                          }`}
+                        >
+                          <span>{file.path}</span>
+                          <span className="text-[10.5px]">
+                            <span className="text-success">+{file.additions}</span>{" "}
+                            <span className="text-error">−{file.deletions}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                </ScrollArea>
-              </>
-            )}
-          </div>
+                )}
+                <span className="ml-auto shrink-0 text-muted">
+                  {activeParsedFile ? `${activeParsedFile.hunks.length} hunks` : "0 hunks"}
+                </span>
+              </div>
+
+              <ScrollArea className="flex-1 min-w-0">
+                <div className="py-2">
+                  {activeParsedFile && activeParsedFile.hunks.length > 0 ? (
+                    activeParsedFile.hunks.map((hunk, idx) => (
+                      <HunkDiffView
+                        key={hunk.id}
+                        hunk={hunk}
+                        hunkIndex={idx}
+                        mode={diffMode}
+                        canRevert={diffResult.toId === null}
+                        reverting={revertingHunkId === hunk.id}
+                        onRevert={() => void handleRevertHunk(hunk)}
+                      />
+                    ))
+                  ) : (
+                    <div className="px-[18px] py-6 text-xs text-muted">
+                      No textual hunks available for this file.
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </>
+          )}
         </section>
       )}
+
+      {/* Right Column: Changes, Commit message, Label this version, Remote strip */}
+      <aside aria-label="Commit" className="w-[320px] shrink-0 flex flex-col gap-2 min-h-0">
+        {/* Card 1: Changes */}
+        <div className="ox-frame p-3 flex flex-col gap-1.5 max-h-[240px] overflow-y-auto">
+          <div className="flex items-center">
+            <span className="font-semibold text-[13px]">Changes</span>
+            <span className="ml-auto font-mono text-[11.5px] text-muted">
+              {totalGitChanges} {totalGitChanges === 1 ? "file" : "files"}
+            </span>
+          </div>
+
+          {totalGitChanges === 0 ? (
+            <div className="py-2 text-[12px] text-muted">Working tree clean</div>
+          ) : (
+            <>
+              {stagedChanges.length > 0 && (
+                <>
+                  <div className="ox-sec mt-1">Staged</div>
+                  {stagedChanges.map((file) => {
+                    const voiceProvider = fileVoiceByPath?.[file.path];
+                    return (
+                      <div
+                        key={`staged-${file.path}`}
+                        className="flex items-center gap-2 h-[26px] px-2 rounded-[6px] font-mono text-[12px] hover:bg-subtle"
+                      >
+                        <input
+                          type="checkbox"
+                          checked
+                          aria-label={`Unstage ${file.path}`}
+                          onChange={() => onUnstageFile?.(file.path)}
+                          className="m-0 accent-foreground shrink-0"
+                        />
+                        {voiceProvider && (
+                          <span
+                            aria-hidden="true"
+                            className="w-[7px] h-[7px] rounded-full shrink-0"
+                            style={{ backgroundColor: getProviderMeta(voiceProvider).colorVar }}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onPreviewGitFileDiff?.(file.path)}
+                          className="truncate text-left flex-1 hover:underline"
+                          title={file.path}
+                        >
+                          {file.path}
+                        </button>
+                        <span className="ml-auto shrink-0 text-[11px] text-muted">
+                          {file.status[0]?.toUpperCase() ?? "M"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {unstagedChanges.length > 0 && (
+                <>
+                  <div className="ox-sec mt-1">Unstaged</div>
+                  {unstagedChanges.map((file) => {
+                    const voiceProvider = fileVoiceByPath?.[file.path];
+                    return (
+                      <div
+                        key={`unstaged-${file.path}`}
+                        className="flex items-center gap-2 h-[26px] px-2 rounded-[6px] font-mono text-[12px] hover:bg-subtle"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={false}
+                          aria-label={`Stage ${file.path}`}
+                          onChange={() => onStageFile?.(file.path)}
+                          className="m-0 accent-foreground shrink-0"
+                        />
+                        {voiceProvider && (
+                          <span
+                            aria-hidden="true"
+                            className="w-[7px] h-[7px] rounded-full shrink-0"
+                            style={{ backgroundColor: getProviderMeta(voiceProvider).colorVar }}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onPreviewGitFileDiff?.(file.path)}
+                          className="truncate text-left flex-1 hover:underline"
+                          title={file.path}
+                        >
+                          {file.path}
+                        </button>
+                        <span className="ml-auto shrink-0 text-[11px] text-muted">
+                          {file.status[0]?.toUpperCase() ?? "M"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Card 2: Commit message */}
+        <div className="ox-frame p-3 flex flex-col gap-2">
+          <div className="flex items-center">
+            <label htmlFor="history-commit-msg" className="font-semibold text-[13px]">
+              Commit message
+            </label>
+            {onGenerateCommitMessageAI && (
+              <button
+                type="button"
+                disabled={isGeneratingCommitMessageAI || totalGitChanges === 0}
+                onClick={() => void onGenerateCommitMessageAI()}
+                className="ml-auto btn btn-secondary btn-sm inline-flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <span
+                  aria-hidden="true"
+                  className="w-[7px] h-[7px] rounded-full bg-[var(--voice-claude-ink)]"
+                />
+                <span>{isGeneratingCommitMessageAI ? "Generating…" : "Generate"}</span>
+              </button>
+            )}
+          </div>
+          <textarea
+            id="history-commit-msg"
+            value={commitMessage}
+            onChange={(e) => onCommitMessageChange?.(e.target.value)}
+            placeholder="Describe your changes…"
+            className="h-[84px] rounded-[8px] border border-border-dark bg-background p-2 text-[12.5px] leading-relaxed resize-none text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <label className="flex items-center gap-1.5 text-[11.5px] text-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={addAgentTrailers}
+              onChange={(e) => setAddAgentTrailers(e.target.checked)}
+              className="m-0 accent-foreground"
+            />
+            <span>Add agent trailers for staged threads</span>
+          </label>
+          <div className="flex gap-1.5 mt-0.5">
+            <button
+              type="button"
+              disabled={
+                committing || stagedChanges.length === 0 || !commitMessage.trim() || !onCommit
+              }
+              onClick={() => void handleCommitAction(false)}
+              className="btn btn-primary flex-1 disabled:opacity-50"
+            >
+              {committing
+                ? "Committing…"
+                : `Commit ${stagedChanges.length} ${stagedChanges.length === 1 ? "file" : "files"}`}
+            </button>
+            <button
+              type="button"
+              disabled={
+                committing ||
+                isPushing ||
+                !gitStatus?.remote ||
+                stagedChanges.length === 0 ||
+                !commitMessage.trim() ||
+                !onCommitAndPush
+              }
+              onClick={() => void handleCommitAction(true)}
+              className="btn btn-secondary disabled:opacity-50"
+            >
+              {isPushing ? "Pushing…" : "& Push"}
+            </button>
+          </div>
+        </div>
+
+        {/* Card 3: Label this version */}
+        <form
+          onSubmit={(e) => void handleQuickLabelSubmit(e)}
+          className="ox-frame p-3 flex flex-col gap-2"
+        >
+          <div className="font-semibold text-[13px]">Label this version</div>
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={quickLabelName}
+              onChange={(e) => setQuickLabelName(e.target.value)}
+              placeholder='e.g. "Submitted to PRL"'
+              className="flex-1 min-w-0 rounded-[8px] border border-border-dark bg-background px-2.5 py-1 text-[12.5px] text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <button
+              type="submit"
+              disabled={savingLabel || !quickLabelName.trim() || checkpoints.length === 0}
+              className="btn btn-secondary btn-sm disabled:opacity-50"
+            >
+              {savingLabel ? "…" : "Add"}
+            </button>
+          </div>
+        </form>
+
+        {/* Bottom Dashed Remote Strip */}
+        {shortRemote ? (
+          <div className="mt-auto flex items-center gap-2 px-2.5 py-2 rounded-[10px] border border-dashed border-border-dark text-[12px] text-muted">
+            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
+              <path
+                d="M8 1.5a6.5 6.5 0 0 0-2 12.7c.3 0 .4-.2.4-.4v-1.3c-1.8.4-2.2-.8-2.2-.8-.3-.8-.7-1-.7-1-.6-.4 0-.4 0-.4.7 0 1 .7 1 .7.6 1 1.5.7 1.9.5 0-.4.2-.7.4-.9-1.4-.2-3-.7-3-3.2 0-.7.3-1.3.7-1.7-.1-.2-.3-.9.1-1.8 0 0 .5-.2 1.8.7a6 6 0 0 1 3.2 0c1.2-.9 1.8-.7 1.8-.7.4.9.1 1.6.1 1.8.4.4.7 1 .7 1.7 0 2.5-1.5 3-3 3.2.2.2.5.6.5 1.2v1.8c0 .2.1.4.4.4A6.5 6.5 0 0 0 8 1.5z"
+                fill="currentColor"
+              />
+            </svg>
+            <span className="truncate">origin · {shortRemote}</span>
+            <span className="ml-auto font-mono shrink-0">
+              ↑{gitStatus?.ahead ?? 0} ↓{gitStatus?.behind ?? 0}
+            </span>
+          </div>
+        ) : (
+          gitStatus?.isRepo &&
+          onPublishToGitHub && (
+            <button
+              type="button"
+              onClick={onPublishToGitHub}
+              className="mt-auto flex items-center justify-center gap-2 px-2.5 py-2 rounded-[10px] border border-dashed border-border-dark text-[12px] text-muted hover:text-foreground hover:bg-subtle transition-colors"
+            >
+              Publish to GitHub…
+            </button>
+          )
+        )}
+      </aside>
 
       {restoreConfirmOpen && (
         <ConfirmDialog

@@ -51,6 +51,16 @@ export interface ProjectInspectorProps {
   onCreateWorktree?: () => Promise<void>;
   onCancelSchedule?: () => Promise<void>;
   onMergeWorktree?: () => Promise<void>;
+  lastBuild?: {
+    mainFile?: string | null;
+    durationMs?: number | null;
+    builtAt?: number | null;
+    status: "idle" | "compiling" | "success" | "error";
+    staleAgentEdits?: number;
+    errorCount?: number;
+    pageCount?: number | null;
+  };
+  fileVoiceByPath?: Record<string, AgentProviderId>;
   className?: string;
 }
 
@@ -92,6 +102,8 @@ export function ProjectInspector({
   onCreateWorktree,
   onCancelSchedule,
   onMergeWorktree,
+  lastBuild,
+  fileVoiceByPath,
   className = "",
 }: ProjectInspectorProps) {
   const [tab, setTab] = useState<InspectorTab>("project");
@@ -261,6 +273,69 @@ export function ProjectInspector({
         (tab === "pdf" && pdfPanel == null) ||
         (tab === "terminal" && terminalPanel == null)) && (
         <div className="flex-1 space-y-2 overflow-y-auto pr-0.5">
+          {lastBuild && (
+            <section className="ox-frame flex gap-3 p-3">
+              <div
+                aria-hidden="true"
+                className="flex h-[68px] w-[52px] shrink-0 flex-col gap-[3px] rounded-[2px] bg-background p-1.5 shadow-xs ring-1 ring-border"
+              >
+                <span className="h-[4px] w-[70%] bg-foreground/75" />
+                <span className="h-[2px] w-full bg-muted/40" />
+                <span className="h-[2px] w-full bg-muted/40" />
+                <span className="mt-0.5 h-[13px] w-full bg-gradient-to-r from-[var(--voice-claude-ink)]/60 via-subtle to-[var(--voice-codex-ink)]/60" />
+                <span className="h-[2px] w-full bg-muted/40" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12.5px] font-medium">Last build</span>
+                  {lastBuild.status === "success" && (
+                    <span className="ml-auto rounded-full border border-[var(--ok-line)] bg-success-bg px-1.5 text-[11px] text-success">
+                      ✓{" "}
+                      {lastBuild.builtAt
+                        ? new Date(lastBuild.builtAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "OK"}
+                    </span>
+                  )}
+                  {lastBuild.status === "error" && (
+                    <span className="ml-auto rounded-full border border-error/40 bg-error-bg px-1.5 text-[11px] text-error">
+                      {lastBuild.errorCount != null
+                        ? `${lastBuild.errorCount} ${lastBuild.errorCount === 1 ? "error" : "errors"}`
+                        : "Failed"}
+                    </span>
+                  )}
+                  {lastBuild.status === "compiling" && (
+                    <span className="ml-auto rounded-full border border-border bg-subtle px-1.5 text-[11px] text-muted">
+                      Compiling
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 truncate font-mono text-[11.5px] text-muted">
+                  {[
+                    lastBuild.mainFile || "main.tex",
+                    lastBuild.pageCount != null ? `${lastBuild.pageCount} pp` : null,
+                    lastBuild.durationMs != null ? `${lastBuild.durationMs} ms` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+                {lastBuild.staleAgentEdits != null && lastBuild.staleAgentEdits > 0 && (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-[var(--voice-claude-text)]">
+                    <span
+                      aria-hidden="true"
+                      className="h-[7px] w-[7px] shrink-0 rounded-full bg-[var(--voice-claude-ink)]"
+                    />
+                    <span>
+                      {lastBuild.staleAgentEdits} agent{" "}
+                      {lastBuild.staleAgentEdits === 1 ? "edit" : "edits"} since
+                    </span>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
           <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
             <div className="flex items-center gap-2">
               <span className="text-[12.5px] font-medium">Checkout</span>
@@ -394,56 +469,188 @@ export function ProjectInspector({
               </p>
             )}
           </section>
-
-          {gitStatus && (
-            <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
-              <div className="flex items-center">
-                <span className="text-[12.5px] font-medium">Working changes</span>
-                <span className="ml-auto font-mono text-[11px] text-[var(--muted-foreground)]">
-                  {gitStatus.changes.length}
-                </span>
+          {lastBuild && (
+            <section className="ox-frame flex gap-3 p-3">
+              <div
+                aria-hidden="true"
+                className="flex h-[68px] w-[52px] shrink-0 flex-col gap-[3px] rounded-[2px] bg-background p-1.5 shadow-xs ring-1 ring-border"
+              >
+                <span className="h-[4px] w-[70%] bg-foreground/75" />
+                <span className="h-[2px] w-full bg-muted/40" />
+                <span className="h-[2px] w-full bg-muted/40" />
+                <span className="mt-0.5 h-[13px] w-full bg-gradient-to-r from-[var(--voice-claude-ink)]/60 via-subtle to-[var(--voice-codex-ink)]/60" />
+                <span className="h-[2px] w-full bg-muted/40" />
               </div>
-              {gitStatus.changes.length > 0 && (
-                <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
-                  {gitStatus.changes.slice(0, 8).map((change) => (
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12.5px] font-medium">Last build</span>
+                  {lastBuild.status === "success" && (
+                    <span className="ml-auto rounded-full border border-[var(--ok-line)] bg-success-bg px-1.5 text-[11px] text-success">
+                      ✓{" "}
+                      {lastBuild.builtAt
+                        ? new Date(lastBuild.builtAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "OK"}
+                    </span>
+                  )}
+                  {lastBuild.status === "error" && (
+                    <span className="ml-auto rounded-full border border-error/40 bg-error-bg px-1.5 text-[11px] text-error">
+                      {lastBuild.errorCount != null
+                        ? `${lastBuild.errorCount} ${lastBuild.errorCount === 1 ? "error" : "errors"}`
+                        : "Failed"}
+                    </span>
+                  )}
+                  {lastBuild.status === "compiling" && (
+                    <span className="ml-auto rounded-full border border-border bg-subtle px-1.5 text-[11px] text-muted">
+                      Compiling
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 truncate font-mono text-[11.5px] text-muted">
+                  {[
+                    lastBuild.mainFile || "main.tex",
+                    lastBuild.pageCount != null ? `${lastBuild.pageCount} pp` : null,
+                    lastBuild.durationMs != null ? `${lastBuild.durationMs} ms` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+                {lastBuild.staleAgentEdits != null && lastBuild.staleAgentEdits > 0 && (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-[var(--voice-claude-text)]">
+                    <span
+                      aria-hidden="true"
+                      className="h-[7px] w-[7px] shrink-0 rounded-full bg-[var(--voice-claude-ink)]"
+                    />
+                    <span>
+                      {lastBuild.staleAgentEdits} agent{" "}
+                      {lastBuild.staleAgentEdits === 1 ? "edit" : "edits"} since
+                    </span>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+          <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
+            <div className="flex items-center">
+              <span className="text-[12.5px] font-medium">Working changes</span>
+              <span className="ml-auto font-mono text-[11px] text-[var(--muted-foreground)]">
+                {gitStatus?.changes.length ?? 0}
+              </span>
+            </div>
+            {gitStatus && gitStatus.changes.length > 0 && (
+              <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                {gitStatus.changes.slice(0, 8).map((change) => {
+                  const voiceProvider = fileVoiceByPath?.[change.path];
+                  return (
                     <div
                       key={change.path}
                       className="flex items-center gap-2 font-mono text-[11.5px] text-[var(--foreground-secondary)]"
                     >
+                      {voiceProvider && (
+                        <span
+                          aria-hidden="true"
+                          className="h-[7px] w-[7px] shrink-0 rounded-full"
+                          style={{ backgroundColor: getProviderMeta(voiceProvider).colorVar }}
+                        />
+                      )}
                       <span className="truncate">{change.path}</span>
                       <span className="ml-auto shrink-0 text-[10.5px] text-[var(--muted-foreground)]">
                         {change.status[0]?.toUpperCase()}
                       </span>
                     </div>
-                  ))}
-                </div>
-              )}
-              {(onReviewChanges || onCommitAndPr) && (
-                <div className="mt-2.5 flex gap-1.5">
-                  {onReviewChanges && (
-                    <button
-                      type="button"
-                      onClick={onReviewChanges}
-                      className="btn-secondary flex-1 rounded-lg py-1 text-[12px] font-medium"
-                    >
-                      Review
-                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {(onReviewChanges || onCommitAndPr) && (
+              <div className="mt-2.5 flex gap-1.5">
+                {onReviewChanges && (
+                  <button
+                    type="button"
+                    onClick={onReviewChanges}
+                    className="btn-secondary flex-1 rounded-lg py-1 text-[12px] font-medium"
+                  >
+                    Review
+                  </button>
+                )}
+                {onCommitAndPr && (
+                  <button
+                    type="button"
+                    onClick={() => void runCheckoutAction(onCommitAndPr)}
+                    disabled={!isWritable || checkoutPending}
+                    className="btn-secondary flex-1 rounded-lg py-1 text-[12px] font-medium disabled:opacity-40"
+                  >
+                    Commit &amp; PR
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+          {lastBuild && (
+            <section className="ox-frame flex gap-3 p-3">
+              <div
+                aria-hidden="true"
+                className="flex h-[68px] w-[52px] shrink-0 flex-col gap-[3px] rounded-[2px] bg-background p-1.5 shadow-xs ring-1 ring-border"
+              >
+                <span className="h-[4px] w-[70%] bg-foreground/75" />
+                <span className="h-[2px] w-full bg-muted/40" />
+                <span className="h-[2px] w-full bg-muted/40" />
+                <span className="mt-0.5 h-[13px] w-full bg-gradient-to-r from-[var(--voice-claude-ink)]/60 via-subtle to-[var(--voice-codex-ink)]/60" />
+                <span className="h-[2px] w-full bg-muted/40" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[12.5px] font-medium">Last build</span>
+                  {lastBuild.status === "success" && (
+                    <span className="ml-auto rounded-full border border-[var(--ok-line)] bg-success-bg px-1.5 text-[11px] text-success">
+                      ✓{" "}
+                      {lastBuild.builtAt
+                        ? new Date(lastBuild.builtAt).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "OK"}
+                    </span>
                   )}
-                  {onCommitAndPr && (
-                    <button
-                      type="button"
-                      onClick={() => void runCheckoutAction(onCommitAndPr)}
-                      disabled={!isWritable || checkoutPending}
-                      className="btn-secondary flex-1 rounded-lg py-1 text-[12px] font-medium disabled:opacity-40"
-                    >
-                      Commit &amp; PR
-                    </button>
+                  {lastBuild.status === "error" && (
+                    <span className="ml-auto rounded-full border border-error/40 bg-error-bg px-1.5 text-[11px] text-error">
+                      {lastBuild.errorCount != null
+                        ? `${lastBuild.errorCount} ${lastBuild.errorCount === 1 ? "error" : "errors"}`
+                        : "Failed"}
+                    </span>
+                  )}
+                  {lastBuild.status === "compiling" && (
+                    <span className="ml-auto rounded-full border border-border bg-subtle px-1.5 text-[11px] text-muted">
+                      Compiling
+                    </span>
                   )}
                 </div>
-              )}
+                <div className="mt-1 truncate font-mono text-[11.5px] text-muted">
+                  {[
+                    lastBuild.mainFile || "main.tex",
+                    lastBuild.pageCount != null ? `${lastBuild.pageCount} pp` : null,
+                    lastBuild.durationMs != null ? `${lastBuild.durationMs} ms` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+                {lastBuild.staleAgentEdits != null && lastBuild.staleAgentEdits > 0 && (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-[var(--voice-claude-text)]">
+                    <span
+                      aria-hidden="true"
+                      className="h-[7px] w-[7px] shrink-0 rounded-full bg-[var(--voice-claude-ink)]"
+                    />
+                    <span>
+                      {lastBuild.staleAgentEdits} agent{" "}
+                      {lastBuild.staleAgentEdits === 1 ? "edit" : "edits"} since
+                    </span>
+                  </div>
+                )}
+              </div>
             </section>
           )}
-
           <section className="rounded-xl border border-[var(--border)] bg-[var(--panel)] p-3">
             <div className="flex items-center">
               <span className="text-[12.5px] font-medium">Orchestration</span>
@@ -508,7 +715,7 @@ export function ProjectInspector({
             )}
 
             {(onDelegate || onSchedule) && (
-              <div className="mt-2.5 flex gap-1.5">
+              <div className="mt-2.5 flex flex-col gap-1.5">
                 {onDelegate && (
                   <button
                     type="button"
@@ -516,19 +723,9 @@ export function ProjectInspector({
                       setFormError(null);
                       setActiveForm((prev) => (prev === "delegate" ? "none" : "delegate"));
                     }}
-                    className="btn-secondary inline-flex flex-1 items-center justify-center gap-1 rounded-lg py-1 text-[12px] font-medium"
+                    className="w-full rounded-[7px] border border-dashed border-border-dark bg-transparent py-1 text-[12px] text-muted transition-colors hover:bg-subtle hover:text-foreground"
                   >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 16 16"
-                      className="h-3 w-3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                    >
-                      <path d="M2 8h11M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    Delegate
+                    Delegate a task…
                   </button>
                 )}
                 {onSchedule && (
@@ -538,20 +735,9 @@ export function ProjectInspector({
                       setFormError(null);
                       setActiveForm((prev) => (prev === "schedule" ? "none" : "schedule"));
                     }}
-                    className="btn-secondary inline-flex flex-1 items-center justify-center gap-1 rounded-lg py-1 text-[12px] font-medium"
+                    className="btn-secondary inline-flex w-full items-center justify-center gap-1 rounded-[7px] py-1 text-[11.5px] font-medium"
                   >
-                    <svg
-                      aria-hidden="true"
-                      viewBox="0 0 16 16"
-                      className="h-3 w-3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                    >
-                      <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
-                      <path d="M5 2v2.5M11 2v2.5M2.5 6.5h11" strokeLinecap="round" />
-                    </svg>
-                    Schedule
+                    Schedule…
                   </button>
                 )}
               </div>

@@ -14,7 +14,7 @@ import {
   ProjectInspector,
   type ScheduleThreadInput,
 } from "@/components/agent/project-inspector";
-import { UsageDashboard } from "@/components/agent/usage-dashboard";
+import { UsageDashboard, type UsageDashboardTopBarState } from "@/components/agent/usage-dashboard";
 import { flattenFileNodes } from "@/components/agent/utils";
 import { WorkspaceChanges } from "@/components/agent/workspace-changes";
 import {
@@ -375,6 +375,7 @@ export default function EditorPage() {
   const [resizing, setResizing] = useState<"sidebar" | "right" | "preview" | null>(null);
   const [workspaceView, setWorkspaceView] = useState<"write" | "agents" | "history">("write");
   const [showUsageDashboard, setShowUsageDashboard] = useState(false);
+  const [usageTopBarState, setUsageTopBarState] = useState<UsageDashboardTopBarState | null>(null);
   const [showHomeWorkspace, setShowHomeWorkspace] = useState(false);
   const [showThreadHistory, setShowThreadHistory] = useState(false);
   const [showCloneDialog, setShowCloneDialog] = useState(false);
@@ -3808,37 +3809,65 @@ export default function EditorPage() {
             <GearIcon className="size-4" />
           </button>
 
-          {daemon.projectPath && !isHomeVisible && !showUsageDashboard && (
-            <button
-              type="button"
-              onClick={() => {
-                if (!latexCompiler.pdfPath) {
-                  toast("Compile the document before exporting PDF", "info");
-                  return;
-                }
-                void (async () => {
-                  const { save } = await import("@tauri-apps/plugin-dialog");
-                  const dest = await save({
-                    title: "Export PDF",
-                    defaultPath: latexCompiler.pdfPath?.split("/").pop() ?? "document.pdf",
-                    filters: [{ name: "PDF", extensions: ["pdf"] }],
-                  });
-                  if (!dest || !latexCompiler.pdfPath) return;
-                  try {
-                    const bytes = await invoke<number[]>("read_file_bytes", {
-                      path: latexCompiler.pdfPath,
-                    });
-                    await invoke("write_file_bytes", { path: dest, bytes });
-                    toast("Exported PDF", "success");
-                  } catch {
-                    toast("Failed to export PDF", "error");
+          {showUsageDashboard && usageTopBarState ? (
+            <div className="flex items-center gap-2">
+              {usageTopBarState.refreshedAt && (
+                <button
+                  type="button"
+                  onClick={usageTopBarState.onRefresh}
+                  disabled={usageTopBarState.loading}
+                  className="text-[12px] text-muted hover:text-foreground tabular-nums transition-colors disabled:opacity-50"
+                  title="Click to refresh usage"
+                >
+                  {usageTopBarState.loading
+                    ? "Refreshing…"
+                    : `Refreshed ${usageTopBarState.refreshedAt}`}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={usageTopBarState.onExportCsv}
+                disabled={!usageTopBarState.canExport}
+                className="btn btn-secondary btn-sm disabled:opacity-50"
+              >
+                {usageTopBarState.exportStatus ?? "Export CSV"}
+              </button>
+            </div>
+          ) : (
+            daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!latexCompiler.pdfPath) {
+                    toast("Compile the document before exporting PDF", "info");
+                    return;
                   }
-                })();
-              }}
-              className="btn btn-secondary btn-sm"
-            >
-              Export
-            </button>
+                  void (async () => {
+                    const { save } = await import("@tauri-apps/plugin-dialog");
+                    const dest = await save({
+                      title: "Export PDF",
+                      defaultPath: latexCompiler.pdfPath?.split("/").pop() ?? "document.pdf",
+                      filters: [{ name: "PDF", extensions: ["pdf"] }],
+                    });
+                    if (!dest || !latexCompiler.pdfPath) return;
+                    try {
+                      const bytes = await invoke<number[]>("read_file_bytes", {
+                        path: latexCompiler.pdfPath,
+                      });
+                      await invoke("write_file_bytes", { path: dest, bytes });
+                      toast("Exported PDF", "success");
+                    } catch {
+                      toast("Failed to export PDF", "error");
+                    }
+                  })();
+                }}
+                className="btn btn-secondary btn-sm"
+              >
+                Export
+              </button>
+            )
           )}
         </div>
       </header>
@@ -3854,7 +3883,7 @@ export default function EditorPage() {
               threadTitles={Object.fromEntries(
                 orchestration.threads.map((thread) => [thread.id, thread.title]),
               )}
-              onClose={() => setShowUsageDashboard(false)}
+              onTopBarStateChange={setUsageTopBarState}
             />
           </div>
         ) : isHomeVisible ? (
@@ -4736,6 +4765,22 @@ export default function EditorPage() {
                 projectDir={
                   showThreadHistory && activeWorktreePath ? activeWorktreePath : daemon.projectPath
                 }
+                gitStatus={gitStatus}
+                stagedChanges={gitStatus?.changes.filter((c) => c.staged) ?? []}
+                unstagedChanges={gitStatus?.changes.filter((c) => !c.staged) ?? []}
+                commitMessage={commitMessage}
+                onCommitMessageChange={setCommitMessage}
+                onStageFile={handleStageFile}
+                onUnstageFile={handleUnstageFile}
+                onCommit={() => handleCommit()}
+                onCommitAndPush={async () => {
+                  await handleCommit();
+                  await handleGitPush();
+                }}
+                onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
+                isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
+                onPreviewGitFileDiff={(path) => void _handlePreviewGitDiff(path, false)}
+                onPublishToGitHub={() => setShowGitHubPublishDialog(true)}
                 onOpenThread={(id) => {
                   const thread = orchestration.threads.find((item) => item.id === id);
                   if (thread)

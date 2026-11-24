@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgentProviderId } from "@/lib/agent/types";
 import { ProviderIcon } from "./icons";
 import {
   type BranchPullRequest,
@@ -20,6 +21,7 @@ export interface OrchestrationSidebarProps {
   onOpenThread: (thread: OrchestrationThreadSummary) => void;
   onNewThread?: () => void;
   onOpenUsage?: () => void;
+  todayUsageByProvider?: Array<{ providerId: AgentProviderId; tokens: number }>;
   className?: string;
 }
 
@@ -31,7 +33,7 @@ function getStatusBadge(status: string): {
     case "running":
       return { label: "running", tone: "running" };
     case "waiting_input":
-      return { label: "needs you", tone: "warn" };
+      return { label: "Approve", tone: "warn" };
     case "error":
       return { label: "error", tone: "error" };
     default:
@@ -54,6 +56,7 @@ export function OrchestrationSidebar({
   onOpenThread,
   onNewThread,
   onOpenUsage,
+  todayUsageByProvider,
   className = "",
 }: OrchestrationSidebarProps) {
   const [query, setQuery] = useState("");
@@ -198,7 +201,7 @@ export function OrchestrationSidebar({
             </span>
             <span className="ml-auto shrink-0 text-[10.5px] font-medium">
               {status.tone === "warn" ? (
-                <span className="rounded-full border border-[var(--warn)] bg-[var(--warn-bg)] px-1.5 py-0.5 text-[var(--warn)]">
+                <span className="rounded-full border border-[var(--warn-line)] bg-warn-bg px-1.5 text-[10.5px] font-semibold leading-4 text-warn">
                   {status.label}
                 </span>
               ) : status.tone === "error" ? (
@@ -216,7 +219,9 @@ export function OrchestrationSidebar({
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
             <span className="inline-flex items-center gap-1">
-              <ProviderIcon providerId={thread.providerId} className="size-3 shrink-0" />
+              <span style={{ color: provider.colorVar }} className="inline-flex shrink-0">
+                <ProviderIcon providerId={thread.providerId} className="size-3 shrink-0" />
+              </span>
               {provider.label}
             </span>
             {thread.parentThreadId && <span>· delegated</span>}
@@ -298,19 +303,9 @@ export function OrchestrationSidebar({
           <button
             type="button"
             onClick={onNewThread}
-            className="btn-secondary inline-flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-[12px] font-medium"
+            className="inline-flex shrink-0 items-center gap-1 rounded-[8px] border-[1.5px] border-[var(--popover-border)] bg-panel px-2.5 py-1 text-[12.5px] font-semibold text-foreground-strong shadow-[2px_2px_0_var(--popover-border)] hover:bg-subtle"
           >
-            <svg
-              aria-hidden="true"
-              viewBox="0 0 16 16"
-              className="h-3.5 w-3.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-            >
-              <path d="M8 3v10M3 8h10" strokeLinecap="round" />
-            </svg>
-            New
+            + New
           </button>
         )}
       </div>
@@ -480,7 +475,7 @@ export function OrchestrationSidebar({
           <svg
             aria-hidden="true"
             viewBox="0 0 16 16"
-            className="h-3.5 w-3.5"
+            className="h-3.5 w-3.5 shrink-0"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.6"
@@ -488,6 +483,27 @@ export function OrchestrationSidebar({
             <path d="M3 13V8M7 13V4M11 13V7M15 13H1" strokeLinecap="round" />
           </svg>
           <span>Usage &amp; limits</span>
+          <span
+            aria-hidden="true"
+            className="ml-auto flex h-[4px] w-[70px] gap-0.5 overflow-hidden rounded-[2px]"
+          >
+            {todayUsageByProvider?.some((item) => item.tokens > 0) ? (
+              todayUsageByProvider
+                .filter((item) => item.tokens > 0)
+                .map((item) => (
+                  <span
+                    key={item.providerId}
+                    className="h-full rounded-[2px]"
+                    style={{
+                      flexGrow: item.tokens,
+                      backgroundColor: getProviderMeta(item.providerId).colorVar,
+                    }}
+                  />
+                ))
+            ) : (
+              <span className="h-full w-full rounded-[2px] bg-border" />
+            )}
+          </span>
         </button>
       )}
     </aside>
