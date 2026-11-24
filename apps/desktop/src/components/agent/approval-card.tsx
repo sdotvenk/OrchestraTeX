@@ -71,11 +71,6 @@ export function ApprovalCard({
       : null;
 
   const directory = cwd ?? (interaction.command ? sessionDirectory : null);
-  const title =
-    interaction.title === `Allow ${interaction.toolName}` ||
-    interaction.title === interaction.command
-      ? null
-      : interaction.title;
   const reason = interaction.reason?.trim();
   const showReason = reason && !/^this command requires approval\.?$/i.test(reason);
   const hasCustomOptions = interaction.options && interaction.options.length > 0;
@@ -90,9 +85,19 @@ export function ApprovalCard({
     : interaction.filePath
       ? "edit a file"
       : `use ${interaction.toolName}`;
+  const headerPhrase = `${providerLabel ?? "Agent"} wants to ${actionPhrase}`;
+  const rawTitle = interaction.title?.trim() ?? "";
+  const isDuplicateTitle =
+    !rawTitle ||
+    rawTitle === `Allow ${interaction.toolName}` ||
+    rawTitle === interaction.command ||
+    rawTitle.toLowerCase() === headerPhrase.toLowerCase() ||
+    rawTitle.toLowerCase() === `wants to ${actionPhrase}`.toLowerCase() ||
+    rawTitle.toLowerCase().includes(headerPhrase.toLowerCase());
+  const title = isDuplicateTitle ? null : rawTitle;
 
   return (
-    <div className="my-2 flex flex-col gap-2 rounded-[10px] border-[1.5px] border-[var(--decision-border)] bg-[var(--decision-bg)] p-3 shadow-[var(--decision-shadow)]">
+    <div className="@container my-2 flex flex-col gap-2 rounded-[10px] border-[1.5px] border-[var(--decision-border)] bg-[var(--decision-bg)] p-3 shadow-[var(--decision-shadow)]">
       <div className="flex items-center gap-2 min-w-0">
         <LockKey className="size-3.5 shrink-0 text-warn" weight="bold" aria-hidden="true" />
         <span className="text-[12.5px] font-semibold text-foreground-strong truncate">
@@ -127,41 +132,50 @@ export function ApprovalCard({
         </pre>
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+      <div className="flex items-center gap-1.5 pt-0.5 min-w-0">
         {hasCustomOptions ? (
-          interaction.options.map((opt) => {
-            const kind = opt.kind ?? "";
-            const isReject = kind.includes("reject");
-            const decision: "allow_once" | "allow_session" | "deny" = isReject
-              ? "deny"
-              : kind.includes("always")
-                ? "allow_session"
-                : "allow_once";
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                disabled={submitting}
-                onClick={() => void handleDecision(decision, opt.id)}
-                className={
-                  isReject
-                    ? "btn btn-outline btn-sm text-error border-error/40 hover:bg-error/10"
-                    : decision === "allow_once"
-                      ? "btn btn-solid btn-sm"
-                      : "btn btn-secondary btn-sm"
+          (() => {
+            let primaryUsed = false;
+            return interaction.options.map((opt) => {
+              let decision: "allow_once" | "allow_session" | "deny" = "allow_once";
+              for (const field of [opt.kind ?? "", opt.id, opt.label]) {
+                if (/reject|deny|cancel|decline/i.test(field)) {
+                  decision = "deny";
+                  break;
                 }
-              >
-                {opt.label}
-              </button>
-            );
-          })
+                if (/always|session|allow_always/i.test(field)) {
+                  decision = "allow_session";
+                  break;
+                }
+              }
+              const isPrimary = decision === "allow_once" && !primaryUsed;
+              if (isPrimary) primaryUsed = true;
+              const btnClass =
+                decision === "deny"
+                  ? "btn-ghost h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center text-foreground hover:bg-error-bg/40 disabled:opacity-50"
+                  : isPrimary
+                    ? "btn-primary h-[23px] rounded-[6px] px-2.5 text-[12px] font-semibold whitespace-nowrap shrink-0 inline-flex items-center justify-center disabled:opacity-50 disabled:shadow-none"
+                    : "h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center bg-panel border border-[var(--decision-border)] text-foreground-strong hover:bg-subtle disabled:opacity-50";
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void handleDecision(decision, opt.id)}
+                  className={btnClass}
+                >
+                  {opt.label}
+                </button>
+              );
+            });
+          })()
         ) : (
           <>
             <button
               type="button"
               disabled={submitting}
               onClick={() => void handleDecision("allow_once")}
-              className="rounded-[6px] bg-primary px-2.5 py-1 text-[12px] font-semibold text-primary-text hover:bg-primary-hover disabled:opacity-50"
+              className="btn-primary h-[23px] rounded-[6px] px-2.5 text-[12px] font-semibold whitespace-nowrap shrink-0 inline-flex items-center justify-center disabled:opacity-50 disabled:shadow-none"
             >
               Allow once
             </button>
@@ -169,7 +183,7 @@ export function ApprovalCard({
               type="button"
               disabled={submitting}
               onClick={() => void handleDecision("allow_session")}
-              className="rounded-[6px] border border-[var(--warn-line)] bg-transparent px-2.5 py-1 text-[12px] text-foreground hover:bg-panel/30 disabled:opacity-50"
+              className="h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center bg-panel border border-[var(--decision-border)] text-foreground-strong hover:bg-subtle disabled:opacity-50"
             >
               Always allow {interaction.toolName}
             </button>
@@ -177,13 +191,15 @@ export function ApprovalCard({
               type="button"
               disabled={submitting}
               onClick={() => void handleDecision("deny")}
-              className="rounded-[6px] bg-transparent px-2 py-1 text-[12px] text-foreground hover:bg-error-bg/40 disabled:opacity-50"
+              className="btn-ghost h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center text-foreground hover:bg-error-bg/40 disabled:opacity-50"
             >
               Deny
             </button>
           </>
         )}
-        <span className="ml-auto font-mono text-[11px] text-[var(--decision-muted)]">⌘Y · ⌘N</span>
+        <span className="ml-auto hidden @[300px]:inline font-mono text-[11px] text-[var(--decision-muted)] shrink-0 whitespace-nowrap">
+          ⌘Y · ⌘N
+        </span>
       </div>
     </div>
   );

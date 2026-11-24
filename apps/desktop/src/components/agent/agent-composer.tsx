@@ -4,6 +4,7 @@ import type { FileNode } from "@orchestratex/shared";
 import { ArrowUp, CaretDown, FileText, Plus, Stop, X } from "@phosphor-icons/react";
 import Image from "next/image";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { formatModelDisplayName } from "@/lib/agent/model-display";
 import type {
   AgentProviderId,
   AgentThread,
@@ -448,7 +449,7 @@ export function AgentComposer({
       attachments.length > 0 ||
       Boolean(contextChip) ||
       Boolean(selectedLineRange));
-  const modelLabel = selectedModelInfo?.name ?? currentModel ?? providerObj?.name ?? "Default";
+  const modelLabel = formatModelDisplayName(currentModel, models) || providerObj?.name || "Default";
   const runtimeLabel =
     RUNTIME_OPTIONS.find((r) => r.id === runtimeMode)?.label ?? "Auto-accept edits";
 
@@ -930,7 +931,7 @@ export function AgentComposer({
               aria-controls={settingsOpen ? menuId : undefined}
               aria-expanded={settingsOpen}
               onClick={() => setSettingsOpen((open) => !open)}
-              className={`h-7 px-2.5 rounded-[7px] bg-subtle inline-flex items-center gap-1.5 text-[12px] transition-colors min-w-0 ${
+              className={`h-7 px-2.5 rounded-[7px] bg-subtle inline-flex items-baseline gap-1.5 text-[12px] transition-colors min-w-0 ${
                 settingsOpen ? "ring-[1.5px] ring-foreground" : "hover:bg-sunken"
               }`}
               title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}${currentEffort ? ` · ${currentEffort}` : ""} · ${interactionMode === "plan" ? "Plan" : "Build"} · ${runtimeLabel}`}
@@ -938,22 +939,24 @@ export function AgentComposer({
             >
               <span
                 style={{ color: (VOICE_COLORS[currentProviderId] ?? VOICE_COLORS.claude).ink }}
-                className="inline-flex shrink-0"
+                className="inline-flex shrink-0 self-center"
               >
                 <ProviderIcon providerId={currentProviderId} className="size-3.5" />
               </span>
-              <span className="truncate font-medium text-foreground">{modelLabel}</span>
+              <span className="min-w-0 truncate max-w-[180px] font-medium text-foreground">
+                {modelLabel}
+              </span>
               {currentEffort && (
                 <>
                   <span className="text-muted shrink-0" aria-hidden="true">
                     ·
                   </span>
-                  <span className="truncate text-[11.5px] text-muted capitalize">
+                  <span className="shrink-0 whitespace-nowrap text-[11.5px] text-muted capitalize">
                     {currentEffort === "medium" ? "Med" : currentEffort}
                   </span>
                 </>
               )}
-              <CaretDown className="size-2.5 opacity-75 shrink-0" aria-hidden="true" />
+              <CaretDown className="size-2.5 opacity-75 shrink-0 self-center" aria-hidden="true" />
             </button>
 
             <input
@@ -1000,7 +1003,7 @@ export function AgentComposer({
                   type="button"
                   disabled={!canSend}
                   onClick={() => void handleSubmit(providerObj?.supportsSteer ? "steer" : "queue")}
-                  className="size-[30px] rounded-[8px] btn-primary inline-flex items-center justify-center disabled:opacity-40"
+                  className="size-[30px] rounded-[8px] btn-primary inline-flex items-center justify-center disabled:opacity-40 disabled:shadow-none"
                   title={providerObj?.supportsSteer ? "Steer active turn" : "Queue for next turn"}
                   aria-label={providerObj?.supportsSteer ? "Steer active turn" : "Queue message"}
                 >
@@ -1012,7 +1015,7 @@ export function AgentComposer({
                 type="button"
                 disabled={!canSend}
                 onClick={() => void handleSubmit("auto")}
-                className="h-[30px] px-3 rounded-[8px] text-[12.5px] font-semibold btn-primary inline-flex items-center justify-center disabled:opacity-40 shrink-0"
+                className="h-[30px] px-3 rounded-[8px] text-[12.5px] font-semibold btn-primary inline-flex items-center justify-center disabled:opacity-40 disabled:shadow-none shrink-0"
                 title="Send message (Enter)"
               >
                 Send
@@ -1022,7 +1025,7 @@ export function AgentComposer({
                 type="button"
                 disabled={!canSend}
                 onClick={() => void handleSubmit("auto")}
-                className="size-[30px] rounded-[8px] btn-primary inline-flex items-center justify-center disabled:opacity-40 shrink-0"
+                className="size-[30px] rounded-[8px] btn-primary inline-flex items-center justify-center disabled:opacity-40 disabled:shadow-none shrink-0"
                 title="Send message (Enter)"
                 aria-label="Send message"
               >

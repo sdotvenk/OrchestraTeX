@@ -40,7 +40,33 @@ const PROVIDER_LABELS: Record<string, { author: CheckpointAuthorKind; label: str
   codex: { author: "codex", label: "Codex" },
   openai: { author: "codex", label: "Codex" },
   antigravity: { author: "antigravity", label: "Antigravity" },
+  custom: { author: "custom", label: "Custom ACP" },
+  "custom-acp": { author: "custom", label: "Custom ACP" },
+  user: { author: "you", label: "You" },
+  you: { author: "you", label: "You" },
 };
+
+function extractHarnessPrefix(rawTitle: string): {
+  author?: CheckpointAuthorKind;
+  authorLabel?: string;
+  title: string;
+} {
+  const match =
+    /^\[(claude|claude-code|codex|openai|antigravity|custom|custom-acp|user|you)\]\s*(.*)$/i.exec(
+      rawTitle.trim(),
+    );
+  if (!match) {
+    return { title: rawTitle.trim() };
+  }
+  const key = (match[1] ?? "").toLowerCase();
+  const mapped = PROVIDER_LABELS[key];
+  const stripped = (match[2] ?? "").trim();
+  return {
+    author: mapped?.author,
+    authorLabel: mapped?.label,
+    title: stripped || rawTitle.trim(),
+  };
+}
 
 export function parseCheckpointMessage(id: string, rawMessage: string): ParsedCheckpointMessage {
   const trimmed = rawMessage.trim();
@@ -52,20 +78,21 @@ export function parseCheckpointMessage(id: string, rawMessage: string): ParsedCh
         if (record.type === "agentTurn") {
           const providerId = typeof record.providerId === "string" ? record.providerId : undefined;
           const normalizedProvider = providerId?.toLowerCase() ?? "";
-          const mapped = PROVIDER_LABELS[normalizedProvider] ?? {
-            author: providerId ? "custom" : "you",
-            label: providerId || "Agent",
-          };
-          const title =
+          const rawTitle =
             typeof record.title === "string" && record.title.trim().length > 0
               ? record.title.trim()
               : id;
+          const prefixed = extractHarnessPrefix(rawTitle);
+          const mapped = PROVIDER_LABELS[normalizedProvider] ?? {
+            author: prefixed.author ?? (providerId ? "custom" : "you"),
+            label: prefixed.authorLabel ?? (providerId || "Agent"),
+          };
           const threadId = typeof record.threadId === "string" ? record.threadId : undefined;
           const phase = typeof record.phase === "string" ? record.phase : undefined;
 
           return {
             kind: "agentTurn",
-            title,
+            title: prefixed.title,
             author: mapped.author,
             authorLabel: mapped.label,
             providerId,
@@ -75,11 +102,12 @@ export function parseCheckpointMessage(id: string, rawMessage: string): ParsedCh
         }
         if (typeof record.title === "string" && record.title.trim().length > 0) {
           const isSafety = record.type === "safety" || id.startsWith("safety-");
+          const prefixed = extractHarnessPrefix(record.title.trim());
           return {
             kind: isSafety ? "safety" : "manual",
-            title: record.title.trim(),
-            author: "you",
-            authorLabel: isSafety ? "Safety" : "You",
+            title: prefixed.title,
+            author: prefixed.author ?? "you",
+            authorLabel: isSafety ? "Safety" : (prefixed.authorLabel ?? "You"),
           };
         }
       }
@@ -88,20 +116,21 @@ export function parseCheckpointMessage(id: string, rawMessage: string): ParsedCh
     }
   }
 
+  const prefixed = extractHarnessPrefix(trimmed);
   if (id.startsWith("safety-") || trimmed.toLowerCase().includes("safety checkpoint")) {
     return {
       kind: "safety",
-      title: trimmed || id,
-      author: "you",
+      title: prefixed.title || id,
+      author: prefixed.author ?? "you",
       authorLabel: "Safety",
     };
   }
 
   return {
-    kind: "manual",
-    title: trimmed || id,
-    author: "you",
-    authorLabel: "You",
+    kind: prefixed.author && prefixed.author !== "you" ? "agentTurn" : "manual",
+    title: prefixed.title || id,
+    author: prefixed.author ?? "you",
+    authorLabel: prefixed.authorLabel ?? "You",
   };
 }
 
@@ -117,7 +146,15 @@ export function formatCheckpointTime(isoString: string): string {
     date.getDate() === now.getDate();
 
   if (sameDay) {
-    return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+  const diffMs = now.getTime() - date.getTime();
+  if (diffMs > 0 && diffMs < 6 * 86_400_000) {
+    return date.toLocaleDateString(undefined, { weekday: "short" });
   }
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }

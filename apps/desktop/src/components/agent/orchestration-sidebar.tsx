@@ -25,7 +25,10 @@ export interface OrchestrationSidebarProps {
   className?: string;
 }
 
-function getStatusBadge(status: string): {
+function getStatusBadge(
+  status: string,
+  messageCount = 0,
+): {
   label: string;
   tone: "running" | "warn" | "error" | "idle";
 } {
@@ -37,7 +40,7 @@ function getStatusBadge(status: string): {
     case "error":
       return { label: "error", tone: "error" };
     default:
-      return { label: "idle", tone: "idle" };
+      return { label: messageCount > 0 ? "done" : "idle", tone: "idle" };
   }
 }
 
@@ -160,7 +163,7 @@ export function OrchestrationSidebar({
   const renderThreadRow = (thread: OrchestrationThreadSummary, isChild = false) => {
     const isActive = thread.id === activeThreadId;
     const provider = getProviderMeta(thread.providerId);
-    const status = getStatusBadge(thread.status);
+    const status = getStatusBadge(thread.status, thread.messageCount);
     const pr =
       prByThreadId?.[thread.id] ??
       (thread.workspaceBranch ? prByBranch?.[thread.workspaceBranch] : undefined);
@@ -199,13 +202,13 @@ export function OrchestrationSidebar({
             <span className="truncate text-[12.5px] font-medium text-[var(--foreground)]">
               {thread.title || "Untitled thread"}
             </span>
-            <span className="ml-auto shrink-0 text-[10.5px] font-medium">
+            <span className="ml-auto shrink-0 whitespace-nowrap text-[10.5px] font-medium">
               {status.tone === "warn" ? (
-                <span className="rounded-full border border-[var(--warn-line)] bg-warn-bg px-1.5 text-[10.5px] font-semibold leading-4 text-warn">
+                <span className="rounded-full border border-[var(--warn-line)] bg-warn-bg px-1.5 text-[10.5px] font-semibold leading-4 text-warn whitespace-nowrap">
                   {status.label}
                 </span>
               ) : status.tone === "error" ? (
-                <span className="rounded-full border border-[var(--danger)] bg-[var(--danger-bg)] px-1.5 py-0.5 text-[var(--danger)]">
+                <span className="rounded-full border border-[var(--danger)] bg-[var(--danger-bg)] px-1.5 py-0.5 text-[var(--danger)] whitespace-nowrap">
                   {status.label}
                 </span>
               ) : status.tone === "running" ? (
@@ -217,21 +220,23 @@ export function OrchestrationSidebar({
               )}
             </span>
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--muted-foreground)]">
-            <span className="inline-flex items-center gap-1">
+          <div className="mt-0.5 flex items-center gap-1.5 min-w-0 text-[11px] text-[var(--muted-foreground)]">
+            <span className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap">
               <span style={{ color: provider.colorVar }} className="inline-flex shrink-0">
                 <ProviderIcon providerId={thread.providerId} className="size-3 shrink-0" />
               </span>
               {provider.label}
             </span>
-            {thread.parentThreadId && <span>· delegated</span>}
+            {thread.parentThreadId && (
+              <span className="shrink-0 whitespace-nowrap">· delegated</span>
+            )}
             {thread.workspaceBranch && (
-              <span className="rounded border border-[var(--border)] px-1 font-mono text-[10px] text-[var(--foreground-secondary)]">
+              <span className="max-w-[120px] truncate rounded border border-[var(--border)] px-1 font-mono text-[10px] text-[var(--foreground-secondary)]">
                 {thread.workspaceBranch}
               </span>
             )}
             {pr && (
-              <span className="font-mono text-[10px] text-[var(--ok)]">
+              <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-[var(--ok)]">
                 PR #{pr.number}
                 {pr.isDraft ? " (draft)" : ""}
               </span>
@@ -245,10 +250,10 @@ export function OrchestrationSidebar({
   return (
     <aside
       aria-label="Orchestration threads"
-      className={`flex h-full w-full max-w-[284px] flex-col gap-1.5 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
+      className={`flex h-full w-[284px] shrink-0 flex-col gap-1.5 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
     >
       <div className="flex items-center gap-1.5">
-        <div className="relative flex flex-1 items-center rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1">
+        <div className="relative flex flex-1 min-w-0 items-center rounded-lg border border-[var(--border)] bg-[var(--panel)] px-2 py-1">
           <svg
             aria-hidden="true"
             viewBox="0 0 16 16"
@@ -273,7 +278,7 @@ export function OrchestrationSidebar({
             }}
             placeholder="Search threads"
             aria-label="Search threads"
-            className="w-full bg-transparent text-[12.5px] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none"
+            className="w-full min-w-0 overflow-hidden text-ellipsis bg-transparent text-[12.5px] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none"
           />
           {query ? (
             <button

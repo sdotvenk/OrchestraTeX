@@ -1,5 +1,10 @@
 import type { AgentProviderId, ThreadSummary } from "@/lib/agent/types";
 
+export {
+  formatModelDisplayName,
+  formatProviderDisplayName,
+} from "@/lib/agent/model-display";
+
 export interface OrchestrationThreadSchedule {
   runAt: number;
   prompt: string;

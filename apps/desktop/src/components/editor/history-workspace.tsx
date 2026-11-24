@@ -1,9 +1,8 @@
 "use client";
 
-import type { GitStatus } from "@orchestratex/shared";
+import type { GitLogEntry, GitStatus } from "@orchestratex/shared";
 import {
   ArrowCounterClockwiseIcon,
-  GitCommitIcon,
   PlusIcon,
   ShieldCheckIcon,
   TagIcon,
@@ -71,6 +70,9 @@ export type HistoryWorkspaceProps = {
   projectDir: string;
   gitSidebarPanel?: ReactNode;
   commitDiffPanel?: ReactNode;
+  gitLogEntries?: GitLogEntry[];
+  selectedCommitHash?: string | null;
+  onSelectCommit?: (entry: GitLogEntry) => void;
   beforeMutation?: () => void;
   onFilesChanged?: () => void;
   onOpenThread?: (threadId: string) => void;
@@ -125,14 +127,18 @@ function HunkDiffView({
   mode,
   canRevert,
   reverting,
+  providerLabel,
   onRevert,
+  onAskToRedo,
 }: {
   hunk: DiffHunk;
   hunkIndex: number;
   mode: DiffMode;
   canRevert: boolean;
   reverting: boolean;
+  providerLabel?: string;
   onRevert: () => void;
+  onAskToRedo?: () => void;
 }) {
   return (
     <div className="py-1">
@@ -142,7 +148,7 @@ function HunkDiffView({
       </div>
 
       {mode === "inline" ? (
-        <div className="font-mono text-[12px] leading-5 overflow-x-auto">
+        <div className="font-mono text-[12px] leading-5">
           {hunk.lines.map((line) => {
             const rowBg =
               line.type === "add"
@@ -156,26 +162,26 @@ function HunkDiffView({
             return (
               <div
                 key={`${hunk.id}-inline-${line.type}-${line.oldLineNumber ?? "n"}-${line.newLineNumber ?? "n"}`}
-                className={`flex h-5 leading-5 whitespace-pre ${rowBg}`}
+                className={`flex min-h-5 leading-5 whitespace-pre-wrap break-words ${rowBg}`}
               >
                 <span className="w-[40px] shrink-0 pr-3 text-right select-none opacity-75">
                   {lineNum ?? ""}
                 </span>
                 <span className="w-4 shrink-0 select-none">{prefix}</span>
-                <span className="flex-1 pr-4">{line.content}</span>
+                <span className="flex-1 min-w-0 pr-4">{line.content}</span>
               </div>
             );
           })}
         </div>
       ) : (
-        <div className="grid grid-cols-2 divide-x divide-border font-mono text-[12px] leading-5 overflow-x-auto">
-          <div>
+        <div className="grid grid-cols-2 divide-x divide-border font-mono text-[12px] leading-5">
+          <div className="min-w-0">
             {hunk.lines
               .filter((l) => l.type !== "add")
               .map((line) => (
                 <div
                   key={`${hunk.id}-old-${line.type}-${line.oldLineNumber ?? "n"}`}
-                  className={`flex h-5 leading-5 whitespace-pre ${
+                  className={`flex min-h-5 leading-5 whitespace-pre-wrap break-words ${
                     line.type === "del"
                       ? "bg-[var(--diff-del-bg)] text-[var(--diff-del-text)]"
                       : "text-foreground-secondary"
@@ -184,17 +190,17 @@ function HunkDiffView({
                   <span className="w-[40px] shrink-0 pr-3 text-right select-none opacity-75">
                     {line.oldLineNumber ?? ""}
                   </span>
-                  <span className="flex-1 pr-2">{line.content}</span>
+                  <span className="flex-1 min-w-0 pr-2">{line.content}</span>
                 </div>
               ))}
           </div>
-          <div>
+          <div className="min-w-0">
             {hunk.lines
               .filter((l) => l.type !== "del")
               .map((line) => (
                 <div
                   key={`${hunk.id}-new-${line.type}-${line.newLineNumber ?? "n"}`}
-                  className={`flex h-5 leading-5 whitespace-pre ${
+                  className={`flex min-h-5 leading-5 whitespace-pre-wrap break-words ${
                     line.type === "add"
                       ? "bg-[var(--diff-add-bg)] text-[var(--diff-add-text)]"
                       : "text-foreground-secondary"
@@ -203,26 +209,37 @@ function HunkDiffView({
                   <span className="w-[40px] shrink-0 pr-3 text-right select-none opacity-75">
                     {line.newLineNumber ?? ""}
                   </span>
-                  <span className="flex-1 pr-2">{line.content}</span>
+                  <span className="flex-1 min-w-0 pr-2">{line.content}</span>
                 </div>
               ))}
           </div>
         </div>
       )}
 
-      {canRevert && (
+      {(canRevert || onAskToRedo) && (
         <div className="mx-[18px] mt-3 mb-2">
           <div className="h-px bg-border/70" />
-          <div className="mt-2.5 flex justify-center">
-            <button
-              type="button"
-              disabled={reverting}
-              onClick={onRevert}
-              className="btn btn-secondary btn-sm inline-flex items-center gap-1 disabled:opacity-50"
-            >
-              <ArrowCounterClockwiseIcon className="w-3 h-3" aria-hidden="true" />
-              <span>{reverting ? "Reverting…" : `Revert hunk ${hunkIndex + 1}`}</span>
-            </button>
+          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-2">
+            {canRevert && (
+              <button
+                type="button"
+                disabled={reverting}
+                onClick={onRevert}
+                className="btn btn-secondary btn-sm inline-flex items-center gap-1 disabled:opacity-50"
+              >
+                <ArrowCounterClockwiseIcon className="w-3 h-3" aria-hidden="true" />
+                <span>{reverting ? "Reverting…" : `Revert hunk ${hunkIndex + 1}`}</span>
+              </button>
+            )}
+            {onAskToRedo && (
+              <button
+                type="button"
+                onClick={onAskToRedo}
+                className="btn btn-secondary btn-sm inline-flex items-center gap-1"
+              >
+                <span>Ask {providerLabel || "Agent"} to redo…</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -232,8 +249,11 @@ function HunkDiffView({
 
 export function HistoryWorkspace({
   projectDir,
-  gitSidebarPanel,
+  gitSidebarPanel: _gitSidebarPanel,
   commitDiffPanel,
+  gitLogEntries = [],
+  selectedCommitHash,
+  onSelectCommit,
   beforeMutation,
   onFilesChanged,
   onOpenThread,
@@ -538,13 +558,20 @@ export function HistoryWorkspace({
     [buildFinalCommitMessage, stagedChanges.length, onCommit, onCommitAndPush],
   );
 
+  const [localSelectedCommitHash, setLocalSelectedCommitHash] = useState<string | null>(null);
+  const activeCommitHash = selectedCommitHash ?? localSelectedCommitHash;
+
   const totalGitChanges = stagedChanges.length + unstagedChanges.length;
-  const shortRemote = gitStatus?.remote
-    ? gitStatus.remote
+  const rawRemote = gitStatus?.remote?.trim() ?? "";
+  const isRemoteUrl =
+    rawRemote.includes("://") || rawRemote.includes("@") || rawRemote.includes("/");
+  const shortRemote = isRemoteUrl
+    ? rawRemote
         .replace(/^https?:\/\//, "")
         .replace(/^git@([^:]+):/, "$1/")
         .replace(/\.git$/, "")
-    : null;
+    : rawRemote;
+  const remoteDisplay = !shortRemote ? null : isRemoteUrl ? `origin · ${shortRemote}` : shortRemote;
 
   return (
     <div className={`flex h-full min-h-0 gap-2 bg-bg p-2 text-foreground ${className}`}>
@@ -554,22 +581,20 @@ export function HistoryWorkspace({
         className="w-[300px] shrink-0 flex flex-col gap-1.5 min-h-0"
       >
         <div className="flex bg-sunken rounded-[9px] p-[3px] gap-0.5 text-[12.5px]">
-          {(["timeline", "commits", "labels"] as const)
-            .filter((tab) => tab !== "commits" || gitSidebarPanel != null)
-            .map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setSidebarTab(tab)}
-                className={`flex-1 py-1 rounded-[7px] capitalize transition-colors ${
-                  sidebarTab === tab
-                    ? "bg-panel text-foreground font-medium shadow-xs ring-1 ring-border"
-                    : "text-muted hover:text-foreground"
-                }`}
-              >
-                {tab}
-              </button>
-            ))}
+          {(["timeline", "commits", "labels"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setSidebarTab(tab)}
+              className={`flex-1 py-1 rounded-[7px] capitalize transition-colors ${
+                sidebarTab === tab
+                  ? "bg-panel text-foreground font-medium shadow-xs ring-1 ring-border"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
 
         {sidebarTab === "timeline" && (
@@ -632,7 +657,7 @@ export function HistoryWorkspace({
                             : "bg-transparent hover:bg-subtle"
                         }`}
                       >
-                        <span className="text-[11px] font-mono text-muted whitespace-nowrap shrink-0 pt-0.5 tabular-nums">
+                        <span className="w-[38px] shrink-0 whitespace-nowrap text-[11px] font-mono text-muted pt-0.5 tabular-nums">
                           {formatCheckpointTime(checkpoint.createdAt)}
                         </span>
                         {parsed.kind === "safety" ? (
@@ -665,14 +690,49 @@ export function HistoryWorkspace({
         )}
 
         {sidebarTab === "commits" && (
-          <div className="flex-1 min-h-0 flex flex-col ox-frame overflow-hidden">
-            {gitSidebarPanel ?? (
-              <div className="p-4 text-xs text-muted flex items-center gap-2">
-                <GitCommitIcon className="w-4 h-4" aria-hidden="true" />
-                <span>Git commit panel not connected.</span>
+          <ScrollArea className="flex-1 min-h-0">
+            {gitLogEntries.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-muted">No commits yet.</div>
+            ) : (
+              <div className="space-y-0.5 pr-1">
+                <div className="ox-sec px-2.5 py-1.5">Committed</div>
+                {gitLogEntries.map((entry) => {
+                  const isSelected = entry.hash === activeCommitHash;
+                  return (
+                    <button
+                      key={entry.hash}
+                      type="button"
+                      onClick={() => {
+                        setLocalSelectedCommitHash(entry.hash);
+                        onSelectCommit?.(entry);
+                      }}
+                      className={`w-full text-left px-2.5 py-2 rounded-[8px] transition-colors flex items-start gap-2.5 ${
+                        isSelected
+                          ? "bg-panel ring-1 ring-border shadow-xs"
+                          : "bg-transparent hover:bg-subtle"
+                      }`}
+                    >
+                      <span className="w-[38px] shrink-0 whitespace-nowrap text-[11px] font-mono text-muted pt-0.5 tabular-nums">
+                        {formatCheckpointTime(entry.date)}
+                      </span>
+                      <span
+                        className="w-[7px] h-[7px] rounded-full shrink-0 mt-1.5 bg-foreground"
+                        aria-hidden="true"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12.5px] font-medium text-foreground truncate">
+                          {entry.message}
+                        </div>
+                        <div className="text-[11.5px] font-mono text-muted truncate mt-0.5">
+                          {entry.shortHash} · {entry.author}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
-          </div>
+          </ScrollArea>
         )}
 
         {sidebarTab === "labels" && (
@@ -864,7 +924,10 @@ export function HistoryWorkspace({
                   </div>
                 )}
                 <span className="ml-auto shrink-0 text-muted">
-                  {activeParsedFile ? `${activeParsedFile.hunks.length} hunks` : "0 hunks"}
+                  {(() => {
+                    const count = activeParsedFile ? activeParsedFile.hunks.length : 0;
+                    return `${count} ${count === 1 ? "hunk" : "hunks"}`;
+                  })()}
                 </span>
               </div>
 
@@ -879,7 +942,13 @@ export function HistoryWorkspace({
                         mode={diffMode}
                         canRevert={diffResult.toId === null}
                         reverting={revertingHunkId === hunk.id}
+                        providerLabel={selectedEntry?.parsed.authorLabel}
                         onRevert={() => void handleRevertHunk(hunk)}
+                        onAskToRedo={
+                          selectedEntry?.parsed.threadId && onOpenThread
+                            ? () => onOpenThread(selectedEntry.parsed.threadId ?? "")
+                            : undefined
+                        }
                       />
                     ))
                   ) : (
@@ -1087,7 +1156,7 @@ export function HistoryWorkspace({
         </form>
 
         {/* Bottom Dashed Remote Strip */}
-        {shortRemote ? (
+        {remoteDisplay ? (
           <div className="mt-auto flex items-center gap-2 px-2.5 py-2 rounded-[10px] border border-dashed border-border-dark text-[12px] text-muted">
             <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" className="shrink-0">
               <path
@@ -1095,13 +1164,12 @@ export function HistoryWorkspace({
                 fill="currentColor"
               />
             </svg>
-            <span className="truncate">origin · {shortRemote}</span>
+            <span className="truncate">{remoteDisplay}</span>
             <span className="ml-auto font-mono shrink-0">
               ↑{gitStatus?.ahead ?? 0} ↓{gitStatus?.behind ?? 0}
             </span>
           </div>
         ) : (
-          gitStatus?.isRepo &&
           onPublishToGitHub && (
             <button
               type="button"

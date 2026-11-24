@@ -78,6 +78,14 @@ const REPEAT_OPTIONS: { label: string; ms: number | null }[] = [
   { label: "Weekly", ms: 604_800_000 },
 ];
 
+function formatInspectorError(raw: string): string {
+  const firstLine = raw.split(/\r?\n/)[0]?.trim() ?? raw.trim();
+  if (/^(TypeError|ReferenceError|SyntaxError):/i.test(firstLine)) {
+    return "Orchestration action could not be completed. Please try again.";
+  }
+  return firstLine.length > 140 ? `${firstLine.slice(0, 137)}…` : firstLine;
+}
+
 export function ProjectInspector({
   projectPath,
   workspacePath,
@@ -224,7 +232,7 @@ export function ProjectInspector({
   return (
     <aside
       aria-label="Project inspector"
-      className={`flex h-full w-full max-w-[320px] flex-col gap-2 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
+      className={`flex h-full w-[308px] shrink-0 flex-col gap-2 bg-[var(--bg)] p-2 text-[var(--foreground)] ${className}`}
     >
       <div
         role="tablist"
@@ -374,7 +382,9 @@ export function ProjectInspector({
                   })
                 }
               >
-                <span className="font-mono text-[var(--ok)]">PR #{branchPr.number}</span>
+                <span className="shrink-0 whitespace-nowrap font-mono text-[var(--ok)]">
+                  PR #{branchPr.number}
+                </span>
                 <span className="truncate text-[var(--foreground-secondary)]">
                   {branchPr.title}
                 </span>
@@ -439,12 +449,12 @@ export function ProjectInspector({
               </div>
             )}
             {(onReviewChanges || onCommitAndPr) && (
-              <div className="mt-2.5 flex gap-1.5">
+              <div className="mt-2.5 grid grid-cols-2 gap-1.5">
                 {onReviewChanges && (
                   <button
                     type="button"
                     onClick={onReviewChanges}
-                    className="btn-secondary flex-1 rounded-lg py-1 text-[12px] font-medium"
+                    className="btn btn-secondary btn-sm whitespace-nowrap"
                   >
                     Review
                   </button>
@@ -454,9 +464,9 @@ export function ProjectInspector({
                     type="button"
                     onClick={() => void runCheckoutAction(onCommitAndPr)}
                     disabled={!isWritable || checkoutPending}
-                    className="btn-secondary flex-1 rounded-lg py-1 text-[12px] font-medium disabled:opacity-40"
+                    className="btn btn-secondary btn-sm whitespace-nowrap disabled:opacity-40"
                   >
-                    Commit &amp; PR
+                    Commit &amp; PR…
                   </button>
                 )}
               </div>
@@ -580,8 +590,8 @@ export function ProjectInspector({
                       style={{ backgroundColor: getProviderMeta(child.providerId).colorVar }}
                     />
                     <span className="truncate">{child.title}</span>
-                    <span className="ml-auto text-[10.5px] text-[var(--muted-foreground)]">
-                      {child.status}
+                    <span className="ml-auto shrink-0 whitespace-nowrap text-[10.5px] text-[var(--muted-foreground)]">
+                      {child.status === "idle" && child.messageCount > 0 ? "done" : child.status}
                     </span>
                   </button>
                 ))}
@@ -628,7 +638,7 @@ export function ProjectInspector({
             )}
             {error && (
               <p role="alert" className="mt-2 text-xs text-error">
-                {error}
+                {formatInspectorError(error)}
               </p>
             )}
 

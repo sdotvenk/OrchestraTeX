@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { CaretDown } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatModelDisplayName } from "@/lib/agent/model-display";
 import type { AgentProviderId, ProviderStatus } from "@/lib/agent/types";
 import {
   buildUsageCsv,
@@ -41,10 +43,17 @@ const DATE_PRESETS: { id: UsageDatePreset; label: string }[] = [
   { id: "30d", label: "30 days" },
 ];
 
-function formatNullableTokens(value: number | null | undefined): string {
+function formatCompactTokens(value: number | null | undefined): string {
+  return formatTokenCount(value).replace(/K$/, "k");
+}
+
+function formatNullableTokens(
+  value: number | null | undefined,
+  treatZeroAsUnreported = false,
+): string {
   if (value === null || value === undefined) return "—";
-  if (value === 0) return "0";
-  return formatTokenCount(value);
+  if (value === 0) return treatZeroAsUnreported ? "—" : "0";
+  return formatCompactTokens(value);
 }
 
 function formatRatioPercent(value: number | null | undefined): string {
@@ -66,6 +75,26 @@ export function UsageDashboard({
   const [error, setError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!projectMenuOpen) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (!projectMenuRef.current?.contains(e.target as Node)) {
+        setProjectMenuOpen(false);
+      }
+    };
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setProjectMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    window.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleOutside);
+      window.removeEventListener("keydown", handleEsc);
+    };
+  }, [projectMenuOpen]);
 
   const projectOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -237,19 +266,74 @@ export function UsageDashboard({
             })}
           </fieldset>
 
-          <select
-            aria-label="Project scope"
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-            className="rounded-[8px] border border-border-dark bg-panel px-2.5 py-1 text-[12.5px] text-foreground"
-          >
-            <option value="__all__">All projects</option>
-            {projectOptions.map((proj) => (
-              <option key={proj.path} value={proj.path}>
-                {proj.name}
-              </option>
-            ))}
-          </select>
+          <div ref={projectMenuRef} className="relative">
+            <button
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={projectMenuOpen}
+              aria-label="Project scope"
+              onClick={() => setProjectMenuOpen((open) => !open)}
+              className="btn btn-secondary btn-sm whitespace-nowrap inline-flex items-center gap-1.5"
+            >
+              <span className="max-w-[180px] truncate">
+                {selectedProject === "__all__"
+                  ? "All projects"
+                  : (projectOptions.find((p) => p.path === selectedProject)?.name ??
+                    selectedProject)}
+              </span>
+              <CaretDown className="size-3 opacity-75 shrink-0" aria-hidden="true" />
+            </button>
+            {projectMenuOpen && (
+              <div
+                role="listbox"
+                aria-label="Project scope options"
+                className="ox-popover absolute right-0 top-full mt-1.5 z-30 min-w-[200px] max-h-60 overflow-y-auto p-1"
+              >
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selectedProject === "__all__"}
+                  onClick={() => {
+                    setSelectedProject("__all__");
+                    setProjectMenuOpen(false);
+                  }}
+                  className={`w-full px-2.5 py-1.5 rounded-[6px] text-left text-[12px] flex items-center justify-between gap-2 transition-colors ${
+                    selectedProject === "__all__"
+                      ? "bg-subtle text-foreground-strong font-medium"
+                      : "text-foreground hover:bg-subtle"
+                  }`}
+                >
+                  <span>All projects</span>
+                  {selectedProject === "__all__" && (
+                    <span className="font-mono text-[11px]">✓</span>
+                  )}
+                </button>
+                {projectOptions.map((proj) => {
+                  const selected = selectedProject === proj.path;
+                  return (
+                    <button
+                      key={proj.path}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      onClick={() => {
+                        setSelectedProject(proj.path);
+                        setProjectMenuOpen(false);
+                      }}
+                      className={`w-full px-2.5 py-1.5 rounded-[6px] text-left text-[12px] flex items-center justify-between gap-2 transition-colors ${
+                        selected
+                          ? "bg-subtle text-foreground-strong font-medium"
+                          : "text-foreground hover:bg-subtle"
+                      }`}
+                    >
+                      <span className="truncate">{proj.name}</span>
+                      {selected && <span className="font-mono text-[11px]">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -285,7 +369,7 @@ export function UsageDashboard({
                 <span className="ml-auto text-[11.5px] font-normal text-muted truncate">
                   {provider?.account?.planType ??
                     provider?.rateLimits?.planType ??
-                    (isInstalled ? (provider?.transport ?? "ACP") : "not configured")}
+                    (isInstalled ? (provider?.transport ?? "ACP") : null)}
                 </span>
               </div>
 
@@ -363,7 +447,17 @@ export function UsageDashboard({
             </span>
           </div>
 
-          <table className="w-full border-collapse text-right">
+          <table className="w-full table-fixed border-collapse text-right">
+            <colgroup>
+              <col className="w-[26%]" />
+              <col className="w-[10%]" />
+              <col className="w-[12%]" />
+              <col className="w-[12%]" />
+              <col className="w-[10%]" />
+              <col className="w-[11%]" />
+              <col className="w-[10%]" />
+              <col className="w-[9%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-border text-[11px] font-semibold text-muted">
                 <th className="text-left pb-2 pr-2 font-semibold">Harness / model</th>
@@ -398,7 +492,7 @@ export function UsageDashboard({
                     {formatNullableTokens(result.total.cacheReadTokens)}
                   </td>
                   <td className="py-2 px-2">
-                    {formatNullableTokens(result.total.cacheWriteTokens)}
+                    {formatNullableTokens(result.total.cacheWriteTokens, true)}
                   </td>
                   <td className="py-2 px-2">{formatNullableTokens(result.total.outputTokens)}</td>
                   <td className="py-2 px-2">{formatRatioPercent(result.total.cacheShare)}</td>
@@ -423,7 +517,7 @@ export function UsageDashboard({
             <div className="flex items-center justify-between mb-3">
               <span className="text-[13px] font-semibold">Input tokens per day</span>
               <span className="text-[11.5px] font-mono text-muted tabular-nums">
-                Total {formatTokenCount(dailyBuckets.totalInput)}
+                Total {formatCompactTokens(dailyBuckets.totalInput)}
               </span>
             </div>
 
@@ -436,7 +530,7 @@ export function UsageDashboard({
                 <div
                   className="flex h-[132px] items-end justify-center gap-3 border-b border-border-dark px-1"
                   role="img"
-                  aria-label={`Daily input tokens across ${dailyBuckets.days.length} days, totaling ${formatTokenCount(dailyBuckets.totalInput)}`}
+                  aria-label={`Daily input tokens across ${dailyBuckets.days.length} days, totaling ${formatCompactTokens(dailyBuckets.totalInput)}`}
                 >
                   {dailyBuckets.days.map((day) => {
                     const max = dailyBuckets.maxTotal || 1;
@@ -445,7 +539,7 @@ export function UsageDashboard({
                       <div
                         key={day.date}
                         className="flex h-full min-w-[6px] flex-1 flex-col items-center justify-end gap-0.5"
-                        title={`${day.date}: ${formatTokenCount(day.dayTotal)}`}
+                        title={`${day.date}: ${formatCompactTokens(day.dayTotal)}`}
                       >
                         {nonZeroRows.map((r, idx) => {
                           const tokens = r.inputTokens ?? 0;
@@ -568,7 +662,7 @@ function ProviderGroupRows({
           {formatNullableTokens(group.summary.cacheReadTokens)}
         </td>
         <td className="py-1.5 px-2 font-mono font-normal">
-          {formatNullableTokens(group.summary.cacheWriteTokens)}
+          {formatNullableTokens(group.summary.cacheWriteTokens, true)}
         </td>
         <td className="py-1.5 px-2 font-mono font-normal">
           {formatNullableTokens(group.summary.outputTokens)}
@@ -586,12 +680,14 @@ function ProviderGroupRows({
           key={`${group.provider}-${row.model ?? "unknown"}`}
           className="border-b border-[var(--line)]"
         >
-          <td className="py-1.5 pr-2 pl-6 text-left font-sans text-[12px] text-[var(--text)]">
-            {row.model ?? "Unspecified model"}
+          <td className="py-1.5 pr-2 pl-6 text-left font-sans text-[12px] text-[var(--text)] truncate">
+            {formatModelDisplayName(row.model) || "Unspecified model"}
           </td>
           <td className="py-1.5 px-2">{formatNullableTokens(row.summary.inputTokens)}</td>
           <td className="py-1.5 px-2">{formatNullableTokens(row.summary.cacheReadTokens)}</td>
-          <td className="py-1.5 px-2">{formatNullableTokens(row.summary.cacheWriteTokens)}</td>
+          <td className="py-1.5 px-2">
+            {formatNullableTokens(row.summary.cacheWriteTokens, true)}
+          </td>
           <td className="py-1.5 px-2">{formatNullableTokens(row.summary.outputTokens)}</td>
           <td className="py-1.5 px-2">{formatRatioPercent(row.summary.cacheShare)}</td>
           <td className="py-1.5 px-2 text-[var(--muted)]">

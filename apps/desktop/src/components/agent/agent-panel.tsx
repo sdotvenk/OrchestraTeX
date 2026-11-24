@@ -11,6 +11,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatModelDisplayName, formatProviderDisplayName } from "@/lib/agent/model-display";
 import type {
   AgentProviderId,
   AgentSettings,
@@ -22,11 +23,12 @@ import type { useAgent } from "@/lib/agent/use-agent";
 import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { AgentComposer, type AgentDraftInjection } from "./agent-composer";
 import { MessageTimeline } from "./message-timeline";
+import { formatShortPath } from "./orchestration-types";
 import { ProviderOnboarding } from "./provider-onboarding";
 import { TasksDisplay } from "./tasks-display";
 import { ThreadList } from "./thread-list";
 import { UsagePopover } from "./usage-popover";
-import { flattenFileNodes } from "./utils";
+import { flattenFileNodes, formatTokenCount } from "./utils";
 
 type UseAgentReturn = ReturnType<typeof useAgent>;
 
@@ -197,16 +199,11 @@ export function AgentPanel({
     [agent.threads],
   );
   const activeVoice = VOICE_COLORS[currentProviderId] ?? VOICE_COLORS.claude;
-  const providerDisplayName =
-    currentProviderId === "claude"
-      ? "Claude"
-      : currentProviderId === "codex"
-        ? "Codex"
-        : currentProviderId === "antigravity"
-          ? "Antigravity"
-          : "Custom ACP";
+  const providerDisplayName = formatProviderDisplayName(currentProviderId);
   const currentModelId =
     activeThread?.summary.model ?? activeProvider?.models?.[0]?.id ?? "default";
+  const currentModelLabel =
+    formatModelDisplayName(currentModelId, activeProvider?.models) || "Default";
   const currentEffort = activeThread?.summary.reasoningEffort ?? null;
   const currentRuntime = activeThread?.summary.runtimeMode ?? agentSettings.defaultRuntimeMode;
   const runtimeLabel =
@@ -215,16 +212,28 @@ export function AgentPanel({
       : currentRuntime === "auto-accept-edits"
         ? "Auto-accept edits"
         : "Ask before commands";
-  const shortProjectPath = projectPath
-    ? projectPath.replace(/^\/Users\/[^/]+/, "~")
-    : "~/workspace";
+  const shortProjectPath = projectPath ? formatShortPath(projectPath) : "~/workspace";
+  const contextUsedTokens = activeThread?.usage?.contextUsedTokens ?? 0;
+  const compactLabel =
+    contextUsedTokens > 0
+      ? `${formatTokenCount(contextUsedTokens).toLowerCase()} → ~${formatTokenCount(Math.round(contextUsedTokens * 0.25)).toLowerCase()}`
+      : undefined;
+  const hasContextPercent = Boolean(
+    activeThread?.usage?.contextWindowTokens && activeThread.usage.contextWindowTokens > 0,
+  );
 
   return (
     <div className="h-full w-full flex flex-col bg-panel min-w-0">
       {mode === "docked" && !threePane ? (
         <>
           <div className="h-9 bg-[var(--tab-strip-bg)] border-b border-border flex items-center shrink-0 min-w-0">
-            <div className="flex items-center min-w-0 flex-1 overflow-x-auto">
+            <div
+              className="flex items-center min-w-0 flex-1 overflow-x-auto pr-2"
+              style={{
+                maskImage: "linear-gradient(to right, black calc(100% - 8px), transparent)",
+                WebkitMaskImage: "linear-gradient(to right, black calc(100% - 8px), transparent)",
+              }}
+            >
               {onSwitchToPdf && (
                 <button
                   type="button"
@@ -278,14 +287,18 @@ export function AgentPanel({
               </div>
             )}
           </div>
-          <div className="px-4 py-1.5 border-b border-border/70 flex items-center gap-2 text-[12px] text-muted shrink-0">
-            <span className="font-medium text-foreground">{providerDisplayName}</span>
-            <span className="font-mono truncate">
-              {currentEffort ? `${currentModelId} · ${currentEffort}` : currentModelId}
+          <div className="px-4 py-1.5 border-b border-border/70 flex items-center gap-2 text-[12px] text-muted shrink-0 min-w-0">
+            <span className="font-medium text-foreground shrink-0 whitespace-nowrap">
+              {providerDisplayName}
             </span>
-            <span aria-hidden="true">·</span>
-            <span className="truncate">{runtimeLabel}</span>
-            <span className="ml-auto font-mono truncate">{shortProjectPath}</span>
+            <span className="font-mono shrink-0 whitespace-nowrap">
+              {currentEffort ? `${currentModelLabel} · ${currentEffort}` : currentModelLabel}
+            </span>
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
+            <span className="shrink-0 whitespace-nowrap">{runtimeLabel}</span>
+            <span className="ml-auto font-mono min-w-0 truncate">{shortProjectPath}</span>
           </div>
         </>
       ) : mode === "docked" && threePane ? (
@@ -511,6 +524,7 @@ export function AgentPanel({
             onChangeRuntimeMode={handleChangeRuntimeMode}
             onOpenWorkspace={onOpenWorkspace}
             workspaceLabel={activeThread?.summary.workspaceBranch ?? "Local"}
+            compactLabel={compactLabel}
             onCompactContext={
               activeThread && activeProvider?.supportsCompact
                 ? () => agent.compactThread(activeThread.summary.id)
@@ -524,6 +538,7 @@ export function AgentPanel({
                 usage={activeThread?.usage}
                 threadStatus={activeThread?.summary.status}
                 compactRing={true}
+                showPercent={hasContextPercent}
                 onRefreshLimits={async () => {
                   if (activeProvider) {
                     await agent.refreshRateLimits(activeProvider.id);

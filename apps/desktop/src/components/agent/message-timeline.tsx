@@ -3,6 +3,7 @@
 import { ArrowDown, CaretDown, CaretRight, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 import Image from "next/image";
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { formatModelDisplayName, formatProviderDisplayName } from "@/lib/agent/model-display";
 import type { AgentMessage, AgentPart, AgentThread, InteractionResponse } from "@/lib/agent/types";
 import { ApprovalCard } from "./approval-card";
 import { ProviderIcon } from "./icons";
@@ -304,7 +305,9 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           {message.providerId && (
             <ProviderIcon providerId={message.providerId} className="size-3 opacity-80" />
           )}
-          <span>{message.model || message.providerId || "Assistant"}</span>
+          <span>
+            {formatModelDisplayName(message.model) || formatProviderDisplayName(message.providerId)}
+          </span>
           <span>·</span>
           <span>{formatRelativeTime(message.createdAt)}</span>
         </div>
