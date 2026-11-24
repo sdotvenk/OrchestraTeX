@@ -388,12 +388,14 @@ export function AgentComposer({
         }
 
         await onSendMessage(composedContent, currentAtts);
-      } catch {
-        setText(savedText);
-        setAttachments(savedAttachments);
-        setContextChip(savedContextChip);
-        setIncludeBuildLog(savedIncludeBuildLog);
-        requestAnimationFrame(() => adjustTextareaHeight());
+      } catch (err) {
+        if (err instanceof Error && err.name === "ThreadModeUpdateError") {
+          setText((curr) => curr || savedText);
+          setAttachments((curr) => (curr.length > 0 ? curr : savedAttachments));
+          setContextChip((curr) => curr ?? savedContextChip);
+          setIncludeBuildLog((curr) => curr || savedIncludeBuildLog);
+          requestAnimationFrame(() => adjustTextareaHeight());
+        }
       }
     },
     [
