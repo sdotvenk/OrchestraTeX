@@ -1,6 +1,6 @@
 use super::util::command;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -391,9 +391,15 @@ fn extract_input_line_number(line: &str) -> u32 {
     0
 }
 
-fn try_parse_file_line_error(line: &str) -> Option<LatexDiagnostic> {
-    let trimmed = line.trim();
-    let trimmed = trimmed.strip_prefix("error: ").unwrap_or(trimmed);
+fn try_parse_file_line_diagnostic(line: &str) -> Option<LatexDiagnostic> {
+    let line = line.trim();
+    let (trimmed, severity, has_engine_prefix) = match line.strip_prefix("error: ") {
+        Some(rest) => (rest, "error", true),
+        None => match line.strip_prefix("warning: ") {
+            Some(rest) => (rest, "warning", true),
+            None => (line, "error", false),
+        },
+    };
     // Format: `<file>:<line>: <message>`
     // Ignore warning prefixes or compiler banners that happen to contain colons
     if trimmed.starts_with("LaTeX ")
@@ -428,7 +434,7 @@ fn try_parse_file_line_error(line: &str) -> Option<LatexDiagnostic> {
             || lower.ends_with(".bib")
             || file_part.contains('/')
             || file_part.contains('\\');
-        if !looks_like_file {
+        if file_part.is_empty() || (!looks_like_file && !has_engine_prefix) {
             continue;
         }
         let line_num = digits.parse::<u32>().ok()?;
@@ -444,7 +450,7 @@ fn try_parse_file_line_error(line: &str) -> Option<LatexDiagnostic> {
             file: clean_file,
             line: line_num,
             message: msg,
-            severity: "error".to_string(),
+            severity: severity.to_string(),
         });
     }
 
@@ -468,11 +474,22 @@ pub fn parse_latex_diagnostics(
 
     let lines: Vec<&str> = log_and_output.lines().collect();
     // Tectonic repeats TeX log errors with a more precise source path on stderr.
-    let tectonic_errors: HashSet<(u32, String)> = lines
+    let tectonic_diagnostics: Vec<LatexDiagnostic> = lines
         .iter()
-        .filter(|line| line.trim_start().starts_with("error: "))
-        .filter_map(|line| try_parse_file_line_error(line))
-        .map(|diag| (diag.line, tex_error_text(&diag.message).to_owned()))
+        .filter(|line| {
+            let line = line.trim_start();
+            line.starts_with("error: ") || line.starts_with("warning: ")
+        })
+        .filter_map(|line| try_parse_file_line_diagnostic(line))
+        .collect();
+    let tectonic_errors: HashSet<_> = tectonic_diagnostics
+        .iter()
+        .filter(|diag| diag.severity == "error")
+        .map(|diag| (diag.line, tex_error_text(&diag.message)))
+        .collect();
+    let tectonic_sources: HashSet<_> = tectonic_diagnostics
+        .iter()
+        .map(|diag| diag.file.as_str())
         .collect();
     let mut current_file = default_file.to_string();
 
@@ -507,14 +524,20 @@ pub fn parse_latex_diagnostics(
                 .chars()
                 .take_while(|c| !c.is_whitespace() && *c != ')' && *c != '(')
                 .collect();
-            if token.ends_with(".tex") || token.ends_with(".sty") || token.ends_with(".cls") {
+            let extensionless_input = Path::new(&token).extension().is_none()
+                && (token.contains('/') || tectonic_sources.contains(token.as_str()));
+            if token.ends_with(".tex")
+                || token.ends_with(".sty")
+                || token.ends_with(".cls")
+                || extensionless_input
+            {
                 current_file = token.strip_prefix("./").unwrap_or(&token).to_string();
             }
             search_from = abs_pos + 1;
         }
 
         // 1. -file-line-error format (`./main.tex:42: Undefined control sequence.`)
-        if let Some(diag) = try_parse_file_line_error(trimmed) {
+        if let Some(diag) = try_parse_file_line_diagnostic(trimmed) {
             current_file = diag.file.clone();
             push_diag(diag);
             continue;
@@ -533,7 +556,7 @@ pub fn parse_latex_diagnostics(
                     }
                 }
             }
-            if tectonic_errors.contains(&(err_line, tex_error_text(err_msg).to_owned())) {
+            if tectonic_errors.contains(&(err_line, tex_error_text(err_msg))) {
                 continue;
             }
             push_diag(LatexDiagnostic {
@@ -588,6 +611,48 @@ pub fn parse_latex_diagnostics(
     (errors, warnings)
 }
 
+async fn project_diagnostic_paths<'a>(
+    diagnostics: impl Iterator<Item = &'a mut LatexDiagnostic>,
+    project: &Path,
+    work_dir: &Path,
+) {
+    let Ok(project) = tokio::fs::canonicalize(project).await else {
+        return;
+    };
+
+    let mut paths = HashMap::<String, Option<String>>::new();
+    for diagnostic in diagnostics {
+        let resolved = if let Some(cached) = paths.get(&diagnostic.file) {
+            cached.clone()
+        } else {
+            let source = work_dir.join(&diagnostic.file);
+            let mut with_extension = source.as_os_str().to_os_string();
+            with_extension.push(".tex");
+
+            let mut resolved = None;
+            for candidate in [source, PathBuf::from(with_extension)] {
+                let Ok(path) = tokio::fs::canonicalize(candidate).await else {
+                    continue;
+                };
+                if let Ok(relative) = path.strip_prefix(&project) {
+                    if tokio::fs::metadata(&path)
+                        .await
+                        .is_ok_and(|stat| stat.is_file())
+                    {
+                        resolved = Some(relative.to_string_lossy().replace('\\', "/"));
+                        break;
+                    }
+                }
+            }
+            paths.insert(diagnostic.file.clone(), resolved.clone());
+            resolved
+        };
+        if let Some(relative) = resolved {
+            diagnostic.file = relative;
+        }
+    }
+}
+
 fn validate_relative_main_file(main_file: &str) -> Result<(), String> {
     let rel = Path::new(main_file);
     for comp in rel.components() {
@@ -623,7 +688,7 @@ async fn stream_compile_output(
                 || line.starts_with("! ")
                 || line.contains("Error")
                 || line.starts_with("error:")
-                || try_parse_file_line_error(&line).is_some());
+                || try_parse_file_line_diagnostic(&line).is_some());
         {
             let mut guard = collected_lines.lock().await;
             if guard.len() < 4000 {
@@ -856,7 +921,13 @@ pub async fn latex_compile(
         }
     }
 
-    let (errors, warnings) = parse_latex_diagnostics(&combined_log, &file_name);
+    let (mut errors, mut warnings) = parse_latex_diagnostics(&combined_log, &file_name);
+    project_diagnostic_paths(
+        errors.iter_mut().chain(&mut warnings),
+        Path::new(&directory),
+        &work_dir,
+    )
+    .await;
     let pdf_exists = tokio::fs::try_exists(&pdf_path_buf).await.unwrap_or(false);
     let success = exit_code == Some(0) && pdf_exists;
 
@@ -2328,6 +2399,34 @@ Overfull \\hbox (12.0pt too wide) in paragraph at lines 70--75
         assert_eq!(warnings.len(), 2);
         assert_eq!(warnings[0].line, 55);
         assert_eq!(warnings[1].line, 70);
+    }
+
+    #[tokio::test]
+    async fn resolves_tectonic_diagnostics_for_extensionless_inputs() {
+        let scratch = tempfile::tempdir().unwrap();
+        let project = scratch.path();
+        let work_dir = project.join("paper");
+        std::fs::create_dir_all(work_dir.join("sections")).unwrap();
+        std::fs::write(work_dir.join("sections/experiment.tex"), "").unwrap();
+        std::fs::write(work_dir.join("appendix with spaces.tex"), "").unwrap();
+
+        let log = r#"(article.cls)
+ (sections/experiment
+LaTeX Warning: Citation undefined on input line 5.
+! Undefined control sequence.
+l.6 unknown
+error: sections/experiment:6: Undefined control sequence
+warning: appendix with spaces:4: Overfull line
+"#;
+        let (mut errors, mut warnings) = parse_latex_diagnostics(log, "main.tex");
+        project_diagnostic_paths(errors.iter_mut().chain(&mut warnings), project, &work_dir).await;
+
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].file, "paper/sections/experiment.tex");
+        assert_eq!(errors[0].line, 6);
+        assert_eq!(warnings.len(), 2);
+        assert_eq!(warnings[0].file, "paper/sections/experiment.tex");
+        assert_eq!(warnings[1].file, "paper/appendix with spaces.tex");
     }
 
     #[test]
