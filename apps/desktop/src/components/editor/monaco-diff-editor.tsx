@@ -4,6 +4,7 @@ import { DiffEditor, type DiffOnMount, type Monaco } from "@monaco-editor/react"
 import type { editor } from "monaco-editor";
 import { useTheme } from "next-themes";
 import { memo, useCallback, useEffect, useRef } from "react";
+import { isNocturneAppearance } from "@/lib/editor/appearance";
 import { resolveMonoFontFamily } from "@/lib/editor/font-stacks";
 import type { EditorSettings } from "@/lib/editor/types";
 
@@ -141,7 +142,7 @@ export const MonacoDiffEditor = memo(function MonacoDiffEditor({
   const isDisposingRef = useRef(false);
   const { resolvedTheme } = useTheme();
 
-  const diffTheme = resolvedTheme === "dark" ? "diff-dark" : "diff-light";
+  const diffTheme = isNocturneAppearance(resolvedTheme) ? "diff-dark" : "diff-light";
   const detectedLanguage = language || (filePath ? getLanguageFromPath(filePath) : "plaintext");
 
   const handleBeforeMount = useCallback((monaco: Monaco) => {

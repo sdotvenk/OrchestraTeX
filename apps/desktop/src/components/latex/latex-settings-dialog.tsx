@@ -9,7 +9,6 @@ import {
 } from "@phosphor-icons/react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
-import { useTheme } from "next-themes";
 import { useCallback, useEffect, useId, useState } from "react";
 import { ProviderIcon } from "@/components/agent/icons";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -34,8 +33,6 @@ import {
   DEFAULT_EDITOR_SETTINGS,
   type EditorSettings,
   type MinimapSettings,
-  UI_PALETTES,
-  type UiPalette,
 } from "@/lib/editor/types";
 import {
   COMPILER_DISPLAY_NAMES,
@@ -144,87 +141,6 @@ function SelectField({
   );
 }
 
-function AppearanceToggle({
-  palette,
-  onChangePalette,
-}: {
-  palette: UiPalette;
-  onChangePalette: (next: UiPalette) => void;
-}) {
-  const { theme, setTheme } = useTheme();
-
-  return (
-    <div className="py-2 space-y-4">
-      <div>
-        <span className="text-[13px] font-medium block mb-2 text-foreground-strong">
-          Color mode
-        </span>
-        <div className="inline-flex w-full p-0.5 rounded-lg bg-sunken gap-0.5">
-          {(
-            [
-              { value: "light", label: "Light" },
-              { value: "dark", label: "Dark" },
-              { value: "system", label: "System" },
-            ] as const
-          ).map((mode) => (
-            <button
-              type="button"
-              key={mode.value}
-              onClick={() => setTheme(mode.value)}
-              className={`flex-1 h-8 px-3 rounded-md text-[12.5px] font-medium transition-all ${
-                theme === mode.value
-                  ? "bg-panel text-foreground-strong shadow-xs"
-                  : "text-muted hover:text-foreground"
-              }`}
-            >
-              {mode.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <span className="text-[13px] font-medium block mb-2 text-foreground-strong">
-          Theme palette
-        </span>
-        <div className="grid grid-cols-2 gap-2">
-          {UI_PALETTES.map((item) => {
-            const active = palette === item.id;
-            return (
-              <button
-                type="button"
-                key={item.id}
-                onClick={() => onChangePalette(item.id)}
-                className={`p-2.5 rounded-xl border text-left transition-all ${
-                  active
-                    ? "border-accent bg-accent-soft/60"
-                    : "border-border bg-panel hover:border-border-dark hover:bg-subtle/60"
-                }`}
-              >
-                <div className="flex items-center gap-1.5 mb-2">
-                  {item.swatches.map((hex) => (
-                    <span
-                      key={hex}
-                      className="size-3.5 rounded-full border border-black/15"
-                      style={{ backgroundColor: hex }}
-                    />
-                  ))}
-                </div>
-                <div className="text-[12.5px] font-semibold text-foreground-strong">
-                  {item.label}
-                </div>
-                <div className="text-[11px] text-muted leading-snug mt-0.5 line-clamp-2">
-                  {item.description}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function LaTeXSettingsDialog({
   open,
   onClose,
@@ -314,14 +230,6 @@ export function LaTeXSettingsDialog({
 
             {/* ===== EDITOR TAB ===== */}
             <Tabs.Content value="editor" className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
-              <SectionHeader>Appearance</SectionHeader>
-
-              {/* Light/Dark & Palette Switcher */}
-              <AppearanceToggle
-                palette={editorSettings.uiPalette}
-                onChangePalette={(uiPalette) => onUpdateEditorSettings({ uiPalette })}
-              />
-
               <SectionHeader>Keybindings</SectionHeader>
 
               <div className="flex items-center justify-between py-2">

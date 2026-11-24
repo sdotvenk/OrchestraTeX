@@ -5,7 +5,6 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion, type PanInfo, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDraftInjection } from "@/components/agent/agent-composer";
 import { AgentStatusCard } from "@/components/agent/agent-status-card";
@@ -57,6 +56,7 @@ import {
   type TabItem,
   type TabReorderPosition,
 } from "@/components/ui/tab-bar";
+import { ThemePicker } from "@/components/ui/theme-picker";
 import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
 import { type AttributedEdit, projectRelativePath } from "@/lib/agent/edit-attribution";
@@ -67,7 +67,6 @@ import { useOrchestration } from "@/lib/agent/use-orchestration";
 import { useScore } from "@/lib/agent/use-score";
 import { useEditorSettings } from "@/lib/editor";
 import { mayHaveNewContents } from "@/lib/editor/file-change";
-import { UI_PALETTES } from "@/lib/editor/types";
 import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import {
   type BibEntry,
@@ -107,14 +106,11 @@ import {
   GearIcon,
   GitBranchIcon,
   MagnifyingGlassIcon,
-  MoonIcon,
   PlayIcon,
   RobotIcon,
   SidebarSimpleIcon,
   SpinnerGapIcon,
   StopIcon,
-  SunIcon,
-  SwatchesIcon,
   TerminalIcon,
 } from "@phosphor-icons/react";
 
@@ -530,7 +526,7 @@ export default function EditorPage() {
   const waitingThreads = projectThreads.filter(
     (thread) => thread.status === "waiting_input",
   ).length;
-  const { resolvedTheme, setTheme } = useTheme();
+  const [showThemePicker, setShowThemePicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [agentExpanded, setAgentExpanded] = useState(false);
   const [agentDraftInjection, setAgentDraftInjection] = useState<AgentDraftInjection | null>(null);
@@ -3314,18 +3310,6 @@ export default function EditorPage() {
     [daemon.files, daemon.projectPath],
   );
 
-  const handleCyclePalette = useCallback(() => {
-    const idx = UI_PALETTES.findIndex((p) => p.id === editorSettings.settings.uiPalette);
-    const next = UI_PALETTES[(idx + 1) % UI_PALETTES.length];
-    if (next) {
-      editorSettings.updateSettings({ uiPalette: next.id });
-      toast(`Theme: ${next.label}`, "info");
-    }
-  }, [editorSettings, toast]);
-
-  const activePaletteMeta =
-    UI_PALETTES.find((p) => p.id === editorSettings.settings.uiPalette) ?? UI_PALETTES[0];
-
   const effectiveRightPanelWidth = agentExpanded ? Math.max(rightPanelWidth, 520) : rightPanelWidth;
   const isWorkspaceVisible = !showHomeWorkspace && !showUsageDashboard;
   const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
@@ -3647,29 +3631,7 @@ export default function EditorPage() {
             </fieldset>
           )}
 
-          <button
-            type="button"
-            onClick={handleCyclePalette}
-            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-            title={`Switch palette (${activePaletteMeta?.label ?? "Atelier"})`}
-            aria-label="Switch color palette"
-          >
-            <SwatchesIcon className="size-4" />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-            title="Toggle Light / Dark mode"
-            aria-label="Toggle Light or Dark mode"
-          >
-            {resolvedTheme === "dark" ? (
-              <SunIcon className="size-4" />
-            ) : (
-              <MoonIcon className="size-4" />
-            )}
-          </button>
+          <ThemePicker open={showThemePicker} onOpenChange={setShowThemePicker} />
 
           <button
             type="button"
@@ -4656,7 +4618,7 @@ export default function EditorPage() {
           setSettingsInitialTab("editor");
           setShowLatexSettings(true);
         }}
-        onCyclePalette={handleCyclePalette}
+        onOpenThemePicker={() => setShowThemePicker(true)}
       />
 
       {showCloneDialog && (

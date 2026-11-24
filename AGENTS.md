@@ -113,13 +113,12 @@ pnpm format                                 # Biome formatter write
 
 Calm, tactile, research-first desktop aesthetic (inspired by Silkscreen, adapted for space-efficient LaTeX editing). Warm paper chrome (`--bg`), crisp white rounded inset frames (`ox-frame`, `12px` radius), hairline borders, sentence-case UI typography (`IBM Plex Sans`), and monospace (`IBM Plex Mono`) reserved strictly for LaTeX source, identifiers, file paths, and tabular metrics.
 
-Three switchable palettes share the same semantic CSS token contract in `apps/desktop/src/app/globals.css` (Light + Dark):
+Lux and Nocturne share the semantic CSS tokens in `apps/desktop/src/app/globals.css`. The top-bar picker defaults to Auto, which follows the system appearance.
 
-| Palette | `--bg` (Light) | `--accent` | `--primary-bg` |
+| Theme | `--bg` | `--accent` | `--primary-bg` |
 | --- | --- | --- | --- |
-| **Atelier** (default) | `#f6f5f0` | `#2c4f7c` | `#d14e2a` |
-| **Conductor** | `#f3f5f8` | `#3652b8` | `#c48b28` |
-| **Monograph** | `#f7f4f0` | `#6e3450` | `#256b60` |
+| **Lux** | `#ece7dc` | `#435670` | `#1b1f33` |
+| **Nocturne** | `#14161f` | `#a3b3ca` | `#f2ede2` |
 
 **Button & Control Style**:
 
@@ -241,7 +240,7 @@ Linux:   apps/desktop/src-tauri/target/release/bundle/appimage/OrchestraTeX_*.Ap
 | Pattern                       | Why                                 |
 | ----------------------------- | ----------------------------------- |
 | `as any`, `@ts-ignore`        | Type safety is non-negotiable       |
-| Raw hex colors in components  | Use semantic tokens in `globals.css` so all 3 palettes + dark mode stay consistent |
+| Raw hex colors in components  | Use semantic tokens in `globals.css` so Lux and Nocturne stay consistent |
 | `std::fs` in async Rust       | Use `tokio::fs` or `spawn_blocking` |
 | `std::thread::sleep` in async | Use `tokio::time::sleep`            |
 | `std::process::Command` in async | Use `tokio::process::Command`    |

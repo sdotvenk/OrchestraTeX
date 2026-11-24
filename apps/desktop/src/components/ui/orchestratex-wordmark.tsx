@@ -18,7 +18,7 @@ export function OrchestraTeXWordmark({ prominent = false }: { prominent?: boolea
         />
         <path
           d="M6 1l8 14"
-          stroke="var(--primary-offset, var(--score-tangerine))"
+          stroke="var(--primary-offset)"
           strokeWidth={prominent ? 2.2 : 2.4}
           strokeLinecap="round"
         />

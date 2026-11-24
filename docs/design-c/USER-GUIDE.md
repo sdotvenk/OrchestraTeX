@@ -4,7 +4,7 @@
 
 **Home** opens folders, creates a starter `main.tex`, and clones Git repositories. Recent projects show active thread counts and status. Home also shows detected LaTeX engines and agent CLI status.
 
-Choose **Write** for source, a docked thread, and live PDF preview. Choose **Agents** for all project threads and the project inspector. Choose **History** for checkpoints, commits, and labels. Switch between light Score and dark Nocturne with the theme control.
+Choose **Write** for source, a docked thread, and live PDF preview. Choose **Agents** for all project threads and the project inspector. Choose **History** for checkpoints, commits, and labels. Open the theme picker to choose **Lux**, **Nocturne**, or **Auto** to follow your system appearance.
 
 Use **Cmd/Ctrl+K** to search threads in Agents or find a file in Write. **Cmd/Ctrl+L** toggles the docked thread, **Cmd/Ctrl+P** toggles the PDF preview, and **Cmd/Ctrl+Shift+B** recompiles.
 

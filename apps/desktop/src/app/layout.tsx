@@ -3,6 +3,11 @@ import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { ExternalLinkHandler } from "@/components/external-link-handler";
 import { ToastProvider } from "@/components/ui/toast";
+import {
+  APPEARANCE_CLASSES,
+  APPEARANCE_STORAGE_KEY,
+  APPEARANCE_THEMES,
+} from "@/lib/editor/appearance";
 import "./globals.css";
 
 const geist = Geist({
@@ -38,7 +43,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
     >
       <body className="antialiased">
-        <ThemeProvider attribute="class" defaultTheme="light" disableTransitionOnChange>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          storageKey={APPEARANCE_STORAGE_KEY}
+          themes={APPEARANCE_THEMES}
+          value={APPEARANCE_CLASSES}
+          enableColorScheme={false}
+          disableTransitionOnChange
+        >
           <ToastProvider>
             <ExternalLinkHandler />
             {children}

@@ -6,15 +6,16 @@
 
 ---
 
-## Tokenized Base & Built-In Palettes
+## Appearance
 
-All components consume semantic CSS variables defined in `apps/desktop/src/app/globals.css`. Three cohesive palettes share the exact same token contract (each with Light and Dark variants via `data-palette` + `.dark`):
+The top-bar theme picker offers Lux, Nocturne, and Auto. Auto is the default and follows the system appearance. Both themes use the semantic CSS tokens in `apps/desktop/src/app/globals.css`.
 
-| Palette | Light Chrome (`--bg`) | Structural Accent (`--accent`) | Primary CTA (`--primary-bg`) | Character |
-| --- | --- | --- | --- | --- |
-| **Atelier** (default) | `#f6f5f0` Warm Cotton | `#2c4f7c` Prussian Ink | `#d14e2a` Vermilion | Letterpress / fine academic typesetting |
-| **Conductor** | `#f3f5f8` Cool Alabaster | `#3652b8` Cobalt Slate | `#c48b28` Warm Brass | Crisp daylight studio instrument |
-| **Monograph** | `#f7f4f0` Warm Linen | `#6e3450` Oxblood Plum | `#256b60` Deep Teal | Quiet monograph & archival study |
+Theme preferences are stored as `lux`, `nocturne`, and `system`.
+
+| Theme | Chrome (`--bg`) | Structural accent (`--accent`) | Primary action (`--primary-bg`) |
+| --- | --- | --- | --- |
+| **Lux** | `#ece7dc` | `#435670` | `#1b1f33` |
+| **Nocturne** | `#14161f` | `#a3b3ca` | `#f2ede2` |
 
 ### Core Semantic Tokens
 

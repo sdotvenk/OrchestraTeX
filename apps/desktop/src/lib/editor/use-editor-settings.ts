@@ -1,5 +1,6 @@
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useState } from "react";
+import { APPEARANCE_STORAGE_KEY, isNocturneAppearance } from "./appearance";
 import {
   DEFAULT_EDITOR_SETTINGS,
   DEFAULT_MINIMAP_SETTINGS,
@@ -29,10 +30,9 @@ function sanitizeString(value: unknown, fallback = ""): string {
 function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
   const settings = { ...DEFAULT_EDITOR_SETTINGS, ...parsed };
 
-  // Remove legacy theme field (now auto-follows app mode)
-  if ("theme" in settings) {
-    delete (settings as Record<string, unknown>).theme;
-  }
+  // Remove retired appearance settings. The app theme is stored by next-themes.
+  delete (settings as Record<string, unknown>).theme;
+  delete (settings as Record<string, unknown>).uiPalette;
 
   // Migrate old boolean minimap format to new object format
   if (typeof parsed.minimap === "boolean") {
@@ -49,15 +49,6 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
       3600,
       Math.max(15, Math.round(parsed.gitAutoFetchIntervalSeconds)),
     );
-  }
-
-  if (
-    settings.uiPalette !== "score" &&
-    settings.uiPalette !== "atelier" &&
-    settings.uiPalette !== "conductor" &&
-    settings.uiPalette !== "monograph"
-  ) {
-    settings.uiPalette = DEFAULT_EDITOR_SETTINGS.uiPalette;
   }
 
   settings.fontFamily = sanitizeString(settings.fontFamily);
@@ -96,31 +87,37 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
 }
 
 export function useEditorSettings() {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
 
   const [settings, setSettings] = useState(DEFAULT_EDITOR_SETTINGS);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   useEffect(() => {
+    if (settingsLoaded) return;
+
     try {
+      const appearance = localStorage.getItem(APPEARANCE_STORAGE_KEY);
+      if (appearance === "light" || appearance === "dark") {
+        setTheme(appearance === "light" ? "lux" : "nocturne");
+      }
+
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        setSettings(migrateSettings(JSON.parse(saved)));
+        const parsed: Record<string, unknown> = JSON.parse(saved);
+        // Legacy palettes defaulted to the light appearance.
+        if (typeof parsed.uiPalette === "string" && appearance === null) {
+          setTheme("lux");
+        }
+        setSettings(migrateSettings(parsed));
       }
     } catch {
       // Ignore parse errors
     }
     setSettingsLoaded(true);
-  }, []);
+  }, [settingsLoaded, setTheme]);
 
   // Derive editor theme from app theme
-  const editorTheme: EditorTheme = resolvedTheme === "dark" ? "one-dark" : "one-light";
-
-  // Apply UI color palette attribute to <html>
-  useEffect(() => {
-    if (!settingsLoaded) return;
-    document.documentElement.dataset.palette = settings.uiPalette;
-  }, [settings.uiPalette, settingsLoaded]);
+  const editorTheme: EditorTheme = isNocturneAppearance(resolvedTheme) ? "one-dark" : "one-light";
 
   // Persist settings to localStorage
   useEffect(() => {
