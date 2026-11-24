@@ -3555,7 +3555,7 @@ export default function EditorPage() {
                     type="button"
                     onClick={() => {
                       void agent.loadThread(entry.threadId);
-                      setWorkspaceView("agents");
+                      activateWorkspaceTab("agents");
                     }}
                     title={`${name} (${entry.count} ${entry.count === 1 ? "thread" : "threads"}) · ${statusLabel}`}
                     aria-label={`${name} ${statusLabel}`}
@@ -4330,7 +4330,7 @@ export default function EditorPage() {
                     onApproveInteraction={score.approveWait}
                     onOpenAgentSettings={handleOpenAgentSettings}
                     onOpenWorkspace={
-                      daemon.projectPath ? () => setWorkspaceView("agents") : undefined
+                      daemon.projectPath ? () => activateWorkspaceTab("agents") : undefined
                     }
                     isExpanded={isAgentsView ? true : agentExpanded}
                     onToggleExpand={
@@ -4639,7 +4639,7 @@ export default function EditorPage() {
         bibEntries={bibEntries}
         diagnostics={latexCompiler.diagnostics}
         onOpenFile={(filePath, line) => {
-          setWorkspaceView("write");
+          activateWorkspaceTab("write");
           void handleFileSelect(filePath).then(() => {
             if (line && line > 0) setPendingGoToLine(line);
           });

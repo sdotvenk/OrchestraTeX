@@ -339,7 +339,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                   : "bg-subtle text-muted hover:text-foreground"
             }`}
             title="Toggle compilation issues and logs"
-            aria-expanded={drawerOpen}
+            aria-expanded={onOpenBuildActivity ? undefined : drawerOpen}
           >
             {compileStatus === "compiling" ? (
               <>

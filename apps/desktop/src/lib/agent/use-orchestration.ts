@@ -72,9 +72,7 @@ export function useOrchestration(settings: AgentSettings) {
             (thread) =>
               typeof thread.schedule?.runAt === "number" &&
               thread.schedule.runAt <= now &&
-              !thread.archived &&
-              thread.status !== "running" &&
-              thread.status !== "waiting_input",
+              !thread.archived,
           )
           .map((thread) => thread.projectPath),
       );

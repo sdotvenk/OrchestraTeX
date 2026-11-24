@@ -333,11 +333,13 @@ export function applyAgentStreamEvent(state: AgentState, event: AgentStreamEvent
         threads: nextThreads,
         activeThread: nextActive,
         error:
-          event.status === "error" && event.error
-            ? event.error
-            : event.status === "running"
-              ? null
-              : state.error,
+          state.activeThread?.summary.id !== event.threadId
+            ? state.error
+            : event.status === "error" && event.error
+              ? event.error
+              : event.status === "running"
+                ? null
+                : state.error,
       };
     }
 
