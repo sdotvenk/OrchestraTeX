@@ -1,7 +1,7 @@
 "use client";
 
 import { LockKey } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { PendingInteraction } from "@/lib/agent/types";
 
 type ApprovalInteraction = Extract<PendingInteraction, { kind: "approval" }>;
@@ -24,14 +24,6 @@ export function ApprovalCard({
   onDecide,
 }: ApprovalCardProps) {
   const [submitting, setSubmitting] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      cardRef.current?.scrollIntoView({ block: "nearest" });
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
 
   const handleDecision = useCallback(
     async (decision: "allow_once" | "allow_session" | "deny", optionId?: string) => {
@@ -105,10 +97,7 @@ export function ApprovalCard({
   const title = isDuplicateTitle ? null : rawTitle;
 
   return (
-    <div
-      ref={cardRef}
-      className="@container my-2 flex flex-col gap-2 rounded-[10px] border-[1.5px] border-[var(--decision-border)] bg-[var(--decision-bg)] p-3 shadow-[var(--decision-shadow)]"
-    >
+    <div className="@container my-2 flex flex-col gap-2 rounded-[10px] border-[1.5px] border-[var(--decision-border)] bg-[var(--decision-bg)] p-3 shadow-[var(--decision-shadow)]">
       <div className="flex items-center gap-2 min-w-0">
         <LockKey className="size-3.5 shrink-0 text-warn" weight="bold" aria-hidden="true" />
         <span className="text-[12.5px] font-semibold text-foreground-strong truncate">

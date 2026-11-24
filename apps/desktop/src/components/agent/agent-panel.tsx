@@ -323,10 +323,7 @@ export const AgentPanel = memo(function AgentPanel({
             <span className="font-medium text-foreground shrink-0 whitespace-nowrap">
               {providerDisplayName}
             </span>
-            <span
-              className="font-mono min-w-0 shrink-[0.2] truncate max-w-[220px]"
-              title={currentModelLabel}
-            >
+            <span className="font-mono shrink-0 max-w-[40%] truncate" title={currentModelLabel}>
               {currentModelLabel}
             </span>
             {currentEffort && (
