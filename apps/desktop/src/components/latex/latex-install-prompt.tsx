@@ -27,7 +27,8 @@ export function LaTeXInstallPrompt({ onRefreshCompilers }: LaTeXInstallPromptPro
   }, [fetchDistributions]);
 
   const handleInstall = async (distributionId: string) => {
-    await install(distributionId);
+    const outcome = await install(distributionId);
+    if (outcome?.success) onRefreshCompilers?.();
   };
 
   const handleOpenDownload = (url: string) => {
@@ -164,6 +165,7 @@ export function LaTeXInstallPrompt({ onRefreshCompilers }: LaTeXInstallPromptPro
                       {dist.install_command && (
                         <button
                           type="button"
+                          aria-label={`Install ${dist.name}`}
                           onClick={() => handleInstall(dist.id)}
                           className={`btn btn-sm border-2 transition-all ${
                             index === 0

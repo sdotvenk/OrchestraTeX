@@ -7,7 +7,7 @@ import { LaTeXInstallPrompt } from "@/components/latex/latex-install-prompt";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { OrchestraTeXWordmark } from "@/components/ui/orchestratex-wordmark";
 import type { ProviderStatus } from "@/lib/agent/types";
-import type { LaTeXCompilersStatus } from "@/lib/latex/types";
+import { COMPILER_DISPLAY_NAMES, type LaTeXCompilersStatus } from "@/lib/latex/types";
 import type { RecentProject } from "@/lib/recent-projects";
 
 export interface ProjectThreadCounts {
@@ -154,13 +154,19 @@ export function HomeWorkspace({
               {!compilersStatus ? (
                 <p className="text-sm text-muted">Checking compilers</p>
               ) : hasCompiler ? (
-                <ul className="space-y-1 text-sm">
-                  {Object.entries(compilersStatus)
-                    .filter(([, compiler]) => compiler.available)
-                    .map(([name]) => (
-                      <li key={name}>{name}</li>
-                    ))}
-                </ul>
+                <p className="text-sm">
+                  <span className="font-medium text-success">Ready</span>
+                  <span className="text-muted">
+                    {" · "}
+                    {Object.values(compilersStatus)
+                      .filter((compiler) => compiler.available)
+                      .map(
+                        (compiler) =>
+                          COMPILER_DISPLAY_NAMES[compiler.name as keyof LaTeXCompilersStatus],
+                      )
+                      .join(", ")}
+                  </span>
+                </p>
               ) : (
                 <LaTeXInstallPrompt onRefreshCompilers={onRefreshCompilers} />
               )}

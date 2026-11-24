@@ -116,7 +116,7 @@ function SelectField({
   label: string;
   value: string | number;
   onChange: (value: string) => void;
-  options: { value: string | number; label: string }[];
+  options: { value: string | number; label: string; disabled?: boolean }[];
   description?: string;
 }) {
   return (
@@ -131,7 +131,7 @@ function SelectField({
         </SelectTrigger>
         <SelectContent>
           {options.map((opt) => (
-            <SelectItem key={opt.value} value={String(opt.value)}>
+            <SelectItem key={opt.value} value={String(opt.value)} disabled={opt.disabled}>
               {opt.label}
             </SelectItem>
           ))}
@@ -944,6 +944,7 @@ export function LaTeXSettingsDialog({
                   return {
                     value: c,
                     label: `${COMPILER_DISPLAY_NAMES[c]}${suffix}`,
+                    disabled: statusInfo?.available === false,
                   };
                 })}
               />

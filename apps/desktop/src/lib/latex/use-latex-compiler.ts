@@ -25,30 +25,6 @@ export interface CompileInvocationOptions {
   compilerOverride?: ConcreteLaTeXCompiler;
 }
 
-export function resolveEffectiveCompiler(
-  preferred: LaTeXSettings["compiler"],
-  status: LaTeXCompilersStatus | null,
-): ConcreteLaTeXCompiler {
-  if (preferred !== "auto") {
-    return preferred;
-  }
-  if (status) {
-    const order: ConcreteLaTeXCompiler[] = [
-      "latexmk",
-      "pdflatex",
-      "xelatex",
-      "lualatex",
-      "tectonic",
-    ];
-    for (const candidate of order) {
-      if (status[candidate]?.available) {
-        return candidate;
-      }
-    }
-  }
-  return "latexmk";
-}
-
 export function useLatexCompiler({
   settings,
   projectPath,
@@ -70,7 +46,6 @@ export function useLatexCompiler({
   const onCompileStartRef = useRef(onCompileStart);
   onCompileStartRef.current = onCompileStart;
   const projectPathRef = useRef(projectPath);
-  const compilersStatusRef = useRef(compilersStatus);
   const autoCompileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingLogRef = useRef<CompileOutputEvent[]>([]);
   const logRafRef = useRef<number | null>(null);
@@ -79,7 +54,6 @@ export function useLatexCompiler({
 
   settingsRef.current = settings;
   projectPathRef.current = projectPath;
-  compilersStatusRef.current = compilersStatus;
 
   const flushCompileLog = useCallback(() => {
     if (logRafRef.current !== null) {
@@ -185,16 +159,7 @@ export function useLatexCompiler({
       }
 
       const curSettings = settingsRef.current;
-      const compiler =
-        compilerOverride ??
-        resolveEffectiveCompiler(curSettings.compiler, compilersStatusRef.current);
-      const args: string[] = [];
-      if (curSettings.shellEscape && compiler !== "tectonic") {
-        args.push("-shell-escape");
-      }
-      if (curSettings.customArgs.length > 0) {
-        args.push(...curSettings.customArgs);
-      }
+      const compiler = compilerOverride ?? curSettings.compiler;
 
       if (logRafRef.current !== null) {
         cancelAnimationFrame(logRafRef.current);
@@ -210,9 +175,10 @@ export function useLatexCompiler({
           directory: targetDir,
           compiler,
           mainFile,
-          args,
+          args: curSettings.customArgs,
           customPath: curSettings.customCompilerPath ?? undefined,
-          latexmkEngine: compiler === "latexmk" ? curSettings.latexmkEngine : undefined,
+          latexmkEngine: curSettings.latexmkEngine,
+          shellEscape: curSettings.shellEscape,
         });
 
         if (generationRef.current !== generation) return null;

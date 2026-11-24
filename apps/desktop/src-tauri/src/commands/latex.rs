@@ -121,6 +121,11 @@ pub fn build_tex_env_path() -> String {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
             extras.push(format!("{}\\Programs\\MiKTeX\\miktex\\bin\\x64", local));
             extras.push(format!("{}\\Programs\\tectonic", local));
+            extras.push(format!("{}\\Microsoft\\WinGet\\Links", local));
+            extras.push(format!("{}\\Microsoft\\WindowsApps", local));
+        }
+        if let Ok(program_files) = std::env::var("ProgramFiles") {
+            extras.push(format!("{}\\WinGet\\Links", program_files));
         }
         if let Ok(profile) = std::env::var("USERPROFILE") {
             extras.push(format!("{}\\.cargo\\bin", profile));
@@ -169,50 +174,59 @@ pub fn build_tex_env_path() -> String {
     parts.join(sep)
 }
 
-async fn find_compiler(name: &str) -> CompilerInfo {
-    let env_path = build_tex_env_path();
-    let which_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
+const AUTO_COMPILERS: [&str; 5] = ["latexmk", "pdflatex", "xelatex", "lualatex", "tectonic"];
+
+async fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = tokio::fs::metadata(path).await else {
+        return false;
     };
 
-    // Try enriched PATH first
-    let output = command(which_cmd)
-        .arg(name)
-        .env("PATH", &env_path)
-        .output()
-        .await;
-
-    if let Ok(output) = output {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .next()
-                .unwrap_or("")
-                .trim()
-                .to_string();
-
-            if !path.is_empty() {
-                let version = get_compiler_version(name, &path).await;
-                return CompilerInfo {
-                    name: name.to_string(),
-                    path: Some(path),
-                    available: true,
-                    version,
-                };
-            }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return false;
         }
     }
 
-    // Check common installation paths directly
-    let common_paths = get_common_paths(name);
-    for path in common_paths {
-        if Path::new(&path).exists() {
-            let version = get_compiler_version(name, &path).await;
+    metadata.is_file()
+}
+
+async fn find_compiler(name: &str) -> CompilerInfo {
+    find_compiler_on_path(name, &build_tex_env_path()).await
+}
+
+async fn find_compiler_on_path(name: &str, env_path: &str) -> CompilerInfo {
+    #[cfg(target_os = "windows")]
+    let binaries = [
+        format!("{name}.exe"),
+        format!("{name}.bat"),
+        format!("{name}.cmd"),
+    ];
+    #[cfg(not(target_os = "windows"))]
+    let binaries = [name.to_string()];
+
+    let check_version = AUTO_COMPILERS.contains(&name);
+    for directory in std::env::split_paths(env_path) {
+        if !directory.is_absolute() {
+            continue;
+        }
+        for binary in &binaries {
+            let path = directory.join(binary);
+            if !is_executable(&path).await {
+                continue;
+            }
+            let version = if check_version {
+                let Some(version) = probe_compiler_version(&path, env_path).await else {
+                    continue;
+                };
+                Some(version)
+            } else {
+                None
+            };
             return CompilerInfo {
                 name: name.to_string(),
-                path: Some(path),
+                path: Some(path.to_string_lossy().into_owned()),
                 available: true,
                 version,
             };
@@ -227,108 +241,55 @@ async fn find_compiler(name: &str) -> CompilerInfo {
     }
 }
 
-fn get_common_paths(name: &str) -> Vec<String> {
-    let mut paths = Vec::new();
+async fn probe_compiler_version(path: &Path, env_path: &str) -> Option<String> {
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        command(path.to_str()?)
+            .arg("--version")
+            .env("PATH", env_path)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            paths.push(format!("{}\\TinyTeX\\bin\\windows\\{}.exe", appdata, name));
-            paths.push(format!("{}\\TinyTeX\\bin\\win32\\{}.exe", appdata, name));
-        }
-        for year in (2020..=2030).rev() {
-            paths.push(format!("C:\\texlive\\{}\\bin\\win32\\{}.exe", year, name));
-            paths.push(format!("C:\\texlive\\{}\\bin\\windows\\{}.exe", year, name));
-        }
-        paths.push(format!(
-            "C:\\Program Files\\MiKTeX\\miktex\\bin\\x64\\{}.exe",
-            name
-        ));
-        paths.push(format!(
-            "C:\\Program Files (x86)\\MiKTeX\\miktex\\bin\\{}.exe",
-            name
-        ));
-        if let Ok(home) = std::env::var("LOCALAPPDATA") {
-            paths.push(format!(
-                "{}\\Programs\\MiKTeX\\miktex\\bin\\x64\\{}.exe",
-                home, name
-            ));
-            paths.push(format!("{}\\Programs\\tectonic\\{}.exe", home, name));
-        }
-        if let Ok(profile) = std::env::var("USERPROFILE") {
-            paths.push(format!("{}\\.cargo\\bin\\{}.exe", profile, name));
-        }
+    if !output.status.success() {
+        return None;
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            paths.push(format!(
-                "{}/Library/TinyTeX/bin/universal-darwin/{}",
-                home, name
-            ));
-            paths.push(format!(
-                "{}/Library/TinyTeX/bin/x86_64-darwin/{}",
-                home, name
-            ));
-            paths.push(format!(
-                "{}/Library/TinyTeX/bin/arm64-darwin/{}",
-                home, name
-            ));
-            paths.push(format!("{}/.cargo/bin/{}", home, name));
-        }
-        paths.push(format!("/Library/TeX/texbin/{}", name));
-        paths.push(format!("/opt/homebrew/bin/{}", name));
-        paths.push(format!("/usr/local/bin/{}", name));
-        for year in (2020..=2030).rev() {
-            paths.push(format!(
-                "/usr/local/texlive/{}/bin/universal-darwin/{}",
-                year, name
-            ));
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(home) = std::env::var("HOME") {
-            paths.push(format!("{}/.TinyTeX/bin/x86_64-linux/{}", home, name));
-            paths.push(format!("{}/.TinyTeX/bin/aarch64-linux/{}", home, name));
-            paths.push(format!("{}/.cargo/bin/{}", home, name));
-            paths.push(format!("{}/bin/{}", home, name));
-        }
-        paths.push(format!("/usr/bin/{}", name));
-        paths.push(format!("/usr/local/bin/{}", name));
-        for year in (2020..=2030).rev() {
-            paths.push(format!(
-                "/usr/local/texlive/{}/bin/x86_64-linux/{}",
-                year, name
-            ));
-        }
-    }
-
-    paths
+    // Some engines report their version on stderr.
+    let version = [&output.stdout, &output.stderr]
+        .into_iter()
+        .find_map(|bytes| {
+            let text = String::from_utf8_lossy(bytes);
+            text.lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .map(str::to_owned)
+        });
+    version
 }
 
-async fn get_compiler_version(_name: &str, path: &str) -> Option<String> {
-    let env_path = build_tex_env_path();
-    let output = command(path)
-        .arg("--version")
-        .env("PATH", env_path)
-        .output()
-        .await
-        .ok()?;
-
-    if output.status.success() {
-        let version_output = String::from_utf8_lossy(&output.stdout);
-        let first_line = version_output.lines().next()?.trim();
-        if first_line.is_empty() {
-            None
-        } else {
-            Some(first_line.to_string())
-        }
+async fn resolve_installed_compiler(preferred: &str, env_path: &str) -> Option<CompilerInfo> {
+    let fallback = [preferred, "tectonic"];
+    let candidates = if preferred == "auto" {
+        &AUTO_COMPILERS[..]
+    } else if preferred == "tectonic" {
+        &fallback[..1]
     } else {
-        None
+        &fallback[..]
+    };
+
+    for &candidate in candidates {
+        if AUTO_COMPILERS.contains(&candidate) {
+            let compiler = find_compiler_on_path(candidate, env_path).await;
+            if compiler.available {
+                return Some(compiler);
+            }
+        }
     }
+    None
 }
 
 #[tauri::command]
@@ -642,6 +603,41 @@ fn validate_relative_main_file(main_file: &str) -> Result<(), String> {
     Ok(())
 }
 
+async fn stream_compile_output(
+    stream: impl tokio::io::AsyncRead + Unpin,
+    app: AppHandle,
+    collected_lines: Arc<Mutex<Vec<String>>>,
+    stderr_is_error: bool,
+) {
+    let mut lines = BufReader::new(stream).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let is_warning = line.contains("Warning:")
+            || line.starts_with("warning:")
+            || line.starts_with("Overfull \\")
+            || line.starts_with("Underfull \\");
+        let is_error = !is_warning
+            && (stderr_is_error
+                || line.starts_with("! ")
+                || line.contains("Error")
+                || line.starts_with("error:")
+                || try_parse_file_line_error(&line).is_some());
+        {
+            let mut guard = collected_lines.lock().await;
+            if guard.len() < 4000 {
+                guard.push(line.clone());
+            }
+        }
+        let _ = app.emit(
+            "latex-compile-output",
+            CompileOutputEvent {
+                line,
+                is_error,
+                is_warning,
+            },
+        );
+    }
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn latex_compile(
@@ -653,6 +649,7 @@ pub async fn latex_compile(
     args: Vec<String>,
     custom_path: Option<String>,
     latexmk_engine: Option<String>,
+    shell_escape: Option<bool>,
 ) -> Result<CompilationResult, String> {
     validate_relative_main_file(&main_file)?;
     let started_at = std::time::Instant::now();
@@ -689,26 +686,41 @@ pub async fn latex_compile(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| main_file.clone());
 
-    let compiler_bin = if let Some(ref path) = custom_path {
-        let trimmed = path.trim();
-        if trimmed.is_empty() {
-            find_compiler(&compiler)
-                .await
-                .path
-                .unwrap_or_else(|| compiler.clone())
-        } else {
-            trimmed.to_string()
+    let env_path = build_tex_env_path();
+    let detected = resolve_installed_compiler(&compiler, &env_path).await;
+    let custom_path = custom_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty());
+    let custom_path = match custom_path {
+        Some(path) if is_executable(&work_dir.join(path)).await => {
+            Some(work_dir.join(path).to_string_lossy().into_owned())
         }
-    } else {
-        find_compiler(&compiler)
-            .await
-            .path
-            .unwrap_or_else(|| compiler.clone())
+        _ => None,
+    };
+    let (engine, compiler_bin) = match (custom_path, detected) {
+        (Some(path), detected) => {
+            let engine = if compiler == "auto" {
+                detected.map_or_else(|| "latexmk".to_string(), |info| info.name)
+            } else {
+                compiler
+            };
+            (engine, path)
+        }
+        (None, Some(info)) => (
+            info.name,
+            info.path
+                .ok_or("No executable found for the LaTeX compiler")?,
+        ),
+        (None, None) => return Err("No executable LaTeX compiler found".to_string()),
     };
 
-    let cmd_args = build_compile_args(&compiler, latexmk_engine.as_deref(), &args, &file_name);
+    let mut user_args = args;
+    if shell_escape.unwrap_or(false) && engine != "tectonic" {
+        user_args.insert(0, "-shell-escape".to_string());
+    }
+    let cmd_args = build_compile_args(&engine, latexmk_engine.as_deref(), &user_args, &file_name);
 
-    let env_path = build_tex_env_path();
     let mut cmd = command(&compiler_bin);
     cmd.current_dir(&work_dir)
         .args(&cmd_args)
@@ -744,61 +756,22 @@ pub async fn latex_compile(
 
     let collected_lines = Arc::new(Mutex::new(Vec::<String>::new()));
 
-    let app_clone = app.clone();
-    let lines_out = collected_lines.clone();
+    let tectonic = engine == "tectonic";
     let stdout_handle = stdout.map(|stdout| {
-        let app = app_clone.clone();
-        tokio::spawn(async move {
-            let reader = BufReader::new(stdout);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let is_error = line.starts_with("! ")
-                    || line.contains("Error")
-                    || line.contains("error:")
-                    || try_parse_file_line_error(&line).is_some();
-                let is_warning = line.contains("Warning:")
-                    || line.contains("warning:")
-                    || line.starts_with("Overfull \\")
-                    || line.starts_with("Underfull \\");
-
-                {
-                    let mut guard = lines_out.lock().await;
-                    if guard.len() < 4000 {
-                        guard.push(line.clone());
-                    }
-                }
-
-                let event = CompileOutputEvent {
-                    line,
-                    is_error,
-                    is_warning,
-                };
-                let _ = app.emit("latex-compile-output", &event);
-            }
-        })
+        tokio::spawn(stream_compile_output(
+            stdout,
+            app.clone(),
+            collected_lines.clone(),
+            false,
+        ))
     });
-
-    let lines_err = collected_lines.clone();
     let stderr_handle = stderr.map(|stderr| {
-        let app = app_clone;
-        tokio::spawn(async move {
-            let reader = BufReader::new(stderr);
-            let mut lines = reader.lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                {
-                    let mut guard = lines_err.lock().await;
-                    if guard.len() < 4000 {
-                        guard.push(line.clone());
-                    }
-                }
-                let event = CompileOutputEvent {
-                    line,
-                    is_error: true,
-                    is_warning: false,
-                };
-                let _ = app.emit("latex-compile-output", &event);
-            }
-        })
+        tokio::spawn(stream_compile_output(
+            stderr,
+            app.clone(),
+            collected_lines.clone(),
+            !tectonic,
+        ))
     });
 
     if let Some(handle) = stdout_handle {
@@ -1225,7 +1198,7 @@ pub async fn latex_get_distributions() -> Result<Vec<LaTeXDistribution>, String>
             id: "tectonic".to_string(),
             description: "Modern standalone Rust TeX engine with automatic package fetching."
                 .to_string(),
-            install_command: Some("winget install tectonic-typesetting.tectonic".to_string()),
+            install_command: Some("tectonic-install".to_string()),
             download_url: Some("https://tectonic-typesetting.github.io/".to_string()),
         });
         distributions.push(LaTeXDistribution {
@@ -1295,7 +1268,7 @@ pub async fn latex_get_distributions() -> Result<Vec<LaTeXDistribution>, String>
             id: "tectonic".to_string(),
             description: "Modern standalone Rust TeX engine with automatic package fetching."
                 .to_string(),
-            install_command: None,
+            install_command: Some("tectonic-install".to_string()),
             download_url: Some("https://tectonic-typesetting.github.io/".to_string()),
         });
         distributions.push(LaTeXDistribution {
@@ -1393,13 +1366,17 @@ async fn install_windows(app: &AppHandle, distribution_id: &str) -> Result<Insta
             .await
         }
         "tectonic" => {
-            install_winget_windows(
+            let _ = install_winget_windows(
                 app,
                 "tectonic-typesetting.tectonic",
                 "Tectonic",
                 "https://tectonic-typesetting.github.io/",
             )
-            .await
+            .await;
+            if find_compiler("tectonic").await.available {
+                return Ok(tectonic_install_success());
+            }
+            install_tectonic_release(app).await
         }
         _ => Ok(InstallResult {
             success: false,
@@ -1539,7 +1516,16 @@ async fn install_winget_windows(
         },
     );
 
-    let winget_check = command("winget").arg("--version").output().await;
+    let env_path = build_tex_env_path();
+    let winget_bin = find_compiler_on_path("winget", &env_path)
+        .await
+        .path
+        .unwrap_or_else(|| "winget".to_string());
+    let winget_check = command(&winget_bin)
+        .arg("--version")
+        .env("PATH", &env_path)
+        .output()
+        .await;
 
     if winget_check.is_err() || !winget_check.unwrap().status.success() {
         return Ok(InstallResult {
@@ -1564,15 +1550,20 @@ async fn install_winget_windows(
         },
     );
 
-    let mut child = command("winget")
+    let mut child = command(&winget_bin)
         .args([
             "install",
+            "--id",
             package_id,
+            "--exact",
+            "--source",
+            "winget",
             "--accept-package-agreements",
             "--accept-source-agreements",
         ])
+        .env("PATH", &env_path)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| format!("Failed to start winget: {}", e))?;
 
@@ -1796,12 +1787,15 @@ async fn install_brew(
         args.push("--cask");
     }
     args.push(package);
+    if package == "tectonic" && find_compiler("tectonic").await.available {
+        return Ok(tectonic_install_success());
+    }
 
     let mut child = command(brew_bin)
         .args(&args)
         .env("PATH", &env_path)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|e| format!("Failed to start brew: {}", e))?;
 
@@ -1829,7 +1823,11 @@ async fn install_brew(
         .map_err(|e| format!("Installation failed: {}", e))?;
 
     if status.success() {
-        let detected = is_compiler_detectable_after_install().await;
+        let detected = if package == "tectonic" {
+            find_compiler("tectonic").await.available
+        } else {
+            is_compiler_detectable_after_install().await
+        };
         let _ = app.emit(
             "latex-install-progress",
             InstallProgress {
@@ -1866,8 +1864,123 @@ async fn install_brew(
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn tectonic_install_success() -> InstallResult {
+    InstallResult {
+        success: true,
+        message: "Tectonic is ready.".to_string(),
+        needs_restart: false,
+    }
+}
+
+// The official installers unpack a portable executable into their working directory.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+async fn install_tectonic_release(app: &AppHandle) -> Result<InstallResult, String> {
+    use tokio::fs;
+
+    #[cfg(target_os = "linux")]
+    let (home, bin_dir, binary, url, script, program, args) = (
+        "HOME",
+        ".local/bin",
+        "tectonic",
+        "https://drop-sh.fullyjustified.net",
+        "install.sh",
+        "/bin/sh",
+        &["install.sh"][..],
+    );
+    #[cfg(target_os = "windows")]
+    let (home, bin_dir, binary, url, script, program, args) = (
+        "LOCALAPPDATA",
+        "Programs/tectonic",
+        "tectonic.exe",
+        "https://drop-ps1.fullyjustified.net",
+        "install.ps1",
+        "powershell.exe",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "install.ps1",
+        ][..],
+    );
+
+    if find_compiler("tectonic").await.available {
+        return Ok(tectonic_install_success());
+    }
+
+    let destination =
+        PathBuf::from(std::env::var_os(home).ok_or("User directory was not found")?).join(bin_dir);
+    fs::create_dir_all(&destination)
+        .await
+        .map_err(|e| e.to_string())?;
+    let scratch = destination.join(format!(".tectonic-install-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&scratch).await.map_err(|e| e.to_string())?;
+
+    let _ = app.emit(
+        "latex-install-progress",
+        InstallProgress {
+            stage: "installing".to_string(),
+            message: "Downloading and installing Tectonic…".to_string(),
+            progress: None,
+        },
+    );
+
+    let result = async {
+        let installer = reqwest::get(url)
+            .await
+            .map_err(|e| format!("Could not download the Tectonic installer: {e}"))?
+            .error_for_status()
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?;
+        fs::write(scratch.join(script), installer)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let env_path = build_tex_env_path();
+        let output = command(program)
+            .args(args)
+            .current_dir(&scratch)
+            .env("PATH", &env_path)
+            .output()
+            .await
+            .map_err(|e| format!("Could not run the Tectonic installer: {e}"))?;
+        let executable = scratch.join(binary);
+        if !output.status.success()
+            || probe_compiler_version(&executable, &env_path)
+                .await
+                .is_none()
+        {
+            let details = decode_process_bytes(&output.stderr);
+            return Err(format!(
+                "The Tectonic installer could not install a working executable. {details}"
+            ));
+        }
+
+        fs::rename(executable, destination.join(binary))
+            .await
+            .map_err(|e| {
+                format!(
+                    "Could not install Tectonic in {}: {e}",
+                    destination.display()
+                )
+            })?;
+        Ok(tectonic_install_success())
+    }
+    .await;
+
+    let _ = fs::remove_dir_all(scratch).await;
+    result
+}
+
 #[cfg(target_os = "linux")]
 async fn install_linux(app: &AppHandle, distribution_id: &str) -> Result<InstallResult, String> {
+    if distribution_id == "tectonic" {
+        return install_tectonic_release(app).await;
+    }
     if distribution_id == "tinytex" {
         return install_tinytex_unix(app).await;
     }
@@ -2086,22 +2199,41 @@ pub async fn latex_detect_main_file(
 mod tests {
     use super::*;
 
-    #[test]
-    fn get_common_paths_returns_non_empty() {
-        let paths = get_common_paths("pdflatex");
-        assert!(!paths.is_empty());
-    }
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn detects_only_working_engines_and_falls_back_to_tectonic() {
+        use std::os::unix::fs::PermissionsExt;
 
-    #[test]
-    fn get_common_paths_all_contain_compiler_name() {
-        let paths = get_common_paths("xelatex");
-        for path in &paths {
-            assert!(
-                path.contains("xelatex"),
-                "path '{}' should contain compiler name",
-                path
-            );
+        let scratch = tempfile::tempdir().unwrap();
+        let skeleton = scratch.path().join("texlive");
+        let homebrew = scratch.path().join("homebrew");
+        std::fs::create_dir_all(skeleton.join("pdflatex")).unwrap();
+        std::fs::create_dir(&homebrew).unwrap();
+        for (file, contents) in [
+            (skeleton.join("xelatex"), "#!/bin/sh\nexit 1\n"),
+            (skeleton.join("tectonic"), "#!/bin/sh\nexit 1\n"),
+            (
+                homebrew.join("tectonic"),
+                "#!/bin/sh\necho Tectonic 0.17.0\n",
+            ),
+        ] {
+            std::fs::write(&file, contents).unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
+        let env_path = std::env::join_paths([skeleton, homebrew.clone()]).unwrap();
+        let env_path = env_path.to_str().unwrap();
+
+        assert!(!find_compiler_on_path("pdflatex", env_path).await.available);
+        assert!(!find_compiler_on_path("xelatex", env_path).await.available);
+        for preferred in ["auto", "xelatex", "tectonic"] {
+            let selected = resolve_installed_compiler(preferred, env_path)
+                .await
+                .unwrap();
+            assert_eq!(selected.name, "tectonic");
+            assert_eq!(selected.path.as_deref(), homebrew.join("tectonic").to_str());
+            assert_eq!(selected.version.as_deref(), Some("Tectonic 0.17.0"));
+        }
+        assert!(resolve_installed_compiler("auto", "").await.is_none());
     }
 
     fn empty_status() -> LaTeXCompilersStatus {
