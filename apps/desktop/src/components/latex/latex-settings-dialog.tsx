@@ -34,6 +34,7 @@ import {
   type EditorSettings,
   type MinimapSettings,
 } from "@/lib/editor/types";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import {
   COMPILER_DISPLAY_NAMES,
   DEFAULT_LATEX_SETTINGS,
@@ -63,6 +64,34 @@ interface LaTeXSettingsDialogProps {
   onRefreshAgentProviders?: () => Promise<unknown> | undefined;
   initialTab?: "build" | "editor" | "agents";
 }
+
+const SETTINGS_TABS = [
+  { id: "build", label: "Build" },
+  { id: "editor", label: "Editor" },
+  { id: "agents", label: "Agents" },
+] as const;
+
+const CLI_PATH_FIELDS = [
+  { id: "claude", label: "Claude Code" },
+  { id: "codex", label: "Codex" },
+  { id: "antigravity", label: "Antigravity" },
+] as const;
+
+const CUSTOM_ACP_FIELDS = [
+  { key: "customName", label: "Display name", placeholder: "Custom ACP" },
+  { key: "customCommand", label: "Command", placeholder: "/path/to/agent-acp" },
+  { key: "customArgs", label: "Arguments", placeholder: "--stdio" },
+] as const;
+
+const TRANSPORT_LABELS: Partial<Record<string, string>> = {
+  "cli-stream": "CLI stream",
+  "app-server": "App server",
+  acp: "ACP",
+};
+
+const AGENT_HEADING = "text-sm font-semibold text-foreground-strong";
+const AGENT_INPUT =
+  "h-8 w-full min-w-0 rounded-lg border border-border-dark bg-panel px-2.5 text-xs text-foreground outline-none placeholder:text-muted focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent";
 
 // Section header component for visual grouping - editorial style
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -112,26 +141,46 @@ function SelectField({
   onChange,
   options,
   description,
+  inset = false,
 }: {
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   options: { value: string | number; label: string; disabled?: boolean }[];
   description?: string;
+  inset?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between py-2 gap-8">
-      <div className="shrink-0">
+    <div
+      className={
+        inset
+          ? "grid grid-cols-[1fr_minmax(0,14rem)] items-center gap-3"
+          : "flex items-center justify-between py-2 gap-8"
+      }
+    >
+      <div className={inset ? "min-w-0" : "shrink-0"}>
         <span className="text-sm font-medium text-foreground-secondary block">{label}</span>
         {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
       </div>
       <Select value={String(value)} onValueChange={onChange}>
-        <SelectTrigger aria-label={label}>
+        <SelectTrigger
+          aria-label={label}
+          className={
+            inset
+              ? "h-[28px] min-w-0 rounded-lg border-border-dark hover:bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              : undefined
+          }
+        >
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className={inset ? "rounded-lg shadow-[var(--shadow-2)]" : undefined}>
           {options.map((opt) => (
-            <SelectItem key={opt.value} value={String(opt.value)} disabled={opt.disabled}>
+            <SelectItem
+              key={opt.value}
+              value={String(opt.value)}
+              disabled={opt.disabled}
+              className={inset ? "rounded-md" : undefined}
+            >
               {opt.label}
             </SelectItem>
           ))}
@@ -179,25 +228,21 @@ export function LaTeXSettingsDialog({
   return (
     <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/35 backdrop-blur-[2px] z-[9999]" />
+        <Dialog.Overlay className="fixed inset-0 z-[9999] bg-shadow/35 backdrop-blur-[2px]" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] bg-panel rounded-2xl border border-border w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col"
-          style={{ boxShadow: "var(--shadow-3)" }}
+          className="fixed left-1/2 top-1/2 z-[9999] flex max-h-[90dvh] w-[90vw] max-w-[576px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-border-dark bg-bg shadow-[var(--shadow-3)]"
           onPointerDownOutside={(e) => e.preventDefault()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex shrink-0 items-center justify-between px-5 pt-3 pb-2">
             <div className="flex items-center gap-2.5">
               <Dialog.Title className="text-[16px] font-semibold tracking-tight text-foreground-strong">
                 Settings
               </Dialog.Title>
-              <span className="text-[11px] text-muted-foreground">Auto-saved</span>
+              <Dialog.Description className="text-xs text-muted">Auto-saved</Dialog.Description>
             </div>
-            <Dialog.Close
-              className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              aria-label="Close"
-            >
-              <XIcon className="size-4" />
+            <Dialog.Close className="btn btn-ghost btn-icon" aria-label="Close">
+              <XIcon className="size-4" aria-hidden="true" />
             </Dialog.Close>
           </div>
 
@@ -206,30 +251,26 @@ export function LaTeXSettingsDialog({
             onValueChange={setActiveTab}
             className="flex-1 flex flex-col overflow-hidden"
           >
-            {/* Tabs */}
-            <Tabs.List className="flex px-4 gap-1 border-b border-border shrink-0">
-              <Tabs.Trigger
-                value="build"
-                className="px-3 py-2.5 text-[13px] font-medium transition-colors relative text-muted hover:text-foreground data-[state=active]:text-accent border-b-2 border-transparent data-[state=active]:border-accent -mb-px"
-              >
-                Build
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="editor"
-                className="px-3 py-2.5 text-[13px] font-medium transition-colors relative text-muted hover:text-foreground data-[state=active]:text-accent border-b-2 border-transparent data-[state=active]:border-accent -mb-px"
-              >
-                Editor
-              </Tabs.Trigger>
-              <Tabs.Trigger
-                value="agents"
-                className="px-3 py-2.5 text-[13px] font-medium transition-colors relative text-muted hover:text-foreground data-[state=active]:text-accent border-b-2 border-transparent data-[state=active]:border-accent -mb-px"
-              >
-                Agents
-              </Tabs.Trigger>
+            <Tabs.List
+              aria-label="Settings sections"
+              className="mx-5 mb-2 flex w-fit shrink-0 gap-0.5 rounded-lg border border-border bg-sunken p-0.5"
+            >
+              {SETTINGS_TABS.map(({ id, label }) => (
+                <Tabs.Trigger
+                  key={id}
+                  value={id}
+                  className="rounded-md px-3 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-accent data-[state=active]:bg-panel data-[state=active]:text-foreground-strong data-[state=active]:shadow-xs"
+                >
+                  {label}
+                </Tabs.Trigger>
+              ))}
             </Tabs.List>
 
             {/* ===== EDITOR TAB ===== */}
-            <Tabs.Content value="editor" className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+            <Tabs.Content
+              value="editor"
+              className="flex-1 overflow-y-auto border-y border-border bg-panel px-5 py-4 space-y-1"
+            >
               <SectionHeader>Keybindings</SectionHeader>
 
               <div className="flex items-center justify-between py-2">
@@ -886,7 +927,10 @@ export function LaTeXSettingsDialog({
             </Tabs.Content>
 
             {/* ===== BUILD TAB ===== */}
-            <Tabs.Content value="build" className="flex-1 overflow-y-auto px-5 py-4 space-y-1">
+            <Tabs.Content
+              value="build"
+              className="flex-1 overflow-y-auto border-y border-border bg-panel px-5 py-4 space-y-1"
+            >
               <SectionHeader>Main File</SectionHeader>
 
               <div className="py-2">
@@ -1164,184 +1208,189 @@ export function LaTeXSettingsDialog({
               )}
             </Tabs.Content>
 
-            {/* ===== AGENTS TAB ===== */}
-            <Tabs.Content value="agents" className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-              <div className="flex items-center justify-between pt-2 pb-1">
-                <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                  Detected Agent CLIs
-                </h3>
-                {onRefreshAgentProviders && (
-                  <button
-                    type="button"
-                    onClick={() => void onRefreshAgentProviders()}
-                    className="btn btn-outline btn-sm inline-flex items-center gap-1"
-                  >
-                    <ArrowsClockwiseIcon className="size-3.5" aria-hidden="true" />
-                    <span>Re-detect</span>
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                {agentProviders.map((p) => (
-                  <div
-                    key={p.id}
-                    className="border border-border bg-surface-secondary px-3 py-2 flex items-center justify-between gap-2 text-xs"
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium text-foreground flex items-center gap-2">
-                        <ProviderIcon providerId={p.id} className="size-3.5 shrink-0" />
-                        <span>{p.name}</span>
-                        <span className="text-[10px] font-mono uppercase text-muted">
-                          {p.transport}
-                        </span>
-                      </div>
-                      <div className="text-[11px] font-mono text-muted truncate">
-                        {p.binaryPath || p.authError || "Not detected on PATH"}
-                      </div>
-                    </div>
-                    <span
-                      className={`text-[10px] font-mono uppercase px-1.5 py-0.5 border shrink-0 ${
-                        p.installed && p.authenticated
-                          ? "border-foreground bg-foreground text-background"
-                          : "border-border text-muted"
-                      }`}
+            <Tabs.Content
+              value="agents"
+              className="mx-3 min-h-0 overflow-y-auto rounded-xl border border-border bg-panel px-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+            >
+              <section className="py-3" aria-label="Detected agent CLIs">
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <h3 className={AGENT_HEADING}>Detected agent CLIs</h3>
+                  {onRefreshAgentProviders && (
+                    <button
+                      type="button"
+                      onClick={() => void onRefreshAgentProviders()}
+                      className="btn btn-secondary btn-sm shrink-0"
                     >
-                      {p.installed ? (p.authenticated ? "Ready" : "Auth Needed") : "Missing"}
-                    </span>
-                  </div>
-                ))}
-              </div>
+                      <ArrowsClockwiseIcon className="size-3.5" aria-hidden="true" />
+                      Detect again
+                    </button>
+                  )}
+                </div>
+
+                <ul className="divide-y divide-border">
+                  {agentProviders.map((provider) => {
+                    const voice = VOICE_COLORS[provider.id];
+                    const status = !provider.installed
+                      ? { label: "Not found", style: "bg-subtle text-muted" }
+                      : provider.authenticated
+                        ? { label: "Ready", style: "bg-success-bg text-success" }
+                        : { label: "Sign-in required", style: "bg-warn-bg text-warn" };
+
+                    return (
+                      <li key={provider.id} className="flex items-center gap-2.5 py-2">
+                        <span
+                          className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg"
+                          style={{ color: voice.ink, backgroundColor: voice.tint }}
+                        >
+                          <ProviderIcon providerId={provider.id} className="size-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-baseline gap-x-2">
+                            <span className="text-[13px] font-medium text-foreground-strong">
+                              {provider.name}
+                            </span>
+                            <span className="text-xs text-muted">
+                              {TRANSPORT_LABELS[provider.transport] ?? provider.transport}
+                            </span>
+                          </div>
+                          {provider.binaryPath ? (
+                            <p
+                              className="truncate font-mono text-[11px] text-muted"
+                              title={provider.binaryPath}
+                            >
+                              {provider.binaryPath}
+                            </p>
+                          ) : (
+                            provider.authError && (
+                              <p className="text-[11px] text-muted">{provider.authError}</p>
+                            )
+                          )}
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${status.style}`}
+                        >
+                          {status.label}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
 
               {agentSettings && onUpdateAgentSettings && (
                 <>
-                  <SectionHeader>Session Defaults</SectionHeader>
+                  <section
+                    className="space-y-2 border-t border-border py-3"
+                    aria-label="Session defaults"
+                  >
+                    <h3 className={AGENT_HEADING}>Session defaults</h3>
 
-                  <SelectField
-                    label="Default Provider"
-                    value={agentSettings.defaultProvider}
-                    onChange={(v) =>
-                      onUpdateAgentSettings({ defaultProvider: v as AgentProviderId })
-                    }
-                    options={[
-                      { value: "claude", label: "Claude Code" },
-                      { value: "codex", label: "OpenAI Codex" },
-                      { value: "antigravity", label: "Antigravity (ACP)" },
-                      { value: "custom-acp", label: "Custom ACP" },
-                    ]}
-                  />
+                    <SelectField
+                      inset
+                      label="Default provider"
+                      value={agentSettings.defaultProvider}
+                      onChange={(v) =>
+                        onUpdateAgentSettings({ defaultProvider: v as AgentProviderId })
+                      }
+                      options={[
+                        { value: "claude", label: "Claude Code" },
+                        { value: "codex", label: "OpenAI Codex" },
+                        { value: "antigravity", label: "Antigravity (ACP)" },
+                        { value: "custom-acp", label: "Custom ACP" },
+                      ]}
+                    />
 
-                  <SelectField
-                    label="Default Interaction Mode"
-                    value={agentSettings.defaultInteractionMode}
-                    onChange={(v) =>
-                      onUpdateAgentSettings({ defaultInteractionMode: v as InteractionMode })
-                    }
-                    options={[
-                      { value: "default", label: "Default (Edit)" },
-                      { value: "plan", label: "Plan" },
-                    ]}
-                  />
+                    <SelectField
+                      inset
+                      label="Default interaction mode"
+                      value={agentSettings.defaultInteractionMode}
+                      onChange={(v) =>
+                        onUpdateAgentSettings({ defaultInteractionMode: v as InteractionMode })
+                      }
+                      options={[
+                        { value: "default", label: "Default (edit)" },
+                        { value: "plan", label: "Plan" },
+                      ]}
+                    />
 
-                  <SelectField
-                    label="Default Permission Policy"
-                    value={agentSettings.defaultRuntimeMode}
-                    onChange={(v) =>
-                      onUpdateAgentSettings({ defaultRuntimeMode: v as RuntimeMode })
-                    }
-                    options={[
-                      { value: "approval-required", label: "Approval Required (Ask)" },
-                      { value: "auto-accept-edits", label: "Auto-Accept File Edits" },
-                      { value: "full-access", label: "Full Access" },
-                    ]}
-                  />
+                    <SelectField
+                      inset
+                      label="Default permission policy"
+                      value={agentSettings.defaultRuntimeMode}
+                      onChange={(v) =>
+                        onUpdateAgentSettings({ defaultRuntimeMode: v as RuntimeMode })
+                      }
+                      options={[
+                        { value: "approval-required", label: "Approval required (ask)" },
+                        { value: "auto-accept-edits", label: "Auto-accept file edits" },
+                        { value: "full-access", label: "Full access" },
+                      ]}
+                    />
+                  </section>
 
                   {onUpdateCustomProvider && (
-                    <>
-                      <SectionHeader>Custom CLI Paths & ACP Server</SectionHeader>
-
-                      {(["claude", "codex", "antigravity"] as const).map((pid) => (
-                        <div key={pid} className="py-1.5 space-y-1">
-                          <label
-                            htmlFor={`agent-bin-${pid}`}
-                            className="text-xs font-mono uppercase text-foreground-secondary block"
-                          >
-                            {pid} Binary Path (optional)
+                    <div className="grid gap-4 border-t border-border py-3 sm:grid-cols-2">
+                      <section className="min-w-0 space-y-2" aria-label="CLI paths">
+                        <h3 className={AGENT_HEADING}>CLI paths</h3>
+                        {CLI_PATH_FIELDS.map(({ id, label }) => (
+                          <label key={id} className="block space-y-1 text-xs text-foreground">
+                            <span>{label}</span>
+                            <input
+                              type="text"
+                              value={agentSettings.customProviders[id].binaryPath}
+                              onChange={(e) =>
+                                onUpdateCustomProvider(id, { binaryPath: e.target.value })
+                              }
+                              placeholder="Auto-detect"
+                              className={`${AGENT_INPUT} font-mono`}
+                            />
                           </label>
-                          <input
-                            id={`agent-bin-${pid}`}
-                            type="text"
-                            value={agentSettings.customProviders[pid].binaryPath}
-                            onChange={(e) =>
-                              onUpdateCustomProvider(pid, { binaryPath: e.target.value })
-                            }
-                            placeholder={`Auto-detect ${pid === "antigravity" ? "agy" : pid}`}
-                            className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
-                          />
-                        </div>
-                      ))}
+                        ))}
+                      </section>
 
-                      <div className="pt-2 border-t border-border space-y-2">
-                        <div className="text-xs font-mono uppercase text-foreground-secondary">
-                          Custom ACP Agent (Optional)
-                        </div>
-                        <input
-                          type="text"
-                          value={agentSettings.customProviders["custom-acp"].customName}
-                          onChange={(e) =>
-                            onUpdateCustomProvider("custom-acp", { customName: e.target.value })
-                          }
-                          placeholder="Display name (e.g. Custom ACP Agent)"
-                          aria-label="Custom ACP agent display name"
-                          className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
-                        />
-                        <input
-                          type="text"
-                          value={agentSettings.customProviders["custom-acp"].customCommand}
-                          onChange={(e) =>
-                            onUpdateCustomProvider("custom-acp", { customCommand: e.target.value })
-                          }
-                          placeholder="Command (e.g. /path/to/agent-acp)"
-                          aria-label="Custom ACP agent command"
-                          className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
-                        />
-                        <input
-                          type="text"
-                          value={agentSettings.customProviders["custom-acp"].customArgs}
-                          onChange={(e) =>
-                            onUpdateCustomProvider("custom-acp", { customArgs: e.target.value })
-                          }
-                          placeholder="Arguments (e.g. --stdio)"
-                          aria-label="Custom ACP agent arguments"
-                          className="w-full px-3 py-1.5 text-xs border border-border focus:outline-none focus:border-foreground font-mono bg-background"
-                        />
-                      </div>
-                    </>
+                      <section
+                        className="min-w-0 space-y-2 sm:border-l sm:border-border sm:pl-4"
+                        aria-label="Custom ACP"
+                      >
+                        <h3 className={AGENT_HEADING}>Custom ACP</h3>
+                        {CUSTOM_ACP_FIELDS.map(({ key, label, placeholder }) => (
+                          <label key={key} className="block space-y-1 text-xs text-foreground">
+                            <span>{label}</span>
+                            <input
+                              type="text"
+                              value={agentSettings.customProviders["custom-acp"][key]}
+                              onChange={(e) =>
+                                onUpdateCustomProvider("custom-acp", { [key]: e.target.value })
+                              }
+                              placeholder={placeholder}
+                              className={
+                                key === "customName" ? AGENT_INPUT : `${AGENT_INPUT} font-mono`
+                              }
+                            />
+                          </label>
+                        ))}
+                      </section>
+                    </div>
                   )}
                 </>
               )}
             </Tabs.Content>
           </Tabs.Root>
 
-          {/* Footer */}
-          <div className="flex items-center justify-between px-5 py-4 border-t border-border">
-            {canResetActiveTab ? (
+          <div className="flex shrink-0 items-center justify-between gap-3 px-5 py-3">
+            {canResetActiveTab && (
               <button
                 type="button"
                 onClick={
                   activeTab === "editor" ? handleResetEditorSettings : handleResetLatexSettings
                 }
-                className="text-xs text-muted hover:text-foreground transition-colors flex items-center gap-1.5 group"
+                className="btn btn-ghost btn-sm"
               >
-                <ArrowCounterClockwiseIcon className="size-3.5 group-hover:rotate-[-45deg] transition-transform" />
-                Reset to Defaults
+                <ArrowCounterClockwiseIcon className="size-3.5" aria-hidden="true" />
+                Reset to defaults
               </button>
-            ) : (
-              <div className="text-xs text-muted-foreground">
-                Agent CLI settings auto-save locally.
-              </div>
             )}
-            <Dialog.Close className="btn btn-primary">Done</Dialog.Close>
+            <Dialog.Close className="btn btn-secondary btn-sm ml-auto">Done</Dialog.Close>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
