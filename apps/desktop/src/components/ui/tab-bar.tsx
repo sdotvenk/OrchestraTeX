@@ -434,7 +434,7 @@ export function TabBar<T extends TabItem>({
     <>
       <div
         ref={containerRef}
-        className={`flex items-center gap-0.5 px-2 border-b border-border bg-panel overflow-x-auto min-h-[36px] ${className}`}
+        className={`flex items-center h-9 border-b border-border bg-[var(--tab-strip-bg)] overflow-x-auto ${className}`}
         style={{
           cursor: onTabReorder && dragState.isDragging ? "grabbing" : undefined,
         }}
@@ -454,10 +454,10 @@ export function TabBar<T extends TabItem>({
               key={tab.id}
               ref={(node) => setTabRef(tab.id, node)}
               data-tab-id={tab.id}
-              className={`group relative flex items-center h-[36px] transition-colors select-none border-b-2 -mb-px ${
+              className={`group relative flex items-center h-9 border-r border-border font-mono text-[12px] transition-colors select-none ${
                 isActive
-                  ? "border-accent text-accent"
-                  : "border-transparent text-muted hover:text-foreground"
+                  ? "bg-panel text-foreground-strong font-medium shadow-[inset_0_-2px_0_var(--text-strong)]"
+                  : "text-muted hover:text-foreground"
               } ${onTabReorder ? "cursor-grab" : ""} ${isDragged ? "opacity-40" : ""}`}
               title={
                 tab.voiceDot?.label

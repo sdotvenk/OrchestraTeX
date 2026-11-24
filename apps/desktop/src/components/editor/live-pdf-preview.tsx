@@ -4,6 +4,8 @@ import {
   ArrowClockwise,
   Broom,
   CaretDown,
+  CaretLeft,
+  CaretRight,
   CheckCircle,
   Crosshair,
   DownloadSimple,
@@ -12,7 +14,6 @@ import {
   Sparkle,
   SpinnerGap,
   Stop,
-  TerminalWindow,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -26,7 +27,7 @@ import type {
   LaTeXCompilersStatus,
   LatexDiagnostic,
 } from "@/lib/latex/types";
-import { type PdfHighlightTarget, PdfViewer } from "./pdf-viewer";
+import { type PdfHighlightTarget, PdfViewer, type PdfViewerControls } from "./pdf-viewer";
 
 interface LivePdfPreviewProps {
   projectPath: string | null;
@@ -49,6 +50,7 @@ interface LivePdfPreviewProps {
   onToggleAutoCompile: () => void;
   onChangeCompiler?: (compiler: LaTeXCompiler) => void;
   onToggleShellEscape?: () => void;
+  onSelectMainFile?: () => void;
   onOpenBuildSettings?: () => void;
   onCleanAuxFiles: () => void;
   onForwardSync: () => void;
@@ -68,7 +70,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   compileLog,
   diagnostics,
   lastResult,
-  lastCompileDurationMs,
+  lastCompileDurationMs: _lastCompileDurationMs,
   autoCompile,
   staleAgentEdits = 0,
   compiler = "pdflatex",
@@ -80,6 +82,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   onToggleAutoCompile,
   onChangeCompiler,
   onToggleShellEscape,
+  onSelectMainFile,
   onOpenBuildSettings,
   onCleanAuxFiles,
   onForwardSync,
@@ -87,13 +90,22 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   onJumpToDiagnostic,
   onFixDiagnosticsWithAi,
   onOpenBuildActivity,
-  onClose,
+  onClose: _onClose,
 }: LivePdfPreviewProps) {
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<"issues" | "log">("issues");
   const [compileMenuOpen, setCompileMenuOpen] = useState(false);
+  const [fitMenuOpen, setFitMenuOpen] = useState(false);
+  const [pdfState, setPdfState] = useState<{
+    currentPage: number;
+    numPages: number;
+    fitMode: "custom" | "width" | "page";
+    scale: number;
+  }>({ currentPage: 1, numPages: 0, fitMode: "width", scale: 1 });
+  const pdfControlRef = useRef<PdfViewerControls | null>(null);
+  const fitMenuRef = useRef<HTMLDivElement>(null);
   const compileMenuId = useId();
   const compileMenuRef = useRef<HTMLDivElement>(null);
   const compileMenuButton = useRef<HTMLButtonElement>(null);
@@ -178,17 +190,34 @@ export const LivePdfPreview = memo(function LivePdfPreview({
     }
   };
 
+  const mainFileName = mainFile ? (mainFile.split("/").pop() ?? mainFile) : "Select…";
+
+  useEffect(() => {
+    if (!fitMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (
+        fitMenuRef.current &&
+        e.target instanceof Node &&
+        !fitMenuRef.current.contains(e.target)
+      ) {
+        setFitMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [fitMenuOpen]);
+
   return (
-    <div className="h-full w-full flex flex-col bg-panel border-l border-border min-w-0">
-      {/* Score PDF Header Strip */}
-      <div className="h-10 px-2.5 border-b border-border bg-bg flex items-center justify-between gap-2 shrink-0">
+    <div className="h-full w-full flex flex-col bg-stage min-w-0">
+      {/* Unified 44px PDF Header Strip */}
+      <div className="h-11 px-2.5 border-b border-border bg-bg flex items-center gap-1.5 shrink-0">
         <div className="flex items-center gap-1.5 min-w-0">
           {compileStatus === "compiling" ? (
             <button
               type="button"
               onClick={onStopCompile}
               className="h-7 px-2.5 rounded-lg bg-error-bg text-error hover:brightness-95 text-[12px] font-medium inline-flex items-center gap-1.5 shrink-0 transition-all"
-              title="Stop compilation"
+              title="Stop compilation (⌘.)"
             >
               <Stop className="size-3.5" weight="fill" aria-hidden="true" />
               <span>Stop</span>
@@ -196,13 +225,13 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           ) : (
             <div
               ref={compileMenuRef}
-              className="relative inline-flex items-center shrink-0 rounded-lg shadow-[2px_2px_0_var(--primary-offset,transparent)]"
+              className="relative inline-flex items-center shrink-0 rounded-lg shadow-[2px_2px_0_var(--primary-offset)]"
             >
               <button
                 type="button"
                 disabled={!projectPath}
                 onClick={onCompile}
-                className="h-7 pl-2.5 pr-2 rounded-l-lg bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 text-[12px] font-medium inline-flex items-center gap-1.5 transition-colors"
+                className="h-7 pl-2.5 pr-2 rounded-l-lg border-[1.5px] border-primary bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors"
                 title="Recompile PDF (Cmd/Ctrl+Shift+B)"
                 aria-label="Recompile PDF"
               >
@@ -217,7 +246,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                 aria-expanded={compileMenuOpen}
                 aria-controls={compileMenuOpen ? compileMenuId : undefined}
                 aria-label="Compile options"
-                className="h-7 px-1.5 rounded-r-lg bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 border-l border-primary-text/25 inline-flex items-center justify-center transition-colors"
+                className="h-7 px-1.5 rounded-r-lg border-[1.5px] border-l-0 border-primary bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 inline-flex items-center justify-center transition-colors"
               >
                 <CaretDown className="size-3" aria-hidden="true" />
               </button>
@@ -225,92 +254,148 @@ export const LivePdfPreview = memo(function LivePdfPreview({
               {compileMenuOpen && (
                 <div
                   id={compileMenuId}
-                  className="absolute left-0 top-full mt-1 w-52 rounded-lg border border-border bg-panel shadow-md py-1 z-50 text-[12px]"
+                  role="menu"
+                  aria-label="Compile options"
+                  className="ox-popover absolute left-0 top-full mt-1.5 w-[264px] p-1.5 z-50 text-[12.5px]"
                 >
-                  <div className="px-3 py-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted">
-                    Engine
-                  </div>
+                  <div className="ox-sec px-2.5 pt-1.5 pb-1">Engine</div>
                   {(
-                    ["auto", "pdflatex", "xelatex", "lualatex", "latexmk", "tectonic"] as const
+                    [
+                      { id: "pdflatex", label: "pdfLaTeX" },
+                      { id: "xelatex", label: "XeLaTeX" },
+                      { id: "lualatex", label: "LuaLaTeX" },
+                      { id: "latexmk", label: "latexmk", hint: "auto" },
+                      { id: "tectonic", label: "Tectonic" },
+                    ] as const
                   ).map((eng) => {
                     const isAvailable =
-                      eng === "auto" ||
-                      !compilersStatus ||
-                      compilersStatus[eng]?.available !== false;
+                      !compilersStatus || compilersStatus[eng.id]?.available !== false;
+                    const isSelected = compiler === eng.id;
                     return (
                       <button
-                        key={eng}
+                        key={eng.id}
                         type="button"
-                        aria-pressed={compiler === eng}
+                        role="menuitemradio"
+                        aria-checked={isSelected}
                         disabled={!isAvailable}
                         onClick={() => {
                           if (!isAvailable) return;
-                          onChangeCompiler?.(eng);
+                          onChangeCompiler?.(eng.id);
                           setCompileMenuOpen(false);
                           compileMenuButton.current?.focus();
                         }}
-                        className={`w-full px-3 py-1.5 text-left flex items-center justify-between transition-colors ${
+                        className={`w-full px-2.5 py-1.5 rounded-md text-left flex items-center justify-between transition-colors ${
                           !isAvailable
                             ? "opacity-45 cursor-not-allowed text-muted"
-                            : compiler === eng
-                              ? "bg-accent-soft text-accent font-medium"
+                            : isSelected
+                              ? "bg-sunken text-foreground-strong font-medium"
                               : "text-foreground hover:bg-subtle"
                         }`}
                       >
-                        <span className="font-mono">{eng}</span>
+                        <span>{eng.label}</span>
                         {!isAvailable ? (
-                          <span className="text-[10px] text-muted">not found</span>
-                        ) : compiler === eng ? (
+                          <span className="text-[10.5px] text-muted">not found</span>
+                        ) : isSelected ? (
                           <CheckCircle
-                            className="size-3.5 shrink-0"
+                            className="size-3.5 shrink-0 text-foreground-strong"
                             weight="fill"
                             aria-hidden="true"
                           />
+                        ) : "hint" in eng && eng.hint ? (
+                          <span className="text-[11px] text-muted">{eng.hint}</span>
                         ) : null}
                       </button>
                     );
                   })}
                   <div className="my-1 border-t border-border" />
-                  {onToggleShellEscape && compiler !== "tectonic" && (
+                  {onSelectMainFile && (
                     <button
                       type="button"
-                      aria-pressed={shellEscape}
+                      role="menuitem"
                       onClick={() => {
-                        onToggleShellEscape();
                         setCompileMenuOpen(false);
-                        compileMenuButton.current?.focus();
+                        onSelectMainFile();
                       }}
-                      className="w-full px-3 py-1.5 text-left flex items-center justify-between text-foreground hover:bg-subtle transition-colors"
+                      className="w-full px-2.5 py-1.5 rounded-md text-left flex items-center justify-between text-foreground hover:bg-subtle transition-colors"
                     >
-                      <span>Shell escape</span>
-                      <span className="font-mono text-[11px] text-muted">
-                        {shellEscape ? "on" : "off"}
+                      <span>Main document</span>
+                      <span className="font-mono text-[11.5px] text-foreground-strong truncate max-w-[120px]">
+                        {mainFileName} ▸
                       </span>
                     </button>
                   )}
                   <button
                     type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      onToggleAutoCompile();
+                      setCompileMenuOpen(false);
+                      compileMenuButton.current?.focus();
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-md text-left flex items-center justify-between text-foreground hover:bg-subtle transition-colors"
+                  >
+                    <span>Auto-compile</span>
+                    <span className="text-[11.5px] text-foreground-strong">
+                      {autoCompile ? "On" : "Off"}
+                    </span>
+                  </button>
+                  {onToggleShellEscape && compiler !== "tectonic" && (
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={shellEscape}
+                      onClick={() => {
+                        onToggleShellEscape();
+                        setCompileMenuOpen(false);
+                        compileMenuButton.current?.focus();
+                      }}
+                      className="w-full px-2.5 py-1.5 rounded-md text-left flex items-center justify-between text-foreground hover:bg-subtle transition-colors"
+                    >
+                      <span>Shell escape</span>
+                      <span className="text-[11.5px] text-foreground-strong">
+                        {shellEscape ? "On" : "Off"}
+                      </span>
+                    </button>
+                  )}
+                  <div className="my-1 border-t border-border" />
+                  <button
+                    type="button"
+                    role="menuitem"
                     onClick={() => {
                       setCompileMenuOpen(false);
                       compileMenuButton.current?.focus();
                       onCleanAuxFiles();
                     }}
-                    className="w-full px-3 py-1.5 text-left flex items-center gap-2 text-foreground hover:bg-subtle transition-colors"
+                    className="w-full px-2.5 py-1.5 rounded-md text-left flex items-center gap-2 text-foreground hover:bg-subtle transition-colors"
                   >
                     <Broom className="size-3.5 text-muted" aria-hidden="true" />
-                    <span>Clean aux files</span>
+                    <span>Clean auxiliary files</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled
+                    onClick={() => {
+                      setCompileMenuOpen(false);
+                      onStopCompile();
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-md text-left flex items-center justify-between text-foreground hover:bg-subtle disabled:opacity-45 transition-colors"
+                  >
+                    <span>Stop compilation</span>
+                    <span className="font-mono text-[11px] text-muted">⌘.</span>
                   </button>
                   {onOpenBuildSettings && (
                     <button
                       type="button"
+                      role="menuitem"
                       onClick={() => {
                         setCompileMenuOpen(false);
                         onOpenBuildSettings();
                       }}
-                      className="w-full px-3 py-1.5 text-left flex items-center gap-2 text-foreground hover:bg-subtle transition-colors"
+                      className="w-full px-2.5 py-1.5 rounded-md text-left flex items-center gap-2 text-foreground hover:bg-subtle transition-colors"
                     >
                       <GearSix className="size-3.5 text-muted" aria-hidden="true" />
-                      <span>Build settings...</span>
+                      <span>Build settings…</span>
                     </button>
                   )}
                 </div>
@@ -318,76 +403,146 @@ export const LivePdfPreview = memo(function LivePdfPreview({
             </div>
           )}
 
-          {/* Status & Issues Pill */}
-          <button
-            type="button"
-            onClick={() => {
-              const targetTab =
-                errorDiags.length > 0 || warningDiags.length > 0 ? "problems" : "build-log";
-              if (onOpenBuildActivity) {
-                onOpenBuildActivity(targetTab);
-                return;
-              }
-              setDrawerOpen((p) => !p);
-              setDrawerTab(targetTab === "problems" ? "issues" : "log");
-            }}
-            className={`h-6 px-2.5 rounded-full text-[11.5px] font-medium inline-flex items-center gap-1.5 truncate transition-colors ${
-              compileStatus === "error" || errorDiags.length > 0
-                ? "bg-error-bg text-error"
-                : compileStatus === "success"
-                  ? "bg-success-bg text-success"
-                  : "bg-subtle text-muted hover:text-foreground"
-            }`}
-            title="Toggle compilation issues and logs"
-            aria-expanded={onOpenBuildActivity ? undefined : drawerOpen}
-          >
-            {compileStatus === "compiling" ? (
-              <>
-                <SpinnerGap className="size-3 animate-spin shrink-0" aria-hidden="true" />
-                <span>Compiling...</span>
-              </>
-            ) : compileStatus === "error" || errorDiags.length > 0 ? (
-              <>
-                <WarningCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
-                <span className="tabular-nums">
-                  {errorDiags.length > 0
-                    ? `${errorDiags.length} ${errorDiags.length === 1 ? "error" : "errors"}`
-                    : "Build failed"}
-                  {warningDiags.length > 0 ? ` · ${warningDiags.length} warn` : ""}
-                </span>
-              </>
-            ) : compileStatus === "success" ? (
-              <>
-                <CheckCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
-                <span className="tabular-nums">
-                  PDF ready
-                  {lastCompileDurationMs != null
-                    ? ` · ${(lastCompileDurationMs / 1000).toFixed(1)}s`
-                    : ""}
-                  {warningDiags.length > 0 ? ` · ${warningDiags.length} warn` : ""}
-                </span>
-              </>
-            ) : (
-              <span>Logs</span>
-            )}
-          </button>
+          {compileStatus === "compiling" ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-subtle px-2 py-0.5 text-[11.5px] text-muted">
+              <SpinnerGap className="size-3 animate-spin shrink-0" aria-hidden="true" />
+              <span>Compiling…</span>
+            </span>
+          ) : compileStatus === "error" || errorDiags.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (onOpenBuildActivity) {
+                  onOpenBuildActivity("problems");
+                  return;
+                }
+                setDrawerOpen((p) => !p);
+                setDrawerTab("issues");
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-error-bg border border-[var(--danger-line)] px-2 py-0.5 text-[11.5px] text-error font-medium truncate transition-colors"
+              title="Open Problems"
+            >
+              <WarningCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
+              <span className="tabular-nums">
+                Build failed · {errorDiags.length} {errorDiags.length === 1 ? "error" : "errors"}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onToggleAutoCompile}
+              className="ml-1 inline-flex items-center gap-1.5 text-[11.5px] text-muted hover:text-foreground transition-colors shrink-0"
+              title="Toggle automatic compilation on save"
+              aria-pressed={autoCompile}
+            >
+              <span
+                className={`relative inline-block w-[22px] h-[12px] rounded-full transition-colors ${
+                  autoCompile ? "bg-primary" : "bg-border-dark"
+                }`}
+                aria-hidden="true"
+              >
+                <span
+                  className={`absolute top-[2px] w-[8px] h-[8px] rounded-full bg-panel transition-transform ${
+                    autoCompile ? "right-[2px]" : "left-[2px]"
+                  }`}
+                />
+              </span>
+              <span>Auto</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={onToggleAutoCompile}
-            className={`h-6 px-2 rounded-full text-[11px] font-medium transition-colors shrink-0 ${
-              autoCompile
-                ? "bg-accent-soft text-accent"
-                : "bg-subtle text-muted hover:text-foreground"
-            }`}
-            title="Toggle automatic compilation on save"
-            aria-pressed={autoCompile}
-          >
-            Auto {autoCompile ? "on" : "off"}
-          </button>
+          {pdfState.numPages > 0 && (
+            <>
+              <span className="w-px h-4 bg-border mx-0.5 shrink-0" aria-hidden="true" />
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => pdfControlRef.current?.prevPage()}
+                  disabled={pdfState.currentPage <= 1}
+                  className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+                  aria-label="Previous page"
+                >
+                  <CaretLeft className="size-3.5" aria-hidden="true" />
+                </button>
+                <span className="font-mono text-[12px] text-foreground tabular-nums px-1">
+                  {pdfState.currentPage} / {pdfState.numPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => pdfControlRef.current?.nextPage()}
+                  disabled={pdfState.currentPage >= pdfState.numPages}
+                  className="size-6 rounded-md inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+                  aria-label="Next page"
+                >
+                  <CaretRight className="size-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="ml-auto flex items-center gap-1 shrink-0">
+          {pdfData && (
+            <div ref={fitMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setFitMenuOpen((p) => !p)}
+                className="h-7 px-2 rounded-md text-[12px] text-foreground hover:bg-subtle transition-colors"
+                aria-expanded={fitMenuOpen}
+              >
+                {pdfState.fitMode === "width"
+                  ? "Fit width"
+                  : pdfState.fitMode === "page"
+                    ? "Fit page"
+                    : `${Math.round(pdfState.scale * 100)}%`}
+              </button>
+              {fitMenuOpen && (
+                <div className="ox-popover absolute right-0 top-full mt-1 w-32 p-1 z-50 text-[12px] flex flex-col gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pdfControlRef.current?.setFitWidth();
+                      setFitMenuOpen(false);
+                    }}
+                    className="w-full px-2 py-1 rounded text-left hover:bg-subtle text-foreground"
+                  >
+                    Fit width
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pdfControlRef.current?.setFitPage();
+                      setFitMenuOpen(false);
+                    }}
+                    className="w-full px-2 py-1 rounded text-left hover:bg-subtle text-foreground"
+                  >
+                    Fit page
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pdfControlRef.current?.zoomIn();
+                      setFitMenuOpen(false);
+                    }}
+                    className="w-full px-2 py-1 rounded text-left hover:bg-subtle text-foreground"
+                  >
+                    Zoom in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pdfControlRef.current?.zoomOut();
+                      setFitMenuOpen(false);
+                    }}
+                    className="w-full px-2 py-1 rounded text-left hover:bg-subtle text-foreground"
+                  >
+                    Zoom out
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             disabled={!pdfPath}
@@ -409,58 +564,49 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           >
             <DownloadSimple className="size-3.5" aria-hidden="true" />
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (onOpenBuildActivity) {
-                onOpenBuildActivity("build-log");
-                return;
-              }
-              setDrawerOpen((open) => !open || drawerTab !== "log");
-              setDrawerTab("log");
-            }}
-            className={`size-7 rounded-lg inline-flex items-center justify-center transition-colors ${
-              drawerOpen
-                ? "bg-accent-soft text-accent"
-                : "text-muted hover:text-foreground hover:bg-subtle"
-            }`}
-            title="Toggle compile log drawer"
-            aria-label="Toggle compile logs"
-            aria-expanded={drawerOpen && drawerTab === "log"}
-          >
-            <TerminalWindow className="size-3.5" aria-hidden="true" />
-          </button>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-            title="Hide PDF Preview (Cmd+P)"
-            aria-label="Close Live PDF Preview"
-          >
-            <X className="size-3.5" aria-hidden="true" />
-          </button>
         </div>
       </div>
 
-      {pdfData && staleAgentEdits > 0 && (
-        <div className="bg-stage px-3 py-2" role="status">
-          <span className="inline-block rounded-full border border-[var(--stale-line)] bg-[var(--stale-bg)] px-2 py-0.5 text-xs text-[var(--stale)]">
-            {staleAgentEdits} agent {staleAgentEdits === 1 ? "edit" : "edits"} since this build
-          </span>
-        </div>
-      )}
-
       {/* Main PDF Body on Calm Drafting Mat */}
-      <div className="flex-1 min-h-0 flex flex-col bg-stage">
+      <div className="relative flex-1 min-h-0 flex flex-col bg-stage">
+        {pdfData && staleAgentEdits > 0 && compileStatus !== "error" && (
+          <button
+            type="button"
+            onClick={onCompile}
+            className="absolute left-1/2 top-3 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-full border border-[var(--voice-claude-line)] bg-panel px-2.5 py-1 text-[11.5px] text-muted shadow-sm whitespace-nowrap hover:text-foreground transition-colors"
+          >
+            <span
+              className="inline-block w-[7px] h-[7px] rounded-full bg-[var(--voice-claude-ink)]"
+              aria-hidden="true"
+            />
+            <span>
+              {staleAgentEdits} {staleAgentEdits === 1 ? "edit" : "edits"} since this build ·{" "}
+              <span className="font-medium text-foreground-strong">⌘↵ to refresh</span>
+            </span>
+          </button>
+        )}
+
+        {pdfData && compileStatus === "error" && (
+          <div className="absolute inset-x-4 top-3 z-10 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12px] text-muted shadow-sm">
+            Showing last good PDF. It updates after the next successful build.
+          </div>
+        )}
+
         {pdfData ? (
-          <PdfViewer
-            pdfData={pdfData}
-            onSynctexClick={onSynctexClick}
-            highlightTarget={highlightTarget}
-            compactToolbar={true}
-          />
+          <div
+            className={`flex-1 min-h-0 ${
+              compileStatus === "error" ? "opacity-55 grayscale-[40%]" : ""
+            }`}
+          >
+            <PdfViewer
+              pdfData={pdfData}
+              onSynctexClick={onSynctexClick}
+              highlightTarget={highlightTarget}
+              hideToolbar
+              onStateChange={setPdfState}
+              controlRef={pdfControlRef}
+            />
+          </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
             <FilePdf className="size-10 text-muted-foreground opacity-60" aria-hidden="true" />

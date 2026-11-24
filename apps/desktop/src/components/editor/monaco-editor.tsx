@@ -39,6 +39,12 @@ type Props = {
   attributedEdits?: AttributedEdit[];
   onKeepEdit?: (edit: AttributedEdit) => void;
   onUndoEdit?: (edit: AttributedEdit) => void;
+  pendingSnippet?: {
+    id: number;
+    before: string;
+    after: string;
+    placeholder?: string;
+  } | null;
 };
 
 type VimModeController = {
@@ -136,6 +142,7 @@ export const MonacoEditor = memo(function MonacoEditor({
   attributedEdits,
   onKeepEdit,
   onUndoEdit,
+  pendingSnippet,
 }: Props) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -521,59 +528,108 @@ export const MonacoEditor = memo(function MonacoEditor({
     ed.focus();
   }, []);
 
+  useEffect(() => {
+    if (!pendingSnippet) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const model = ed.getModel();
+    const selection = ed.getSelection();
+    if (!model || !selection) return;
+    const selectedText = model.getValueInRange(selection);
+    const inner = selectedText || pendingSnippet.placeholder || "";
+    const text = `${pendingSnippet.before}${inner}${pendingSnippet.after}`;
+    ed.executeEdits("latex-toolbar", [{ range: selection, text, forceMoveMarkers: true }]);
+    if (!selectedText && pendingSnippet.placeholder) {
+      const startOffset =
+        model.getOffsetAt({
+          lineNumber: selection.startLineNumber,
+          column: selection.startColumn,
+        }) + pendingSnippet.before.length;
+      const startPos = model.getPositionAt(startOffset);
+      const endPos = model.getPositionAt(startOffset + pendingSnippet.placeholder.length);
+      ed.setSelection({
+        startLineNumber: startPos.lineNumber,
+        startColumn: startPos.column,
+        endLineNumber: endPos.lineNumber,
+        endColumn: endPos.column,
+      });
+    }
+    ed.focus();
+  }, [pendingSnippet]);
+
   const pendingEdits = attributedEdits?.filter((edit) => edit.status === "pending");
 
   return (
     <div className={`relative flex flex-col ${className}`}>
       {pendingEdits && pendingEdits.length > 0 && (
         <section
-          className="absolute top-2 right-4 z-10 flex flex-col gap-1 max-w-[320px] pointer-events-auto"
+          className="absolute top-2 right-3.5 z-10 flex flex-col items-end gap-1.5 max-w-[340px] pointer-events-auto"
           aria-label="Attributed agent edits"
         >
           {pendingEdits.map((edit) => {
             const voice = VOICE_COLORS[edit.thread.providerId] ?? VOICE_COLORS["custom-acp"];
-            const label = `${edit.thread.providerId} · ${edit.thread.title}`;
+            const providerName =
+              edit.thread.providerId === "claude"
+                ? "Claude"
+                : edit.thread.providerId === "codex"
+                  ? "Codex"
+                  : edit.thread.providerId === "antigravity"
+                    ? "Antigravity"
+                    : "Agent";
+            const lineCount = Math.max(1, edit.endLine - edit.startLine + 1);
+            const changeSummary =
+              edit.endLine > edit.startLine ? `+${lineCount} lines` : "1 change";
+            const label = `${providerName} · ${changeSummary}`;
+            const isRunning = edit.thread.status === "running";
             return (
-              <div
-                key={edit.id}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-border bg-panel/95 backdrop-blur-sm shadow-sm text-[11.5px]"
-              >
-                <button
-                  type="button"
-                  onClick={() => jumpToAttributedEdit(edit)}
-                  className="inline-flex items-center gap-1.5 min-w-0 flex-1 text-left hover:underline"
-                  title={`Jump to ${label} (L${edit.startLine})`}
-                  aria-label={`Jump to ${label} at line ${edit.startLine}`}
-                >
-                  <span
-                    className="inline-block w-[7px] h-[7px] rounded-full flex-shrink-0"
+              <div key={edit.id} className="flex flex-col items-end gap-1">
+                {isRunning && (
+                  <div
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium text-white rounded-[5px_5px_5px_0] shadow-xs"
                     style={{ backgroundColor: voice.ink }}
-                    aria-hidden="true"
-                  />
-                  <span className="truncate font-medium" style={{ color: voice.text }}>
-                    {label}
-                  </span>
-                </button>
-                {onKeepEdit && (
+                  >
+                    <span>{providerName} · writing</span>
+                  </div>
+                )}
+                <div
+                  className="flex items-center gap-1.5 pl-2.5 pr-1 py-0.5 rounded-[8px] border bg-panel/95 backdrop-blur-sm shadow-sm text-[11.5px] text-muted"
+                  style={{ borderColor: voice.tint }}
+                >
                   <button
                     type="button"
-                    onClick={() => onKeepEdit(edit)}
-                    className="px-1.5 py-0.5 rounded text-[11px] text-foreground hover:bg-subtle transition-colors"
-                    aria-label={`Keep edit from ${label}`}
+                    onClick={() => jumpToAttributedEdit(edit)}
+                    className="inline-flex items-center gap-1.5 min-w-0 flex-1 text-left hover:underline"
+                    title={`Jump to ${providerName} · ${edit.thread.title} (L${edit.startLine})`}
+                    aria-label={`Jump to ${label} at line ${edit.startLine}`}
                   >
-                    Keep
+                    <span
+                      className="inline-block w-[7px] h-[7px] rounded-full flex-shrink-0"
+                      style={{ backgroundColor: voice.ink }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate font-medium text-foreground">{label}</span>
                   </button>
-                )}
-                {onUndoEdit && (
-                  <button
-                    type="button"
-                    onClick={() => onUndoEdit(edit)}
-                    className="px-1.5 py-0.5 rounded text-[11px] text-foreground hover:bg-subtle transition-colors"
-                    aria-label={`Undo edit from ${label}`}
-                  >
-                    Undo
-                  </button>
-                )}
+                  {onKeepEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onKeepEdit(edit)}
+                      className="px-1.5 py-0.5 rounded-[5px] text-[11.5px] text-foreground-strong hover:bg-subtle transition-colors"
+                      aria-label={`Keep edit from ${providerName}`}
+                    >
+                      Keep
+                    </button>
+                  )}
+                  {onUndoEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onUndoEdit(edit)}
+                      className="px-1.5 py-0.5 rounded-[5px] text-[11.5px] text-foreground-strong hover:bg-subtle transition-colors"
+                      aria-label={`Undo edit from ${providerName}`}
+                    >
+                      Undo
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

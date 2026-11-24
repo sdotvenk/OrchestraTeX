@@ -408,6 +408,21 @@ export default function EditorPage() {
 
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [visualMode, setVisualMode] = useState(false);
+  const [pendingSnippet, setPendingSnippet] = useState<{
+    id: number;
+    before: string;
+    after: string;
+    placeholder?: string;
+  } | null>(null);
+  const snippetCounterRef = useRef(0);
+  const triggerLatexSnippet = useCallback(
+    (before: string, after: string, placeholder?: string) => {
+      if (visualMode) setVisualMode(false);
+      snippetCounterRef.current += 1;
+      setPendingSnippet({ id: snippetCounterRef.current, before, after, placeholder });
+    },
+    [visualMode],
+  );
   const [livePreviewWidth, setLivePreviewWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("livePreviewWidth");
@@ -3137,11 +3152,18 @@ export default function EditorPage() {
       )}
 
       {selectedFile && /\.tex$/i.test(selectedFile) && !isShowingGitDiff && !binaryPreviewUrl && (
-        <div className="border-b border-border px-3 py-1">
-          <fieldset aria-label="Editing mode" className="inline-flex rounded-lg bg-sunken p-0.5">
+        <div className="h-[34px] px-2 border-b border-border/70 flex items-center gap-1 bg-panel shrink-0">
+          <fieldset
+            aria-label="Editing mode"
+            className="inline-flex bg-sunken rounded-[7px] p-0.5 border-0"
+          >
             <button
               type="button"
-              className={`btn btn-sm btn-ghost ${!visualMode ? "bg-panel text-foreground-strong" : ""}`}
+              className={`px-2.5 py-0.5 rounded-[5px] text-[12px] transition-colors ${
+                !visualMode
+                  ? "bg-panel text-foreground-strong font-medium ring-1 ring-border"
+                  : "text-muted hover:text-foreground"
+              }`}
               aria-pressed={!visualMode}
               onClick={() => setVisualMode(false)}
             >
@@ -3149,13 +3171,89 @@ export default function EditorPage() {
             </button>
             <button
               type="button"
-              className={`btn btn-sm btn-ghost ${visualMode ? "bg-panel text-foreground-strong" : ""}`}
+              className={`px-2.5 py-0.5 rounded-[5px] text-[12px] transition-colors ${
+                visualMode
+                  ? "bg-panel text-foreground-strong font-medium ring-1 ring-border"
+                  : "text-muted hover:text-foreground"
+              }`}
               aria-pressed={visualMode}
               onClick={() => setVisualMode(true)}
             >
               Visual
             </button>
           </fieldset>
+          <span className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden="true" />
+          <button
+            type="button"
+            aria-label="Bold"
+            onClick={() => triggerLatexSnippet("\\textbf{", "}", "text")}
+            className="h-6 min-w-6 px-1.5 rounded-[5px] text-[13px] font-bold text-foreground hover:bg-subtle transition-colors"
+          >
+            B
+          </button>
+          <button
+            type="button"
+            aria-label="Italic"
+            onClick={() => triggerLatexSnippet("\\textit{", "}", "text")}
+            className="h-6 min-w-6 px-1.5 rounded-[5px] text-[14px] italic font-serif text-foreground hover:bg-subtle transition-colors"
+          >
+            I
+          </button>
+          <button
+            type="button"
+            aria-label="Insert reference"
+            onClick={() => triggerLatexSnippet("\\ref{", "}", "label")}
+            className="h-6 px-1.5 rounded-[5px] text-[12px] font-mono text-foreground hover:bg-subtle transition-colors"
+          >
+            \ref
+          </button>
+          <button
+            type="button"
+            aria-label="Insert citation"
+            onClick={() => triggerLatexSnippet("\\cite{", "}", "key")}
+            className="h-6 px-1.5 rounded-[5px] text-[12px] font-mono text-foreground hover:bg-subtle transition-colors"
+          >
+            \cite
+          </button>
+          <button
+            type="button"
+            aria-label="Insert math"
+            onClick={() => triggerLatexSnippet("$", "$", "x")}
+            className="h-6 px-1.5 rounded-[5px] text-[13px] italic font-serif text-foreground hover:bg-subtle transition-colors"
+          >
+            Σ
+          </button>
+          <button
+            type="button"
+            aria-label="Insert figure"
+            onClick={() =>
+              triggerLatexSnippet(
+                "\\begin{figure}[t]\n  \\centering\n  \\includegraphics[width=\\linewidth]{",
+                "}\n  \\caption{}\n  \\label{fig:}\n\\end{figure}",
+                "figure.pdf",
+              )
+            }
+            className="h-6 px-1.5 rounded-[5px] text-[12px] text-foreground hover:bg-subtle transition-colors"
+          >
+            Figure
+          </button>
+          <button
+            type="button"
+            aria-label="Insert table"
+            onClick={() =>
+              triggerLatexSnippet(
+                "\\begin{table}[t]\n  \\centering\n  \\begin{tabular}{cc}\n    ",
+                "\n  \\end{tabular}\n  \\caption{}\n  \\label{tab:}\n\\end{table}",
+                "a & b \\\\",
+              )
+            }
+            className="h-6 px-1.5 rounded-[5px] text-[12px] text-foreground hover:bg-subtle transition-colors"
+          >
+            Table
+          </button>
+          <span className="ml-auto font-mono text-[11.5px] text-muted truncate">
+            {selectedFile.split("/").join(" / ")}
+          </span>
         </div>
       )}
       {selectedFile ? (
@@ -3272,6 +3370,7 @@ export default function EditorPage() {
                   editorSettings={editorSettings.settings}
                   editorTheme={editorSettings.editorTheme}
                   goToLine={pendingGoToLine}
+                  pendingSnippet={pendingSnippet}
                   className="h-full"
                 />
               )}
@@ -4037,10 +4136,10 @@ export default function EditorPage() {
             </AnimatePresence>
           )}
 
-          {/* Primary Inset Frame: Home OR Unified Editor + Live PDF */}
-          <div className="flex-1 min-w-0 w-0 flex flex-col ox-frame">
-            <div className="flex-1 min-h-0 flex overflow-hidden">
-              <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {/* Primary Write Column: Separate Inset Frames for Editor, Live PDF, and BuildActivityDrawer */}
+          <div className="flex-1 min-w-0 w-0 flex flex-col gap-2 min-h-0">
+            <div className="flex-1 min-h-0 flex gap-2">
+              <div className="flex-1 min-w-0 flex flex-col overflow-hidden ox-frame">
                 {daemon.projectPath && editorPanelItems.length > 0 ? (
                   <div ref={editorWorkspaceRef} className="relative flex-1 min-h-0">
                     {splitDropHint && (
@@ -4104,7 +4203,7 @@ export default function EditorPage() {
                       width:
                         resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
                     }}
-                    className="flex-shrink-0 min-w-0 max-w-[60%] h-full overflow-hidden"
+                    className="flex-shrink-0 min-w-0 max-w-[60%] h-full rounded-[10px] border border-border bg-stage overflow-hidden shadow-[var(--frame-shadow)]"
                   >
                     <LivePdfPreview
                       projectPath={daemon.projectPath}
@@ -4137,6 +4236,7 @@ export default function EditorPage() {
                         setSettingsInitialTab("build");
                         setShowLatexSettings(true);
                       }}
+                      onSelectMainFile={() => setShowMainFileDialog(true)}
                       onCleanAuxFiles={handleCleanAuxFiles}
                       onForwardSync={handleLivePreviewForwardSync}
                       onSynctexClick={handleLivePreviewSynctexClick}
@@ -4223,6 +4323,29 @@ export default function EditorPage() {
                   />
                 }
                 diagnostics={latexCompiler.diagnostics}
+                threadStatuses={agent.threads.slice(0, 3).map((t) => ({
+                  id: t.id,
+                  providerId: t.providerId,
+                  label:
+                    t.status === "running"
+                      ? `${t.providerId === "claude" ? "Claude" : t.providerId === "codex" ? "Codex" : t.providerId === "antigravity" ? "Antigravity" : "Agent"} editing`
+                      : `${t.providerId === "claude" ? "Claude" : t.providerId === "codex" ? "Codex" : t.providerId === "antigravity" ? "Antigravity" : "Agent"} ${t.status === "error" ? "error" : "done"}`,
+                }))}
+                buildSummary={
+                  latexCompiler.lastCompileDurationMs != null
+                    ? `${latexSettings.settings.compiler} · ${latexCompiler.compileStatus === "error" ? "failed after " : ""}${latexCompiler.lastCompileDurationMs} ms`
+                    : undefined
+                }
+                mainFileLogName={
+                  latexSettings.settings.mainFile
+                    ? `${
+                        latexSettings.settings.mainFile
+                          .split("/")
+                          .pop()
+                          ?.replace(/\.tex$/i, "") ?? "main"
+                      }.log`
+                    : "main.log"
+                }
                 log={latexCompiler.compileLog}
                 onJumpToDiagnostic={handleJumpToDiagnostic}
                 onFixDiagnostics={handleFixDiagnosticsWithAi}
