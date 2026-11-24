@@ -98,11 +98,12 @@ export function AgentStatusCard({
   useEffect(() => {
     if (!open) return;
     popoverRef.current?.querySelector("button")?.focus({ preventScroll: true });
-    const handleClickOutside = (e: MouseEvent) => {
+    const dismissOutside = (event: Event) => {
       if (
+        event.target instanceof Node &&
         containerRef.current &&
-        !containerRef.current.contains(e.target as Node) &&
-        !popoverRef.current?.contains(e.target as Node)
+        !containerRef.current.contains(event.target) &&
+        !popoverRef.current?.contains(event.target)
       ) {
         setPosition(null);
       }
@@ -118,12 +119,14 @@ export function AgentStatusCard({
       const trigger = triggerRef.current;
       if (trigger) setPosition(getPopoverPosition(trigger));
     };
-    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", dismissOutside);
+    document.addEventListener("focusin", dismissOutside);
     window.addEventListener("keydown", handleEsc);
     window.addEventListener("resize", reposition);
     window.addEventListener("scroll", reposition, true);
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("mousedown", dismissOutside);
+      document.removeEventListener("focusin", dismissOutside);
       window.removeEventListener("keydown", handleEsc);
       window.removeEventListener("resize", reposition);
       window.removeEventListener("scroll", reposition, true);

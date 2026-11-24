@@ -63,8 +63,19 @@ export const PdfViewer = memo(function PdfViewer({
         options.open = false;
       }
     };
+    const handleEscape = (event: KeyboardEvent) => {
+      const options = fitOptionsRef.current;
+      if (event.key !== "Escape" || !options?.open) return;
+      event.preventDefault();
+      options.open = false;
+      options.querySelector("summary")?.focus();
+    };
     document.addEventListener("pointerdown", dismissFitOptions);
-    return () => document.removeEventListener("pointerdown", dismissFitOptions);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissFitOptions);
+      window.removeEventListener("keydown", handleEscape);
+    };
   }, []);
 
   // Clone Uint8Array so pdf.js worker transfer cannot detach caller state
@@ -273,13 +284,6 @@ export const PdfViewer = memo(function PdfViewer({
         <details
           ref={fitOptionsRef}
           className="relative"
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && event.currentTarget.open) {
-              event.stopPropagation();
-              event.currentTarget.open = false;
-              event.currentTarget.querySelector("summary")?.focus();
-            }
-          }}
           onBlur={(event) => {
             if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
               event.currentTarget.open = false;
@@ -300,7 +304,7 @@ export const PdfViewer = memo(function PdfViewer({
                   key={mode}
                   type="button"
                   aria-pressed={fitMode === mode}
-                  className="btn btn-ghost btn-sm"
+                  className={`btn btn-sm ${fitMode === mode ? "btn-secondary" : "btn-ghost"}`}
                   onClick={() => {
                     setFitMode(mode);
                     computeFitScale(mode);
