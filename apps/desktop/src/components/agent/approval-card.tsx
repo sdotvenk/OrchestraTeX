@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, LockKey, Terminal, X } from "@phosphor-icons/react";
-import { useState } from "react";
+import { Check, LockKey, X } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
 import type { PendingInteraction } from "@/lib/agent/types";
 
 type ApprovalInteraction = Extract<PendingInteraction, { kind: "approval" }>;
@@ -9,6 +9,7 @@ type ApprovalInteraction = Extract<PendingInteraction, { kind: "approval" }>;
 interface ApprovalCardProps {
   interaction: ApprovalInteraction;
   sessionDirectory: string | null;
+  providerLabel?: string;
   onDecide: (params: {
     decision: "allow_once" | "allow_session" | "deny";
     optionId?: string;
@@ -16,21 +17,49 @@ interface ApprovalCardProps {
   }) => Promise<void> | void;
 }
 
-export function ApprovalCard({ interaction, sessionDirectory, onDecide }: ApprovalCardProps) {
+export function ApprovalCard({
+  interaction,
+  sessionDirectory,
+  providerLabel,
+  onDecide,
+}: ApprovalCardProps) {
   const [submitting, setSubmitting] = useState(false);
 
-  const handleDecision = async (
-    decision: "allow_once" | "allow_session" | "deny",
-    optionId?: string,
-  ) => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onDecide({ decision, optionId });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const handleDecision = useCallback(
+    async (decision: "allow_once" | "allow_session" | "deny", optionId?: string) => {
+      if (submitting) return;
+      setSubmitting(true);
+      try {
+        await onDecide({ decision, optionId });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [onDecide, submitting],
+  );
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "y") {
+        event.preventDefault();
+        void handleDecision("allow_once");
+      } else if (key === "n") {
+        event.preventDefault();
+        void handleDecision("deny");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleDecision]);
 
   const cwd =
     interaction.input &&
@@ -51,16 +80,29 @@ export function ApprovalCard({ interaction, sessionDirectory, onDecide }: Approv
   const showReason = reason && !/^this command requires approval\.?$/i.test(reason);
   const hasCustomOptions = interaction.options && interaction.options.length > 0;
 
+  const shortDir = directory
+    ? directory === sessionDirectory
+      ? "./"
+      : directory.split("/").slice(-2).join("/")
+    : null;
+  const actionPhrase = interaction.command
+    ? "run a command"
+    : interaction.filePath
+      ? "edit a file"
+      : `use ${interaction.toolName}`;
+
   return (
-    <div className="my-2 space-y-2 rounded-lg border border-warn/30 bg-warn-bg p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <LockKey className="size-4 shrink-0 text-warn" weight="fill" aria-hidden="true" />
-          <span className="text-xs font-semibold text-warn">Permission required</span>
-          <span className="text-xs font-mono text-foreground font-medium truncate">
-            {interaction.toolName}
+    <div className="my-2 flex flex-col gap-2 rounded-[10px] border-[1.5px] border-[var(--decision-border)] bg-[var(--decision-bg)] p-3 shadow-[var(--decision-shadow)]">
+      <div className="flex items-center gap-2 min-w-0">
+        <LockKey className="size-3.5 shrink-0 text-warn" weight="bold" aria-hidden="true" />
+        <span className="text-[12.5px] font-semibold text-foreground-strong truncate">
+          {providerLabel ?? "Agent"} wants to {actionPhrase}
+        </span>
+        {shortDir && (
+          <span className="ml-auto font-mono text-[11.5px] text-[var(--decision-muted)] shrink-0">
+            in {shortDir}
           </span>
-        </div>
+        )}
       </div>
 
       {title && <div className="text-xs font-medium text-foreground">{title}</div>}
@@ -68,35 +110,24 @@ export function ApprovalCard({ interaction, sessionDirectory, onDecide }: Approv
       {showReason && <div className="text-xs text-foreground">{reason}</div>}
 
       {interaction.command && (
-        <div className="border border-border bg-background p-2 flex items-start gap-2">
-          <Terminal className="size-3.5 text-muted shrink-0 mt-0.5" aria-hidden="true" />
-          <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all flex-1">
-            {interaction.command}
-          </pre>
-        </div>
-      )}
-
-      {directory && (
-        <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-warn">
-          <span>{cwd ? "Working directory" : "Session directory"}</span>
-          <code className="min-w-0 wrap-anywhere">{directory}</code>
-        </div>
+        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[12px] text-foreground overflow-x-auto whitespace-pre-wrap break-all">
+          {interaction.command}
+        </pre>
       )}
 
       {interaction.filePath && (
-        <div className="flex flex-wrap items-baseline gap-x-2 border border-border bg-background px-2 py-1 text-[11px] text-foreground-secondary">
-          <span>File</span>
-          <code className="min-w-0 wrap-anywhere">{interaction.filePath}</code>
+        <div className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[12px] text-foreground overflow-x-auto">
+          {interaction.filePath}
         </div>
       )}
 
       {interaction.diff && (
-        <pre className="border border-border bg-background p-2 text-[11px] font-mono overflow-x-auto max-h-40 whitespace-pre-wrap text-foreground-secondary">
+        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[11.5px] text-foreground overflow-x-auto max-h-40 whitespace-pre-wrap">
           {interaction.diff}
         </pre>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1 border-t border-border/60">
+      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         {hasCustomOptions ? (
           interaction.options.map((opt) => {
             const isReject = opt.kind.includes("reject");
@@ -128,31 +159,30 @@ export function ApprovalCard({ interaction, sessionDirectory, onDecide }: Approv
             <button
               type="button"
               disabled={submitting}
-              onClick={() => void handleDecision("deny")}
-              className="btn btn-outline btn-sm inline-flex items-center gap-1 text-error hover:bg-error/10"
+              onClick={() => void handleDecision("allow_once")}
+              className="rounded-[6px] bg-primary px-2.5 py-1 text-[12px] font-semibold text-primary-text hover:bg-primary-hover disabled:opacity-50"
             >
-              <X className="size-3" aria-hidden="true" />
-              <span>Deny</span>
+              Allow once
             </button>
             <button
               type="button"
               disabled={submitting}
               onClick={() => void handleDecision("allow_session")}
-              className="btn btn-outline btn-sm"
+              className="rounded-[6px] border border-[var(--warn-line)] bg-transparent px-2.5 py-1 text-[12px] text-foreground hover:bg-panel/30 disabled:opacity-50"
             >
-              Allow Session
+              Always allow {interaction.toolName}
             </button>
             <button
               type="button"
               disabled={submitting}
-              onClick={() => void handleDecision("allow_once")}
-              className="btn btn-solid btn-sm inline-flex items-center gap-1"
+              onClick={() => void handleDecision("deny")}
+              className="rounded-[6px] bg-transparent px-2 py-1 text-[12px] text-foreground hover:bg-error-bg/40 disabled:opacity-50"
             >
-              <Check className="size-3" aria-hidden="true" />
-              <span>Allow Once</span>
+              Deny
             </button>
           </>
         )}
+        <span className="ml-auto font-mono text-[11px] text-[var(--decision-muted)]">⌘Y · ⌘N</span>
       </div>
     </div>
   );

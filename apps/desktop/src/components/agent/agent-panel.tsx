@@ -2,12 +2,14 @@
 
 import type { FileNode } from "@orchestratex/shared";
 import {
+  ArrowSquareOut,
   ArrowsInSimple,
   ArrowsOutSimple,
   CaretDown,
   Chats,
   GitFork,
   Plus,
+  SidebarSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -20,6 +22,7 @@ import type {
   RuntimeMode,
 } from "@/lib/agent/types";
 import type { useAgent } from "@/lib/agent/use-agent";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { AgentComposer, type AgentDraftInjection } from "./agent-composer";
 import { MessageTimeline } from "./message-timeline";
 import { ProviderOnboarding } from "./provider-onboarding";
@@ -48,6 +51,12 @@ interface AgentPanelProps {
   onOpenAgentSettings: () => void;
   onOpenWorkspace?: () => void;
   onApproveInteraction?: (threadId: string, interactionId: string) => void;
+  mode?: "docked" | "workspace";
+  threePane?: boolean;
+  pdfPageLabel?: string | null;
+  onSwitchToPdf?: () => void;
+  onDockInWrite?: () => void;
+  latestBuildLogExcerpt?: string | null;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
   onClose?: () => void;
@@ -71,6 +80,12 @@ export function AgentPanel({
   onOpenAgentSettings,
   onOpenWorkspace,
   onApproveInteraction,
+  mode = "docked",
+  threePane = false,
+  pdfPageLabel = null,
+  onSwitchToPdf,
+  onDockInWrite,
+  latestBuildLogExcerpt = null,
   isExpanded = false,
   onToggleExpand,
   onClose,
@@ -182,90 +197,207 @@ export function AgentPanel({
     chatToggleRef.current?.focus();
   };
 
+  const recentTabs = useMemo(
+    () => agent.threads.filter((t) => !t.archived).slice(0, 3),
+    [agent.threads],
+  );
+  const activeVoice = VOICE_COLORS[currentProviderId] ?? VOICE_COLORS.claude;
+  const providerDisplayName =
+    currentProviderId === "claude"
+      ? "Claude"
+      : currentProviderId === "codex"
+        ? "Codex"
+        : currentProviderId === "antigravity"
+          ? "Antigravity"
+          : "Custom ACP";
+  const currentModelId =
+    activeThread?.summary.model ?? activeProvider?.models?.[0]?.id ?? "default";
+  const currentEffort = activeThread?.summary.reasoningEffort ?? "medium";
+  const currentRuntime = activeThread?.summary.runtimeMode ?? agentSettings.defaultRuntimeMode;
+  const runtimeLabel =
+    currentRuntime === "full-access"
+      ? "Full access"
+      : currentRuntime === "auto-accept-edits"
+        ? "Auto-accept edits"
+        : "Ask before commands";
+  const shortProjectPath = projectPath
+    ? projectPath.replace(/^\/Users\/[^/]+/, "~")
+    : "~/workspace";
+
   return (
     <div className="h-full w-full flex flex-col bg-panel min-w-0">
-      {/* Calm Silkscreen-style Agent Header */}
-      <div className="h-10 px-3 border-b border-border flex items-center justify-between gap-2 bg-panel shrink-0">
-        <div className="flex items-center gap-1.5 min-w-0">
+      {mode === "docked" && !threePane ? (
+        <>
+          <div className="h-9 bg-[var(--tab-strip-bg)] border-b border-border flex items-center pr-1.5 overflow-x-auto shrink-0">
+            {onSwitchToPdf && (
+              <button
+                type="button"
+                onClick={onSwitchToPdf}
+                className="h-9 px-3 border-r border-border text-[12.5px] text-muted hover:text-foreground inline-flex items-center gap-1.5 shrink-0"
+              >
+                <span>PDF</span>
+                {pdfPageLabel && <span className="text-[10.5px] text-muted">{pdfPageLabel}</span>}
+              </button>
+            )}
+            {recentTabs.map((t) => {
+              const isTabActive = t.id === activeThread?.summary.id && view === "chat";
+              const tabVoice = VOICE_COLORS[t.providerId] ?? VOICE_COLORS.claude;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => {
+                    void agent.loadThread(t.id);
+                    setView("chat");
+                  }}
+                  style={isTabActive ? { boxShadow: `inset 0 -2px 0 ${tabVoice.ink}` } : undefined}
+                  className={`h-9 px-3 border-r border-border text-[12.5px] inline-flex items-center gap-1.5 max-w-[180px] shrink-0 ${
+                    isTabActive
+                      ? "bg-panel text-foreground-strong font-medium"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  <span
+                    className="size-2 rounded-full shrink-0"
+                    style={{ backgroundColor: tabVoice.ink }}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate">{t.title}</span>
+                </button>
+              );
+            })}
+            {onOpenWorkspace && (
+              <button
+                type="button"
+                onClick={onOpenWorkspace}
+                className="ml-auto rounded-[7px] border border-border-dark bg-panel px-2.5 py-1 text-[12px] text-foreground inline-flex items-center gap-1 hover:bg-subtle shrink-0"
+              >
+                <ArrowSquareOut className="size-3" aria-hidden="true" />
+                <span>Open in Agents</span>
+              </button>
+            )}
+          </div>
+          <div className="px-4 py-1.5 border-b border-border/70 flex items-center gap-2 text-[12px] text-muted shrink-0">
+            <span className="font-medium text-foreground">{providerDisplayName}</span>
+            <span className="font-mono truncate">
+              {currentModelId} · {currentEffort}
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className="truncate">{runtimeLabel}</span>
+            <span className="ml-auto font-mono truncate">{shortProjectPath}</span>
+          </div>
+        </>
+      ) : mode === "docked" && threePane ? (
+        <div className="h-9 bg-[var(--tab-strip-bg)] border-b border-border px-3.5 flex items-center gap-2 text-[12.5px] shrink-0">
+          <span
+            className="size-2 rounded-full shrink-0"
+            style={{ backgroundColor: activeVoice.ink }}
+            aria-hidden="true"
+          />
           <button
             ref={chatToggleRef}
             type="button"
             aria-expanded={view === "threads"}
             onClick={() => setView((v) => (v === "threads" ? "chat" : "threads"))}
-            className={`inline-flex items-center gap-1.5 h-7 px-2 -ml-1 rounded-lg text-[13px] font-semibold transition-colors min-w-0 ${
-              view === "threads"
-                ? "bg-accent-soft text-accent"
-                : "text-foreground-strong hover:bg-subtle"
-            }`}
-            title="Switch or manage chats"
+            className="font-medium text-foreground-strong truncate hover:underline text-left"
           >
-            <Chats className="size-4 shrink-0 text-muted" aria-hidden="true" />
-            <span className="truncate">
-              {view === "threads" ? "Chats" : activeThread?.summary.title || "New chat"}
-            </span>
-            <CaretDown className="size-3 text-muted shrink-0" aria-hidden="true" />
+            {activeThread?.summary.title ?? "New thread"}
           </button>
-        </div>
-
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button
-            type="button"
-            disabled={!projectPath}
-            onClick={() => {
-              void agent.createThread();
-              setView("chat");
-            }}
-            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
-            title="New chat"
-            aria-label="New chat"
-          >
-            <Plus className="size-4" aria-hidden="true" />
-          </button>
-
-          {activeThread && activeProvider?.supportsFork && (
+          <span className="ml-auto text-[11.5px] text-muted shrink-0">{providerDisplayName}</span>
+          {onOpenWorkspace && (
             <button
               type="button"
-              onClick={() => {
-                void agent.forkThread(activeThread.summary.id);
-                setView("chat");
-              }}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              title="Fork current chat"
-              aria-label="Fork chat"
+              onClick={onOpenWorkspace}
+              className="size-6 rounded inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle shrink-0"
+              title="Open in Agents"
+              aria-label="Open in Agents"
             >
-              <GitFork className="size-3.5" aria-hidden="true" />
+              <ArrowSquareOut className="size-3.5" aria-hidden="true" />
             </button>
           )}
-
-          {onToggleExpand && (
-            <button
-              type="button"
-              onClick={onToggleExpand}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              title={isExpanded ? "Restore pane width" : "Expand agent pane"}
-              aria-label={isExpanded ? "Restore pane width" : "Expand agent pane"}
-            >
-              {isExpanded ? (
-                <ArrowsInSimple className="size-3.5" aria-hidden="true" />
-              ) : (
-                <ArrowsOutSimple className="size-3.5" aria-hidden="true" />
-              )}
-            </button>
-          )}
-
           {onClose && (
             <button
               type="button"
               onClick={onClose}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              title="Hide Agent Panel (Cmd+L)"
-              aria-label="Close agent panel"
+              className="size-6 rounded inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle shrink-0"
+              title="Close thread pane"
+              aria-label="Close thread pane"
             >
               <X className="size-3.5" aria-hidden="true" />
             </button>
           )}
         </div>
-      </div>
+      ) : (
+        <div className="h-10 px-4 border-b border-border/70 flex items-center gap-2 bg-panel shrink-0">
+          <span
+            className="size-2 rounded-full shrink-0"
+            style={{ backgroundColor: activeVoice.ink }}
+            aria-hidden="true"
+          />
+          <span className="font-semibold text-[13px] text-foreground-strong truncate">
+            {activeThread?.summary.title ?? "New thread"}
+          </span>
+          <span className="border border-border rounded px-1.5 font-mono text-[10.5px] text-muted shrink-0">
+            {activeThread?.summary.workspaceBranch ?? "main"}
+          </span>
+
+          <div className="ml-auto flex items-center gap-0.5 shrink-0">
+            {onDockInWrite && (
+              <button
+                type="button"
+                onClick={onDockInWrite}
+                className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+                title="Dock beside editor"
+                aria-label="Dock beside editor"
+              >
+                <SidebarSimple className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+            {activeThread && activeProvider?.supportsFork && (
+              <button
+                type="button"
+                onClick={() => {
+                  void agent.forkThread(activeThread.summary.id);
+                  setView("chat");
+                }}
+                className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+                title="Fork thread"
+                aria-label="Fork thread"
+              >
+                <GitFork className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={!projectPath}
+              onClick={() => {
+                void agent.createThread();
+                setView("chat");
+              }}
+              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+              title="New chat"
+              aria-label="New chat"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+            </button>
+            <button
+              ref={chatToggleRef}
+              type="button"
+              aria-expanded={view === "threads"}
+              onClick={() => setView((v) => (v === "threads" ? "chat" : "threads"))}
+              className={`size-7 rounded-lg inline-flex items-center justify-center transition-colors ${
+                view === "threads"
+                  ? "bg-accent-soft text-accent"
+                  : "text-muted hover:text-foreground hover:bg-subtle"
+              }`}
+              title="Switch chats"
+              aria-label="Switch chats"
+            >
+              <Chats className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tasks Progress Bar */}
       {view === "chat" && activeThread && activeThread.tasks.length > 0 && (
@@ -349,6 +481,8 @@ export function AgentPanel({
           />
 
           <AgentComposer
+            compact={mode === "docked"}
+            latestBuildLogExcerpt={latestBuildLogExcerpt}
             projectPath={projectPath}
             files={files}
             providers={agent.providers}

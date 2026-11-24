@@ -34,6 +34,20 @@ type Props = {
     startLine: number,
     endLine: number,
   ) => void;
+  onNewThreadFromSelection?: (
+    selectionText: string,
+    filePath: string,
+    startLine: number,
+    endLine: number,
+  ) => void;
+  onExplainSelection?: (
+    selectionText: string,
+    filePath: string,
+    startLine: number,
+    endLine: number,
+  ) => void;
+  activeProviderId?: keyof typeof VOICE_COLORS;
+  activeProviderName?: string;
   onCursorChange?: (pos: { line: number; column: number }) => void;
   goToLine?: number;
   attributedEdits?: AttributedEdit[];
@@ -137,6 +151,10 @@ export const MonacoEditor = memo(function MonacoEditor({
   onCompileShortcut,
   onForwardSync,
   onAskAgent,
+  onNewThreadFromSelection,
+  onExplainSelection,
+  activeProviderId = "claude",
+  activeProviderName = "Claude",
   onCursorChange,
   goToLine,
   attributedEdits,
@@ -158,6 +176,16 @@ export const MonacoEditor = memo(function MonacoEditor({
   const onAskAgentRef = useRef(onAskAgent);
   const onCursorChangeRef = useRef(onCursorChange);
   const cursorListenerRef = useRef<IDisposable | null>(null);
+  const selectionListenerRef = useRef<IDisposable | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  const [selectionPopover, setSelectionPopover] = useState<{
+    text: string;
+    startLine: number;
+    endLine: number;
+    top: number;
+    left: number;
+  } | null>(null);
 
   sharedBibEntries = bibEntries;
   sharedTexLabels = texLabels;
@@ -338,6 +366,43 @@ export const MonacoEditor = memo(function MonacoEditor({
       onCursorChangeRef.current?.({
         line: ev.position.lineNumber,
         column: ev.position.column,
+      });
+    });
+
+    selectionListenerRef.current?.dispose();
+    selectionListenerRef.current = editor.onDidChangeCursorSelection((ev) => {
+      if (readOnlyRef.current) {
+        setSelectionPopover(null);
+        return;
+      }
+      const sel = ev.selection;
+      const model = editor.getModel();
+      if (!model || sel.isEmpty()) {
+        setSelectionPopover(null);
+        return;
+      }
+      const selectedText = model.getValueInRange(sel);
+      if (!selectedText.trim()) {
+        setSelectionPopover(null);
+        return;
+      }
+      const startLine = Math.min(sel.startLineNumber, sel.endLineNumber);
+      const endLine = Math.max(sel.startLineNumber, sel.endLineNumber);
+      const endPos = { lineNumber: startLine, column: Math.max(sel.startColumn, sel.endColumn) };
+      const coords = editor.getScrolledVisiblePosition(endPos);
+      if (!coords) {
+        setSelectionPopover(null);
+        return;
+      }
+      const layout = editor.getLayoutInfo();
+      const top = Math.max(8, coords.top - 36);
+      const left = Math.min(Math.max(12, coords.left), Math.max(12, layout.width - 280));
+      setSelectionPopover({
+        text: selectedText,
+        startLine,
+        endLine,
+        top,
+        left,
       });
     });
 
@@ -634,6 +699,62 @@ export const MonacoEditor = memo(function MonacoEditor({
             );
           })}
         </section>
+      )}
+      {selectionPopover && !readOnly && (
+        <div
+          role="toolbar"
+          aria-label="Selection actions"
+          style={{ top: selectionPopover.top, left: selectionPopover.left }}
+          className="absolute z-20 flex items-center gap-0.5 rounded-[8px] bg-primary p-[3px] text-[12px] text-primary-text shadow-md"
+        >
+          <span className="px-1.5 font-mono text-[11px] opacity-75">
+            {selectionPopover.startLine === selectionPopover.endLine
+              ? `L${selectionPopover.startLine}`
+              : `L${selectionPopover.startLine}–${selectionPopover.endLine}`}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const pop = selectionPopover;
+              setSelectionPopover(null);
+              onAskAgent?.(pop.text, filePath ?? "", pop.startLine, pop.endLine);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-[5px] bg-primary-hover px-2 py-0.5 text-primary-text hover:opacity-95"
+          >
+            <span
+              className="size-2 rounded-full shrink-0"
+              style={{ backgroundColor: VOICE_COLORS[activeProviderId].ink }}
+              aria-hidden="true"
+            />
+            Ask {activeProviderName}
+          </button>
+          {onNewThreadFromSelection && (
+            <button
+              type="button"
+              onClick={() => {
+                const pop = selectionPopover;
+                setSelectionPopover(null);
+                onNewThreadFromSelection(pop.text, filePath ?? "", pop.startLine, pop.endLine);
+              }}
+              className="rounded-[5px] px-2 py-0.5 text-primary-text hover:bg-primary-hover/80"
+            >
+              New thread…
+            </button>
+          )}
+          {onExplainSelection && (
+            <button
+              type="button"
+              onClick={() => {
+                const pop = selectionPopover;
+                setSelectionPopover(null);
+                onExplainSelection(pop.text, filePath ?? "", pop.startLine, pop.endLine);
+              }}
+              className="rounded-[5px] px-2 py-0.5 text-primary-text hover:bg-primary-hover/80"
+            >
+              Explain
+            </button>
+          )}
+        </div>
       )}
       {editorSettings?.vimMode && !readOnly && (
         <div

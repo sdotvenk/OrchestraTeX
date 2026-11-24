@@ -12,6 +12,8 @@ interface UsagePopoverProps {
   usage: TokenUsageSnapshot | null | undefined;
   threadStatus?: string;
   compactRing?: boolean;
+  showPercent?: boolean;
+  voiceColor?: string;
   onRefreshLimits: () => Promise<unknown>;
   onCompact?: () => Promise<unknown>;
 }
@@ -23,6 +25,8 @@ export function UsagePopover({
   usage,
   threadStatus,
   compactRing = false,
+  showPercent = false,
+  voiceColor,
   onRefreshLimits,
   onCompact,
 }: UsagePopoverProps) {
@@ -97,7 +101,7 @@ export function UsagePopover({
           aria-expanded={open}
           aria-controls={open ? popoverId : undefined}
           onClick={() => onOpenChange(!open)}
-          className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle aria-expanded:bg-accent-soft aria-expanded:text-accent transition-colors"
+          className={`${showPercent ? "h-7 px-1.5 gap-1.5" : "size-7"} rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle aria-expanded:bg-accent-soft aria-expanded:text-accent transition-colors`}
           title={
             contextWindow
               ? `Context: ${formatTokenCount(contextUsed)} / ${formatTokenCount(contextWindow)} (${contextPct}%)`
@@ -121,7 +125,7 @@ export function UsagePopover({
                 cy="8"
                 r={ringRadius}
                 fill="none"
-                stroke={contextPct >= 85 ? "var(--danger)" : "var(--accent)"}
+                stroke={contextPct >= 85 ? "var(--danger)" : (voiceColor ?? "var(--accent)")}
                 strokeWidth="2"
                 strokeDasharray={ringCircumference}
                 strokeDashoffset={ringOffset}
@@ -130,6 +134,11 @@ export function UsagePopover({
               />
             )}
           </svg>
+          {showPercent && (
+            <span className="font-mono text-[11.5px] text-muted">
+              {contextPct != null ? `${contextPct}%` : "0%"}
+            </span>
+          )}
         </button>
       ) : (
         <button

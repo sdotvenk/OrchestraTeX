@@ -132,39 +132,74 @@ export const ToolDisplay = memo(function ToolDisplay({
   const displayedOutput =
     isLongOutput && !showFullOutput ? `${outputText.slice(0, 2000)}\n...` : outputText;
 
+  const isReadOrSearch = (() => {
+    const name = part.tool.toLowerCase();
+    return (
+      name === "read" ||
+      name === "view" ||
+      name.includes("read_file") ||
+      name === "grep" ||
+      name === "glob" ||
+      name === "search" ||
+      name.includes("search")
+    );
+  })();
+
+  const diffCounts = (() => {
+    if (!part.diff) return null;
+    let added = 0;
+    let removed = 0;
+    for (const line of part.diff.split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) added++;
+      else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+    }
+    return added > 0 || removed > 0 ? { added, removed } : null;
+  })();
+
   return (
     <div className={depth > 0 ? "ml-3 border-l border-border pl-2.5" : ""}>
-      <div className="rounded-xl border border-border/80 bg-subtle/45 overflow-hidden my-1">
-        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+      <div
+        className={
+          expanded
+            ? "rounded-lg border border-border/80 bg-subtle/35 overflow-hidden my-1"
+            : "my-0.5"
+        }
+      >
+        <div className="flex items-center justify-between gap-2 h-[22px] px-0.5 text-[12px] text-muted">
           <button
             type="button"
             onClick={() => setExpanded((prev) => !prev)}
-            className="flex items-center gap-2 min-w-0 flex-1 text-left"
+            className="flex items-center gap-2 min-w-0 flex-1 text-left hover:text-foreground transition-colors"
           >
-            {expanded ? (
-              <CaretDown className="size-3 text-muted shrink-0" aria-hidden="true" />
-            ) : (
-              <CaretRight className="size-3 text-muted shrink-0" aria-hidden="true" />
-            )}
-
             {isRunning ? (
               <SpinnerGap
-                className="size-3.5 text-accent animate-spin shrink-0"
+                className="size-2.5 text-accent animate-spin shrink-0"
                 aria-hidden="true"
               />
-            ) : isError ? (
-              <X className="size-3.5 text-error shrink-0" weight="bold" aria-hidden="true" />
-            ) : isPending ? (
-              <Clock className="size-3.5 text-muted shrink-0" aria-hidden="true" />
+            ) : isReadOrSearch ? (
+              <svg width="9" height="9" viewBox="0 0 9 9" className="shrink-0" aria-hidden="true">
+                <rect
+                  x="1"
+                  y="1"
+                  width="7"
+                  height="7"
+                  fill="none"
+                  stroke={isError ? "var(--error)" : "var(--accent)"}
+                  strokeWidth="1.4"
+                />
+              </svg>
             ) : (
-              <Check className="size-3.5 text-success shrink-0" weight="bold" aria-hidden="true" />
+              <svg width="9" height="9" viewBox="0 0 9 9" className="shrink-0" aria-hidden="true">
+                <circle
+                  cx="4.5"
+                  cy="4.5"
+                  r="3.5"
+                  fill={isError ? "var(--error)" : "var(--accent)"}
+                />
+              </svg>
             )}
 
-            <Icon className="size-3.5 text-muted shrink-0" aria-hidden="true" />
-
-            <span className="text-[12px] font-mono font-medium text-foreground-strong shrink-0">
-              {part.tool}
-            </span>
+            <span className="font-medium text-foreground truncate shrink-0">{part.tool}</span>
 
             {summary && !relFile && (
               <span className="text-[11.5px] font-mono text-muted truncate">{summary}</span>

@@ -2792,6 +2792,41 @@ export default function EditorPage() {
     [],
   );
 
+  const handleNewThreadFromSelection = useCallback(
+    (selectionText: string, filePath: string, startLine: number, endLine: number) => {
+      void agent.createThread().catch((error: unknown) => toast(String(error), "error"));
+      setShowRightPanel(true);
+      const loc =
+        filePath && startLine > 0
+          ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
+          : filePath || "current file";
+      const snippet = selectionText.trim();
+      setAgentDraftInjection({
+        id: Date.now(),
+        text: "",
+        contextChip: { label: loc, snippet },
+      });
+    },
+    [agent, toast],
+  );
+
+  const handleExplainSelection = useCallback(
+    (selectionText: string, filePath: string, startLine: number, endLine: number) => {
+      setShowRightPanel(true);
+      const loc =
+        filePath && startLine > 0
+          ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
+          : filePath || "current file";
+      const snippet = selectionText.trim();
+      setAgentDraftInjection({
+        id: Date.now(),
+        text: "Explain this selection.",
+        contextChip: { label: loc, snippet },
+      });
+    },
+    [],
+  );
+
   const handleFixDiagnosticsWithAi = useCallback(
     (diags: LatexDiagnostic[]) => {
       if (diags.length === 0) return;
@@ -3366,6 +3401,23 @@ export default function EditorPage() {
                   onCompileShortcut={handleCompileShortcut}
                   onForwardSync={handleEditorForwardSync}
                   onAskAgent={handleAskAgentSelection}
+                  onNewThreadFromSelection={handleNewThreadFromSelection}
+                  onExplainSelection={handleExplainSelection}
+                  activeProviderId={
+                    agent.activeProviderStatus?.id ?? agentSettings.settings.defaultProvider
+                  }
+                  activeProviderName={
+                    (agent.activeProviderStatus?.id ?? agentSettings.settings.defaultProvider) ===
+                    "claude"
+                      ? "Claude"
+                      : (agent.activeProviderStatus?.id ??
+                            agentSettings.settings.defaultProvider) === "codex"
+                        ? "Codex"
+                        : (agent.activeProviderStatus?.id ??
+                              agentSettings.settings.defaultProvider) === "antigravity"
+                          ? "Antigravity"
+                          : "Custom ACP"
+                  }
                   onCursorChange={setCursorPosition}
                   editorSettings={editorSettings.settings}
                   editorTheme={editorSettings.editorTheme}
@@ -4519,6 +4571,25 @@ export default function EditorPage() {
                     onOpenAgentSettings={handleOpenAgentSettings}
                     onOpenWorkspace={
                       daemon.projectPath ? () => activateWorkspaceTab("agents") : undefined
+                    }
+                    mode={isAgentsView ? "workspace" : "docked"}
+                    threePane={
+                      workspaceView === "write" &&
+                      showRightPanel &&
+                      Boolean(daemon.projectPath && showLivePreview)
+                    }
+                    onSwitchToPdf={() => setShowLivePreview(true)}
+                    onDockInWrite={() => {
+                      setWorkspaceView("write");
+                      setShowRightPanel(true);
+                    }}
+                    latestBuildLogExcerpt={
+                      latexCompiler.compileLog.length > 0
+                        ? latexCompiler.compileLog
+                            .slice(-5)
+                            .map((entry) => entry.line)
+                            .join("\n")
+                        : null
                     }
                     isExpanded={isAgentsView ? true : agentExpanded}
                     onToggleExpand={

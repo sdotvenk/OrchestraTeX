@@ -85,6 +85,8 @@ interface AgentComposerProps {
   compactLabel?: string;
   onCompactContext?: () => Promise<void> | void;
   usageTrigger?: React.ReactNode;
+  compact?: boolean;
+  latestBuildLogExcerpt?: string | null;
 }
 
 const RUNTIME_OPTIONS: readonly {
@@ -146,6 +148,8 @@ export function AgentComposer({
   compactLabel,
   onCompactContext,
   usageTrigger,
+  compact: _compact = false,
+  latestBuildLogExcerpt: _latestBuildLogExcerpt = null,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
@@ -873,8 +877,8 @@ export function AgentComposer({
           />
         </div>
 
-        {/* Bottom Control Row */}
-        <div className="flex flex-wrap items-center justify-between gap-1 border-t border-border bg-subtle/35 rounded-b-xl p-1.5">
+        {/* Seamless Bottom Control Row */}
+        <div className="flex flex-wrap items-center justify-between gap-1 pt-1.5">
           {/* Left: Compact Model · Effort chip + Attach + Usage */}
           <div className="flex items-center gap-1 min-w-0">
             <button

@@ -462,8 +462,9 @@ export const MessageTimeline = memo(function MessageTimeline({
                 );
 
                 return (
-                  <div key={msg.id} className="flex justify-end">
-                    <div className="max-w-[86%] rounded-2xl bg-subtle px-3.5 py-2.5 space-y-2 text-foreground-strong">
+                  <div key={msg.id} className="space-y-1.5">
+                    <div className="text-[11.5px] font-semibold text-foreground-strong">You</div>
+                    <div className="space-y-2 text-[13.5px] leading-[1.6] text-foreground">
                       {images.length > 0 && (
                         <div className="flex flex-wrap gap-1.5">
                           {images.map((img) => (
@@ -535,6 +536,15 @@ export const MessageTimeline = memo(function MessageTimeline({
                   key={pendingInteraction.id}
                   interaction={pendingInteraction}
                   sessionDirectory={thread?.summary.workspacePath ?? projectPath}
+                  providerLabel={
+                    thread?.summary.providerId === "claude"
+                      ? "Claude"
+                      : thread?.summary.providerId === "codex"
+                        ? "Codex"
+                        : thread?.summary.providerId === "antigravity"
+                          ? "Antigravity"
+                          : "Custom ACP"
+                  }
                   onDecide={(decision) =>
                     onRespondInteraction(pendingInteraction.id, {
                       kind: "approvalDecision",
