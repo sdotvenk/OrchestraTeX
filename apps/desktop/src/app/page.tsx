@@ -4514,7 +4514,11 @@ export default function EditorPage() {
           gitStatus={gitStatus}
           compileStatus={latexCompiler.compileStatus}
           lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
-          compiler={latexSettings.settings.compiler}
+          compiler={
+            latexCompiler.compileStatus === "idle"
+              ? latexSettings.settings.compiler
+              : (latexCompiler.lastResult?.compiler ?? latexSettings.settings.compiler)
+          }
           mainFile={latexSettings.settings.mainFile}
           onSelectMainFile={() => {
             if (!daemon.projectPath) return;

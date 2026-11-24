@@ -41,6 +41,7 @@ export interface LatexDiagnostic {
 }
 
 export interface CompilationResult {
+  compiler?: ConcreteLaTeXCompiler;
   success: boolean;
   cancelled: boolean;
   exit_code: number | null;

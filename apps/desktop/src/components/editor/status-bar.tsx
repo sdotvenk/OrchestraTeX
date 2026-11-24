@@ -63,7 +63,7 @@ export function StatusBar({
 
   const buildText =
     compileStatus === "compiling"
-      ? `Compiling · ${COMPILER_LABELS[compiler]}`
+      ? "Compiling"
       : errorCount > 0
         ? `${errorCount} ${errorCount === 1 ? "error" : "errors"} · ${COMPILER_LABELS[compiler]}`
         : compileStatus === "error"

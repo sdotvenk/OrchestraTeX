@@ -62,6 +62,7 @@ pub struct LatexDiagnostic {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompilationResult {
+    pub compiler: String,
     pub success: bool,
     pub cancelled: bool,
     pub exit_code: Option<i32>,
@@ -743,6 +744,7 @@ pub async fn latex_compile(
             let _ = child.kill().await;
             let duration_ms = started_at.elapsed().as_millis() as u64;
             return Ok(CompilationResult {
+                compiler: engine,
                 success: false,
                 cancelled: true,
                 exit_code: None,
@@ -807,6 +809,7 @@ pub async fn latex_compile(
             // Process was killed or replaced by a newer generation before wait()
             let duration_ms = started_at.elapsed().as_millis() as u64;
             return Ok(CompilationResult {
+                compiler: engine,
                 success: false,
                 cancelled: true,
                 exit_code: None,
@@ -822,6 +825,7 @@ pub async fn latex_compile(
     let duration_ms = started_at.elapsed().as_millis() as u64;
     if state.generation.load(Ordering::SeqCst) != my_gen {
         return Ok(CompilationResult {
+            compiler: engine,
             success: false,
             cancelled: true,
             exit_code,
@@ -857,6 +861,7 @@ pub async fn latex_compile(
     let success = exit_code == Some(0) && pdf_exists;
 
     Ok(CompilationResult {
+        compiler: engine,
         success,
         cancelled: false,
         exit_code,
@@ -2390,6 +2395,7 @@ SyncTeX result end
     #[test]
     fn compilation_result_serialization_roundtrip() {
         let result = CompilationResult {
+            compiler: "tectonic".into(),
             success: true,
             cancelled: false,
             exit_code: Some(0),
@@ -2401,6 +2407,7 @@ SyncTeX result end
         };
         let json = serde_json::to_string(&result).unwrap();
         let deserialized: CompilationResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.compiler, result.compiler);
         assert_eq!(deserialized.success, result.success);
         assert_eq!(deserialized.exit_code, result.exit_code);
         assert_eq!(deserialized.pdf_path, result.pdf_path);
