@@ -299,6 +299,8 @@ pub async fn agent_update_thread(
     interaction_mode: Option<InteractionMode>,
     runtime_mode: Option<RuntimeMode>,
 ) -> Result<ThreadSummary, String> {
+    let _thread_guard =
+        worktree::acquire_thread_lock(&state.worktree_locks, &project_path, &thread_id).await;
     let store = state.get_store(&app).await?;
     let existing = store
         .get_thread(&project_path, &thread_id)
@@ -308,6 +310,86 @@ pub async fn agent_update_thread(
     let provider_changed = provider_id
         .map(|p| p != existing.summary.provider_id)
         .unwrap_or(false);
+
+    let next_effort = reasoning_effort.as_ref().map(|e| {
+        if e.is_empty() {
+            None
+        } else {
+            Some(e.clone())
+        }
+    });
+    let effort_changed = next_effort
+        .as_ref()
+        .map(|e| *e != existing.summary.reasoning_effort)
+        .unwrap_or(false);
+    let full_access_changed = runtime_mode
+        .map(|rm| {
+            (rm == RuntimeMode::FullAccess)
+                != (existing.summary.runtime_mode == RuntimeMode::FullAccess)
+        })
+        .unwrap_or(false);
+    let is_turn_active = matches!(existing.summary.status.as_str(), "running" | "waiting_input");
+    let claude_startup_change = !provider_changed
+        && existing.summary.provider_id == AgentProviderId::Claude
+        && (effort_changed || full_access_changed);
+
+    let existing_claude_handle = if !provider_changed
+        && existing.summary.provider_id == AgentProviderId::Claude
+    {
+        let guard = state.claude_sessions.lock().await;
+        guard.get(&thread_id).cloned()
+    } else {
+        None
+    };
+
+    if let Some(handle) = existing_claude_handle {
+        if claude_startup_change {
+            if is_turn_active {
+                return Err(
+                    "Stop the active turn before changing effort or Full Access mode on a Claude thread."
+                        .to_string(),
+                );
+            }
+            // Idle Claude process cannot apply --effort or --allow-dangerously-skip-permissions live.
+            // Terminate it while preserving provider_session_id so the next turn resumes with the new flags.
+            let removed = { state.claude_sessions.lock().await.remove(&thread_id) };
+            if let Some(removed) = removed {
+                removed.kill().await;
+            }
+        } else {
+            let mut live_failed: Option<String> = None;
+            if let Some(ref m) = model {
+                if !m.is_empty() && existing.summary.model.as_deref() != Some(m.as_str()) {
+                    if let Err(err) = handle.set_model(m).await {
+                        live_failed = Some(err);
+                    }
+                }
+            }
+            let next_interaction = interaction_mode.unwrap_or(existing.summary.interaction_mode);
+            let next_runtime = runtime_mode.unwrap_or(existing.summary.runtime_mode);
+            if live_failed.is_none()
+                && (next_interaction != existing.summary.interaction_mode
+                    || next_runtime != existing.summary.runtime_mode)
+            {
+                if let Err(err) = handle
+                    .set_permission_mode(next_interaction, next_runtime)
+                    .await
+                {
+                    live_failed = Some(err);
+                }
+            }
+            if let Some(err) = live_failed {
+                if is_turn_active {
+                    return Err(format!("Failed to apply Claude setting live: {}", err));
+                }
+                // Idle session rejected/timed out on live RPC; restart on next turn while keeping provider_session_id.
+                let removed = { state.claude_sessions.lock().await.remove(&thread_id) };
+                if let Some(removed) = removed {
+                    removed.kill().await;
+                }
+            }
+        }
+    }
 
     let updated = store
         .mutate_thread(&project_path, &thread_id, |t| {
@@ -357,22 +439,6 @@ pub async fn agent_update_thread(
         for k in acp_keys {
             if let Some(c) = state.acp_clients.lock().await.remove(&k) {
                 c.kill().await;
-            }
-        }
-    } else if updated.summary.provider_id == AgentProviderId::Claude {
-        if let Some(handle) = state.claude_sessions.lock().await.get(&thread_id).cloned() {
-            if let Some(ref m) = model {
-                if !m.is_empty() {
-                    let _ = handle.set_model(m).await;
-                }
-            }
-            if interaction_mode.is_some() || runtime_mode.is_some() {
-                let _ = handle
-                    .set_permission_mode(
-                        updated.summary.interaction_mode,
-                        updated.summary.runtime_mode,
-                    )
-                    .await;
             }
         }
     } else if matches!(
@@ -674,7 +740,16 @@ pub async fn agent_send_message(
                 let custom_bin = find_custom_config(&configs, AgentProviderId::Claude)
                     .and_then(|c| c.binary_path.as_deref());
                 let existing = state.claude_sessions.lock().await.get(&thread_id).cloned();
-                let handle = if let Some(h) = existing {
+                let compatible_existing = match existing {
+                    Some(h) if h.is_compatible_with(&thread.summary).await => Some(h),
+                    Some(stale) => {
+                        state.claude_sessions.lock().await.remove(&thread_id);
+                        stale.kill().await;
+                        None
+                    }
+                    None => None,
+                };
+                let handle = if let Some(h) = compatible_existing {
                     h
                 } else {
                     let spawned = spawn_claude_session(

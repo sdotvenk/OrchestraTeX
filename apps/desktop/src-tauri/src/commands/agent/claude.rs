@@ -14,8 +14,37 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Child;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::time::{timeout, Duration};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeSessionConfig {
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub interaction_mode: InteractionMode,
+    pub runtime_mode: RuntimeMode,
+}
+
+impl ClaudeSessionConfig {
+    pub fn from_summary(summary: &super::types::ThreadSummary) -> Self {
+        Self {
+            model: summary
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && *s != "default")
+                .map(str::to_owned),
+            reasoning_effort: summary
+                .reasoning_effort
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            interaction_mode: summary.interaction_mode,
+            runtime_mode: summary.runtime_mode,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingClaudeControl {
@@ -35,6 +64,8 @@ pub struct ClaudeSessionHandle {
     stdin_tx: mpsc::UnboundedSender<String>,
     child: Arc<Mutex<Option<Child>>>,
     pending_controls: Arc<Mutex<HashMap<String, PendingClaudeControl>>>,
+    pending_rpc: Arc<Mutex<HashMap<String, oneshot::Sender<Result<(), String>>>>>,
+    session_config: Arc<Mutex<ClaudeSessionConfig>>,
 }
 
 impl ClaudeSessionHandle {
@@ -88,16 +119,46 @@ impl ClaudeSessionHandle {
         self.write_json(&req)
     }
 
+    pub async fn is_compatible_with(&self, summary: &super::types::ThreadSummary) -> bool {
+        let current = self.session_config.lock().await.clone();
+        current == ClaudeSessionConfig::from_summary(summary)
+    }
+
+    async fn send_control_rpc(&self, request_id: String, req: &Value) -> Result<(), String> {
+        let (tx, rx) = oneshot::channel();
+        self.pending_rpc.lock().await.insert(request_id.clone(), tx);
+        if let Err(err) = self.write_json(req) {
+            self.pending_rpc.lock().await.remove(&request_id);
+            return Err(err);
+        }
+        match timeout(Duration::from_secs(5), rx).await {
+            Ok(Ok(res)) => res,
+            Ok(Err(_)) => Err("Claude session closed before confirming update".to_string()),
+            Err(_) => {
+                self.pending_rpc.lock().await.remove(&request_id);
+                Err("Timed out waiting for Claude to confirm settings update".to_string())
+            }
+        }
+    }
+
     pub async fn set_model(&self, model: &str) -> Result<(), String> {
+        let request_id = format!("mdl_{}", uuid::Uuid::new_v4());
         let req = json!({
             "type": "control_request",
-            "request_id": format!("mdl_{}", uuid::Uuid::new_v4()),
+            "request_id": request_id,
             "request": {
                 "subtype": "set_model",
                 "model": model,
             }
         });
-        self.write_json(&req)
+        self.send_control_rpc(request_id, &req).await?;
+        let mut cfg = self.session_config.lock().await;
+        cfg.model = if model.trim().is_empty() || model == "default" {
+            None
+        } else {
+            Some(model.trim().to_string())
+        };
+        Ok(())
     }
 
     pub async fn set_permission_mode(
@@ -106,15 +167,20 @@ impl ClaudeSessionHandle {
         runtime_mode: RuntimeMode,
     ) -> Result<(), String> {
         let mode = map_claude_permission_mode(interaction_mode, runtime_mode);
+        let request_id = format!("pm_{}", uuid::Uuid::new_v4());
         let req = json!({
             "type": "control_request",
-            "request_id": format!("pm_{}", uuid::Uuid::new_v4()),
+            "request_id": request_id,
             "request": {
                 "subtype": "set_permission_mode",
                 "mode": mode,
             }
         });
-        self.write_json(&req)
+        self.send_control_rpc(request_id, &req).await?;
+        let mut cfg = self.session_config.lock().await;
+        cfg.interaction_mode = interaction_mode;
+        cfg.runtime_mode = runtime_mode;
+        Ok(())
     }
 
     pub async fn send_compact(&self) -> Result<(), String> {
@@ -708,6 +774,10 @@ pub async fn spawn_claude_session(
 
     let child_arc = Arc::new(Mutex::new(Some(child)));
     let pending_controls = Arc::new(Mutex::new(HashMap::<String, PendingClaudeControl>::new()));
+    let pending_rpc = Arc::new(Mutex::new(
+        HashMap::<String, oneshot::Sender<Result<(), String>>>::new(),
+    ));
+    let session_config = Arc::new(Mutex::new(ClaudeSessionConfig::from_summary(&thread.summary)));
 
     let handle = ClaudeSessionHandle {
         thread_id: thread.summary.id.clone(),
@@ -715,6 +785,8 @@ pub async fn spawn_claude_session(
         stdin_tx,
         child: child_arc.clone(),
         pending_controls: pending_controls.clone(),
+        pending_rpc: pending_rpc.clone(),
+        session_config,
     };
 
     // Stderr logger
@@ -744,7 +816,9 @@ pub async fn spawn_claude_session(
     let store_out = store.clone();
     let rate_cache_out = rate_limit_cache.clone();
     let pending_out = pending_controls.clone();
+    let pending_rpc_out = pending_rpc.clone();
     let sessions_out = sessions_map.clone();
+    let child_id = child_arc.clone();
 
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
@@ -788,6 +862,26 @@ pub async fn spawn_claude_session(
                     }
                 }
                 "control_response" => {
+                    if let Some(resp) = val.get("response") {
+                        if let Some(req_id) = resp.get("request_id").and_then(|v| v.as_str()) {
+                            if let Some(waiter) = pending_rpc_out.lock().await.remove(req_id) {
+                                let subtype = resp
+                                    .get("subtype")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("success");
+                                if subtype == "error" {
+                                    let msg = resp
+                                        .get("error")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("Claude rejected control request")
+                                        .to_string();
+                                    let _ = waiter.send(Err(msg));
+                                } else {
+                                    let _ = waiter.send(Ok(()));
+                                }
+                            }
+                        }
+                    }
                     if let Some(cmds) = val
                         .get("response")
                         .and_then(|r| r.get("response"))
@@ -1579,8 +1673,18 @@ pub async fn spawn_claude_session(
             }
         }
 
-        // Process exited
-        sessions_out.lock().await.remove(&thread_id);
+        // Process exited: fail any pending control RPCs immediately and only remove our own session entry.
+        for (_, waiter) in pending_rpc_out.lock().await.drain() {
+            let _ = waiter.send(Err("Claude process exited".to_string()));
+        }
+        {
+            let mut sessions = sessions_out.lock().await;
+            if let Some(current) = sessions.get(&thread_id) {
+                if Arc::ptr_eq(&current.child, &child_id) {
+                    sessions.remove(&thread_id);
+                }
+            }
+        }
         if active_message_id.is_some() {
             let _ = store_out
                 .mutate_thread(&project_path, &thread_id, |t| {

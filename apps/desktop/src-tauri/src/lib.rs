@@ -67,6 +67,7 @@ pub fn run() {
             commands::git::git_log,
             commands::git::git_graph,
             commands::git::git_diff,
+            commands::git::git_commit_diff,
             commands::git::git_discard_all,
             commands::git::git_discard_file,
             commands::git::git_unstage,

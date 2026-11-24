@@ -4,10 +4,97 @@ use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::UNIX_EPOCH;
 
 const MAX_SYNCTEX_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_CACHED_MAPS: usize = 4;
 // SyncTeX positions are in scaled TeX points. The PDF viewer uses 72 points per inch.
 const SCALED_POINTS_PER_PDF_POINT: f64 = 65_781.76;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SyncCacheKey {
+    sidecar_path: PathBuf,
+    len: u64,
+    modified_nanos: u128,
+}
+
+struct SyncCacheSlot {
+    map: Mutex<Option<Arc<SyncMap>>>,
+}
+
+#[derive(Default)]
+struct SyncCache {
+    order: Vec<SyncCacheKey>,
+    entries: HashMap<SyncCacheKey, Arc<SyncCacheSlot>>,
+}
+
+fn global_sync_cache() -> &'static Mutex<SyncCache> {
+    static CACHE: OnceLock<Mutex<SyncCache>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(SyncCache::default()))
+}
+
+fn resolve_sidecar_key(
+    pdf: &Path,
+    project_root: Option<&Path>,
+) -> Result<(PathBuf, bool, SyncCacheKey), String> {
+    let gz = pdf.with_extension("synctex.gz");
+    let (path, is_gz) = match std::fs::metadata(&gz) {
+        Ok(_) => (gz, true),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            let plain = pdf.with_extension("synctex");
+            std::fs::metadata(&plain).map_err(|error| {
+                format!("Could not open SyncTeX data for {}: {error}", pdf.display())
+            })?;
+            (plain, false)
+        }
+        Err(err) => return Err(format!("Could not open SyncTeX data: {err}")),
+    };
+    let canonical = std::fs::canonicalize(&path)
+        .map_err(|error| format!("Could not resolve SyncTeX path: {error}"))?;
+    if let Some(root) = project_root {
+        let canonical_root = std::fs::canonicalize(root)
+            .map_err(|error| format!("Invalid project path: {error}"))?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err("Access denied: SyncTeX sidecar is outside project directory".to_string());
+        }
+    }
+    let meta = std::fs::metadata(&canonical)
+        .map_err(|error| format!("Could not stat SyncTeX data: {error}"))?;
+    let modified_nanos = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    Ok((
+        canonical.clone(),
+        is_gz,
+        SyncCacheKey {
+            sidecar_path: canonical,
+            len: meta.len(),
+            modified_nanos,
+        },
+    ))
+}
+
+pub(super) fn validate_sidecar_in_project(pdf: &Path, project_root: &Path) -> Result<(), String> {
+    let canonical_root = std::fs::canonicalize(project_root)
+        .map_err(|error| format!("Invalid project path: {error}"))?;
+    for ext in ["synctex.gz", "synctex"] {
+        let candidate = pdf.with_extension(ext);
+        if candidate.exists() {
+            let canonical = std::fs::canonicalize(&candidate)
+                .map_err(|error| format!("Could not resolve SyncTeX path: {error}"))?;
+            if !canonical.starts_with(&canonical_root) {
+                return Err(
+                    "Access denied: SyncTeX sidecar is outside project directory".to_string(),
+                );
+            }
+        }
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy)]
 struct Bounds {
@@ -34,15 +121,78 @@ pub(super) struct SyncMap {
 }
 
 impl SyncMap {
-    pub(super) fn load(pdf: &Path) -> Result<Self, String> {
-        let reader: Box<dyn Read> = match File::open(pdf.with_extension("synctex.gz")) {
-            Ok(file) => Box::new(GzDecoder::new(file)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                Box::new(File::open(pdf.with_extension("synctex")).map_err(|error| {
-                    format!("Could not open SyncTeX data for {}: {error}", pdf.display())
-                })?)
+    pub(super) fn load_cached_in_project(
+        pdf: &Path,
+        project_root: &Path,
+    ) -> Result<Arc<Self>, String> {
+        Self::load_cached_inner(pdf, Some(project_root))
+    }
+
+    #[cfg(test)]
+    pub(super) fn load_cached(pdf: &Path) -> Result<Arc<Self>, String> {
+        Self::load_cached_inner(pdf, None)
+    }
+
+    fn load_cached_inner(pdf: &Path, project_root: Option<&Path>) -> Result<Arc<Self>, String> {
+        let (sidecar_path, is_gz, key) = resolve_sidecar_key(pdf, project_root)?;
+        let slot = {
+            let mut cache = global_sync_cache()
+                .lock()
+                .map_err(|_| "SyncTeX cache lock poisoned".to_string())?;
+            if let Some(existing) = cache.entries.get(&key) {
+                Arc::clone(existing)
+            } else {
+                while cache.order.len() >= MAX_CACHED_MAPS {
+                    if let Some(oldest) = cache.order.first().cloned() {
+                        cache.order.remove(0);
+                        cache.entries.remove(&oldest);
+                    }
+                }
+                let created = Arc::new(SyncCacheSlot {
+                    map: Mutex::new(None),
+                });
+                cache.order.push(key.clone());
+                cache.entries.insert(key.clone(), Arc::clone(&created));
+                created
             }
-            Err(error) => return Err(format!("Could not open SyncTeX data: {error}")),
+        };
+
+        // Per-key lock coalesces simultaneous loads of the same sidecar/build identity.
+        let mut slot_guard = slot
+            .map
+            .lock()
+            .map_err(|_| "SyncTeX slot lock poisoned".to_string())?;
+        if let Some(cached) = slot_guard.as_ref() {
+            return Ok(Arc::clone(cached));
+        }
+        let loaded = match Self::load_sidecar(&sidecar_path, is_gz, pdf) {
+            Ok(map) => Arc::new(map),
+            Err(err) => {
+                if let Ok(mut cache) = global_sync_cache().lock() {
+                    cache.entries.remove(&key);
+                    cache.order.retain(|k| k != &key);
+                }
+                return Err(err);
+            }
+        };
+        *slot_guard = Some(Arc::clone(&loaded));
+        Ok(loaded)
+    }
+
+    #[cfg(test)]
+    pub(super) fn load(pdf: &Path) -> Result<Self, String> {
+        let (sidecar_path, is_gz, _) = resolve_sidecar_key(pdf, None)?;
+        Self::load_sidecar(&sidecar_path, is_gz, pdf)
+    }
+
+    fn load_sidecar(sidecar_path: &Path, is_gz: bool, pdf: &Path) -> Result<Self, String> {
+        let file = File::open(sidecar_path).map_err(|error| {
+            format!("Could not open SyncTeX data for {}: {error}", pdf.display())
+        })?;
+        let reader: Box<dyn Read> = if is_gz {
+            Box::new(GzDecoder::new(file))
+        } else {
+            Box::new(file)
         };
 
         let mut data = Vec::new();
@@ -403,5 +553,23 @@ Postamble:\n";
         assert!(SyncMap::load(&pdf).is_ok());
         std::fs::write(pdf.with_extension("synctex"), "not SyncTeX").unwrap();
         assert!(SyncMap::load(&pdf).is_err());
+    }
+
+    #[test]
+    fn caches_by_sidecar_identity_and_invalidates_on_change() {
+        let scratch = tempfile::tempdir().unwrap();
+        let pdf = scratch.path().join("cached.pdf");
+        let sidecar = pdf.with_extension("synctex");
+        std::fs::write(&sidecar, SAMPLE).unwrap();
+
+        let first = SyncMap::load_cached(&pdf).unwrap();
+        let second = SyncMap::load_cached(&pdf).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+
+        // Change file length so cache key changes immediately even within same timestamp tick
+        let updated = format!("{SAMPLE}\n");
+        std::fs::write(&sidecar, updated).unwrap();
+        let third = SyncMap::load_cached(&pdf).unwrap();
+        assert!(!Arc::ptr_eq(&first, &third));
     }
 }

@@ -677,32 +677,56 @@ async fn stream_compile_output(
     collected_lines: Arc<Mutex<Vec<String>>>,
     stderr_is_error: bool,
 ) {
+    const MAX_BATCH_LINES: usize = 32;
+    const FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
     let mut lines = BufReader::new(stream).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let is_warning = line.contains("Warning:")
-            || line.starts_with("warning:")
-            || line.starts_with("Overfull \\")
-            || line.starts_with("Underfull \\");
-        let is_error = !is_warning
-            && (stderr_is_error
-                || line.starts_with("! ")
-                || line.contains("Error")
-                || line.starts_with("error:")
-                || try_parse_file_line_diagnostic(&line).is_some());
-        {
-            let mut guard = collected_lines.lock().await;
-            if guard.len() < 4000 {
-                guard.push(line.clone());
+    let mut batch: Vec<CompileOutputEvent> = Vec::with_capacity(MAX_BATCH_LINES);
+    let mut flush_tick = tokio::time::interval(FLUSH_INTERVAL);
+    flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            next = lines.next_line() => {
+                match next {
+                    Ok(Some(line)) => {
+                        let is_warning = line.contains("Warning:")
+                            || line.starts_with("warning:")
+                            || line.starts_with("Overfull \\")
+                            || line.starts_with("Underfull \\");
+                        let is_error = !is_warning
+                            && (stderr_is_error
+                                || line.starts_with("! ")
+                                || line.contains("Error")
+                                || line.starts_with("error:")
+                                || try_parse_file_line_diagnostic(&line).is_some());
+                        {
+                            let mut guard = collected_lines.lock().await;
+                            if guard.len() < 4000 {
+                                guard.push(line.clone());
+                            }
+                        }
+                        batch.push(CompileOutputEvent {
+                            line,
+                            is_error,
+                            is_warning,
+                        });
+                        if batch.len() >= MAX_BATCH_LINES {
+                            let to_emit = std::mem::take(&mut batch);
+                            let _ = app.emit("latex-compile-output-batch", to_emit);
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            _ = flush_tick.tick(), if !batch.is_empty() => {
+                let to_emit = std::mem::take(&mut batch);
+                let _ = app.emit("latex-compile-output-batch", to_emit);
             }
         }
-        let _ = app.emit(
-            "latex-compile-output",
-            CompileOutputEvent {
-                line,
-                is_error,
-                is_warning,
-            },
-        );
+    }
+    if !batch.is_empty() {
+        let _ = app.emit("latex-compile-output-batch", batch);
     }
 }
 
@@ -1139,20 +1163,45 @@ pub fn parse_synctex_view_output(stdout: &str) -> Result<SynctexViewResult, Stri
     })
 }
 
+fn snapshot_project_path(
+    project_state: &State<'_, std::sync::Mutex<crate::commands::fs::ProjectState>>,
+) -> Result<String, String> {
+    let guard = project_state
+        .lock()
+        .map_err(|_| "Failed to lock project state".to_string())?;
+    guard
+        .project_path
+        .clone()
+        .ok_or_else(|| "No project open".to_string())
+}
+
 #[tauri::command]
 pub async fn latex_synctex_edit(
+    project_state: State<'_, std::sync::Mutex<crate::commands::fs::ProjectState>>,
     pdf_path: String,
     page: u32,
     x: f64,
     y: f64,
 ) -> Result<SynctexResult, String> {
+    let project_path = snapshot_project_path(&project_state)?;
     let Some(synctex_bin) = find_compiler("synctex").await.path else {
         return tokio::task::spawn_blocking(move || {
-            synctex::SyncMap::load(Path::new(&pdf_path))?.edit(page, x, y)
+            crate::commands::fs::validate_path_within_project(&pdf_path, &project_path)?;
+            synctex::SyncMap::load_cached_in_project(Path::new(&pdf_path), Path::new(&project_path))?
+                .edit(page, x, y)
         })
         .await
         .map_err(|error| format!("Could not read SyncTeX data: {error}"))?;
     };
+
+    let pdf_check = pdf_path.clone();
+    let proj_check = project_path.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::commands::fs::validate_path_within_project(&pdf_check, &proj_check)?;
+        synctex::validate_sidecar_in_project(Path::new(&pdf_check), Path::new(&proj_check))
+    })
+    .await
+    .map_err(|error| format!("Could not validate SyncTeX paths: {error}"))??;
 
     let input_spec = format!("{}:{}:{}:{}", page, x, y, pdf_path);
     let mut cmd = command(&synctex_bin);
@@ -1196,18 +1245,34 @@ pub async fn latex_synctex_edit(
 
 #[tauri::command]
 pub async fn latex_synctex_view(
+    project_state: State<'_, std::sync::Mutex<crate::commands::fs::ProjectState>>,
     pdf_path: String,
     tex_path: String,
     line: u32,
     column: u32,
 ) -> Result<SynctexViewResult, String> {
+    let project_path = snapshot_project_path(&project_state)?;
     let Some(synctex_bin) = find_compiler("synctex").await.path else {
         return tokio::task::spawn_blocking(move || {
-            synctex::SyncMap::load(Path::new(&pdf_path))?.view(Path::new(&tex_path), line, column)
+            crate::commands::fs::validate_path_within_project(&pdf_path, &project_path)?;
+            crate::commands::fs::validate_path_within_project(&tex_path, &project_path)?;
+            synctex::SyncMap::load_cached_in_project(Path::new(&pdf_path), Path::new(&project_path))?
+                .view(Path::new(&tex_path), line, column)
         })
         .await
         .map_err(|error| format!("Could not read SyncTeX data: {error}"))?;
     };
+
+    let pdf_check = pdf_path.clone();
+    let tex_check = tex_path.clone();
+    let proj_check = project_path.clone();
+    tokio::task::spawn_blocking(move || {
+        crate::commands::fs::validate_path_within_project(&pdf_check, &proj_check)?;
+        crate::commands::fs::validate_path_within_project(&tex_check, &proj_check)?;
+        synctex::validate_sidecar_in_project(Path::new(&pdf_check), Path::new(&proj_check))
+    })
+    .await
+    .map_err(|error| format!("Could not validate SyncTeX paths: {error}"))??;
 
     let input_spec = format!("{}:{}:{}", line, column.max(1), tex_path);
     let mut cmd = command(&synctex_bin);

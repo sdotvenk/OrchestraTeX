@@ -48,7 +48,7 @@ pub struct ProjectState {
     pub project_path: Option<String>,
 }
 
-fn validate_path_within_project(path: &str, project_path: &str) -> Result<(), String> {
+pub(crate) fn validate_path_within_project(path: &str, project_path: &str) -> Result<(), String> {
     let canonical_project =
         std::fs::canonicalize(project_path).map_err(|e| format!("Invalid project path: {}", e))?;
 

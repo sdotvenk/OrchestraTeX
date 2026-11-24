@@ -228,36 +228,74 @@ fn parse_porcelain_v1_z(output: &str) -> Vec<GitFileChange> {
 
         let x = bytes[0] as char;
         let y = bytes[1] as char;
-        let staged = x != ' ' && x != '?';
-        let status_char = if staged { x } else { y };
+        let path = record[3..].to_string();
 
         let original_path = if matches!(x, 'R' | 'C') || matches!(y, 'R' | 'C') {
-            // A rename has two paths to reset when unstaging. A copy only changes its destination.
-            parts
-                .next()
-                .filter(|_| status_char == 'R')
-                .map(str::to_owned)
+            parts.next().map(str::to_owned)
         } else {
             None
         };
 
-        let status = match status_char {
-            'M' => "modified",
-            'A' => "added",
-            'D' => "deleted",
-            'R' => "renamed",
-            '?' => "untracked",
-            _ => "modified",
-        }
-        .to_string();
+        let status_label = |code: char| -> String {
+            match code {
+                'M' => "modified",
+                'A' => "added",
+                'D' => "deleted",
+                'R' => "renamed",
+                '?' => "untracked",
+                _ => "modified",
+            }
+            .to_string()
+        };
 
-        let path = record[3..].to_string();
-        changes.push(GitFileChange {
-            path,
-            original_path,
-            status,
-            staged,
-        });
+        if x == '?' && y == '?' {
+            changes.push(GitFileChange {
+                path,
+                original_path: None,
+                status: "untracked".to_string(),
+                staged: false,
+            });
+            continue;
+        }
+
+        // Unmerged / conflict entries (DD, AU, UD, UA, DU, AA, UU) are represented once as unstaged conflicts.
+        let is_conflict = matches!(
+            (x, y),
+            ('D', 'D')
+                | ('A', 'U')
+                | ('U', 'D')
+                | ('U', 'A')
+                | ('D', 'U')
+                | ('A', 'A')
+                | ('U', 'U')
+        );
+        if is_conflict {
+            changes.push(GitFileChange {
+                path,
+                original_path: None,
+                status: "conflict".to_string(),
+                staged: false,
+            });
+            continue;
+        }
+
+        if x != ' ' && x != '?' {
+            changes.push(GitFileChange {
+                path: path.clone(),
+                original_path: if x == 'R' { original_path.clone() } else { None },
+                status: status_label(x),
+                staged: true,
+            });
+        }
+
+        if y != ' ' && y != '?' {
+            changes.push(GitFileChange {
+                path,
+                original_path: if y == 'R' { original_path } else { None },
+                status: status_label(y),
+                staged: false,
+            });
+        }
     }
 
     changes
@@ -443,7 +481,7 @@ pub async fn git_diff(
     file: Option<String>,
     staged: Option<bool>,
 ) -> Result<String, String> {
-    let mut args = vec!["--literal-pathspecs", "diff"];
+    let mut args = vec!["-c", "core.quotepath=false", "--literal-pathspecs", "diff"];
     if staged.unwrap_or(false) {
         args.push("--staged");
     }
@@ -452,6 +490,32 @@ pub async fn git_diff(
         args.push(f);
     }
     run_git(&dir, &args).await
+}
+
+#[tauri::command]
+pub async fn git_commit_diff(dir: String, hash: String) -> Result<String, String> {
+    let trimmed = hash.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with('-')
+        || !trimmed.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err("Invalid commit hash".to_string());
+    }
+    run_git(
+        &dir,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "show",
+            "--first-parent",
+            "-m",
+            "--format=",
+            "--patch",
+            "--no-color",
+            trimmed,
+        ],
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1219,5 +1283,35 @@ mod tests {
         assert_eq!(changes[6].path, "deleted.tex");
         assert_eq!(changes[6].status, "deleted");
         assert!(!changes[6].staged);
+    }
+
+    #[test]
+    fn parse_porcelain_v1_z_emits_mixed_staged_unstaged_and_conflicts() {
+        let input = concat!(
+            "MM sections/mixed.tex\0",
+            "AM sections/added-then-edited.tex\0",
+            "UU sections/conflicted.tex\0",
+        );
+
+        let changes = parse_porcelain_v1_z(input);
+        assert_eq!(changes.len(), 5);
+
+        assert_eq!(changes[0].path, "sections/mixed.tex");
+        assert_eq!(changes[0].status, "modified");
+        assert!(changes[0].staged);
+        assert_eq!(changes[1].path, "sections/mixed.tex");
+        assert_eq!(changes[1].status, "modified");
+        assert!(!changes[1].staged);
+
+        assert_eq!(changes[2].path, "sections/added-then-edited.tex");
+        assert_eq!(changes[2].status, "added");
+        assert!(changes[2].staged);
+        assert_eq!(changes[3].path, "sections/added-then-edited.tex");
+        assert_eq!(changes[3].status, "modified");
+        assert!(!changes[3].staged);
+
+        assert_eq!(changes[4].path, "sections/conflicted.tex");
+        assert_eq!(changes[4].status, "conflict");
+        assert!(!changes[4].staged);
     }
 }
