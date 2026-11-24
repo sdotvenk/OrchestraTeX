@@ -63,7 +63,7 @@ export function HomeWorkspace({
   return (
     <section aria-label="Home" className="h-full overflow-auto bg-bg p-6">
       <div className="mx-auto max-w-5xl space-y-6">
-        <h1>
+        <h1 className="text-center">
           <OrchestraTeXWordmark prominent />
         </h1>
         <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">

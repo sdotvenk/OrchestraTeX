@@ -3311,6 +3311,7 @@ export default function EditorPage() {
   );
 
   const effectiveRightPanelWidth = agentExpanded ? Math.max(rightPanelWidth, 520) : rightPanelWidth;
+  const isHomeVisible = !showUsageDashboard && (!daemon.projectPath || showHomeWorkspace);
   const isWorkspaceVisible = !showHomeWorkspace && !showUsageDashboard;
   const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
     setShowHomeWorkspace(false);
@@ -3320,27 +3321,28 @@ export default function EditorPage() {
 
   return (
     <div className="h-dvh flex flex-col bg-bg text-foreground">
-      {/* Score Top Bar on Warm Paper */}
       <header className="h-10 shrink-0 px-3 flex items-center justify-between gap-3 border-b border-border select-none">
         {/* Left: Brand + Project Switcher + Branch */}
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => {
-              import("@tauri-apps/plugin-shell").then(({ open }) => {
-                open("https://github.com/sdotvenk/OrchestraTeX");
-              });
-            }}
-            className="inline-flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-subtle transition-colors shrink-0"
-            title="OrchestraTeX on GitHub"
-            aria-label="Open OrchestraTeX repository"
-          >
-            <OrchestraTeXWordmark />
-          </button>
+          {!isHomeVisible && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowUsageDashboard(false);
+                setShowHomeWorkspace(true);
+              }}
+              className="inline-flex shrink-0 items-center rounded-lg px-1.5 py-1 transition-colors hover:bg-subtle focus:bg-subtle focus-visible:outline-2 focus-visible:outline-accent"
+              aria-label="Home"
+            >
+              <OrchestraTeXWordmark />
+            </button>
+          )}
 
           {daemon.projectPath && (
             <>
-              <span className="h-4 w-px bg-border-dark shrink-0" aria-hidden="true" />
+              {!isHomeVisible && (
+                <span className="h-4 w-px bg-border-dark shrink-0" aria-hidden="true" />
+              )}
               <ProjectSwitcher
                 projectPath={daemon.projectPath}
                 recentProjects={recentProjects.projects}
@@ -3455,19 +3457,6 @@ export default function EditorPage() {
 
         {/* Right: Live Voice/Status + Panel Toggles */}
         <div className="flex items-center justify-end gap-1.5 flex-1 shrink-0">
-          {daemon.projectPath && (
-            <button
-              type="button"
-              className={`btn btn-sm ${showHomeWorkspace && !showUsageDashboard ? "btn-secondary" : "btn-ghost"}`}
-              aria-pressed={showHomeWorkspace && !showUsageDashboard}
-              onClick={() => {
-                setShowUsageDashboard(false);
-                setShowHomeWorkspace((open) => !open);
-              }}
-            >
-              Home
-            </button>
-          )}
           <button
             type="button"
             className={`btn btn-sm ${showUsageDashboard ? "btn-secondary" : "btn-ghost"}`}
@@ -3695,7 +3684,7 @@ export default function EditorPage() {
               onClose={() => setShowUsageDashboard(false)}
             />
           </div>
-        ) : !daemon.projectPath || showHomeWorkspace ? (
+        ) : isHomeVisible ? (
           <div className="min-w-0 flex-1">
             <HomeWorkspace
               recentProjects={recentProjects.projects}
