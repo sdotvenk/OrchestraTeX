@@ -1332,7 +1332,7 @@ export default function EditorPage() {
     [loadDiffPreview],
   );
 
-  const handlePreviewGitDiff = useCallback(
+  const _handlePreviewGitDiff = useCallback(
     async (path: string, staged: boolean) => {
       setOpenTabs((prev) => {
         if (prev.includes(path)) return prev;
@@ -4229,77 +4229,6 @@ export default function EditorPage() {
                   </div>
                 )}
               </div>
-
-              {daemon.projectPath && showLivePreview && (
-                <>
-                  <div className="relative group w-1 flex-shrink-0">
-                    <motion.div
-                      drag="x"
-                      dragConstraints={{ left: 0, right: 0 }}
-                      dragElastic={0}
-                      dragMomentum={false}
-                      onDragStart={() => startResize("preview")}
-                      onDrag={(_event, info) => handleResizeDrag("preview", info)}
-                      onDragEnd={endResize}
-                      className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                      style={{ x: 0 }}
-                    />
-                    <div
-                      className={`w-full h-full transition-colors ${
-                        resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
-                      }`}
-                    />
-                  </div>
-                  <div
-                    style={{
-                      width:
-                        resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
-                    }}
-                    className="flex-shrink-0 min-w-0 max-w-[60%] h-full rounded-[10px] border border-border bg-stage overflow-hidden shadow-[var(--frame-shadow)]"
-                  >
-                    <LivePdfPreview
-                      projectPath={daemon.projectPath}
-                      mainFile={latexSettings.settings.mainFile}
-                      pdfPath={latexCompiler.pdfPath}
-                      pdfVersion={latexCompiler.pdfVersion}
-                      compileStatus={latexCompiler.compileStatus}
-                      compileLog={latexCompiler.compileLog}
-                      diagnostics={latexCompiler.diagnostics}
-                      lastResult={latexCompiler.lastResult}
-                      lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
-                      autoCompile={latexSettings.settings.autoCompile}
-                      staleAgentEdits={staleAgentEdits}
-                      compiler={latexSettings.settings.compiler}
-                      compilersStatus={latexCompiler.compilersStatus}
-                      shellEscape={latexSettings.settings.shellEscape}
-                      highlightTarget={pdfHighlightTarget}
-                      onCompile={handleCompileShortcut}
-                      onStopCompile={handleStopCompile}
-                      onToggleAutoCompile={handleToggleAutoCompile}
-                      onChangeCompiler={(nextCompiler) => {
-                        void latexSettings.updateSettings({ compiler: nextCompiler });
-                      }}
-                      onToggleShellEscape={() => {
-                        void latexSettings.updateSettings({
-                          shellEscape: !latexSettings.settings.shellEscape,
-                        });
-                      }}
-                      onOpenBuildSettings={() => {
-                        setSettingsInitialTab("build");
-                        setShowLatexSettings(true);
-                      }}
-                      onSelectMainFile={() => setShowMainFileDialog(true)}
-                      onCleanAuxFiles={handleCleanAuxFiles}
-                      onForwardSync={handleLivePreviewForwardSync}
-                      onSynctexClick={handleLivePreviewSynctexClick}
-                      onJumpToDiagnostic={handleJumpToDiagnostic}
-                      onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
-                      onOpenBuildActivity={openBuildActivity}
-                      onClose={handleCloseLivePreview}
-                    />
-                  </div>
-                </>
-              )}
             </div>
 
             {/* LaTeX Install Prompt */}
@@ -4601,6 +4530,80 @@ export default function EditorPage() {
                   />
                 </AgentErrorBoundary>
               </aside>
+              {workspaceView === "write" &&
+                daemon.projectPath &&
+                showLivePreview &&
+                !showUsageDashboard &&
+                !showHomeWorkspace && (
+                  <>
+                    <div className="relative group w-1 flex-shrink-0">
+                      <motion.div
+                        drag="x"
+                        dragConstraints={{ left: 0, right: 0 }}
+                        dragElastic={0}
+                        dragMomentum={false}
+                        onDragStart={() => startResize("preview")}
+                        onDrag={(_event, info) => handleResizeDrag("preview", info)}
+                        onDragEnd={endResize}
+                        className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                        style={{ x: 0 }}
+                      />
+                      <div
+                        className={`w-full h-full transition-colors ${
+                          resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
+                        }`}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        width:
+                          resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
+                      }}
+                      className="flex-shrink-0 min-w-0 max-w-[60%] h-full rounded-[10px] border border-border bg-stage overflow-hidden shadow-[var(--frame-shadow)]"
+                    >
+                      <LivePdfPreview
+                        projectPath={daemon.projectPath}
+                        mainFile={latexSettings.settings.mainFile}
+                        pdfPath={latexCompiler.pdfPath}
+                        pdfVersion={latexCompiler.pdfVersion}
+                        compileStatus={latexCompiler.compileStatus}
+                        compileLog={latexCompiler.compileLog}
+                        diagnostics={latexCompiler.diagnostics}
+                        lastResult={latexCompiler.lastResult}
+                        lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
+                        autoCompile={latexSettings.settings.autoCompile}
+                        staleAgentEdits={staleAgentEdits}
+                        compiler={latexSettings.settings.compiler}
+                        compilersStatus={latexCompiler.compilersStatus}
+                        shellEscape={latexSettings.settings.shellEscape}
+                        highlightTarget={pdfHighlightTarget}
+                        onCompile={handleCompileShortcut}
+                        onStopCompile={handleStopCompile}
+                        onToggleAutoCompile={handleToggleAutoCompile}
+                        onChangeCompiler={(nextCompiler) => {
+                          void latexSettings.updateSettings({ compiler: nextCompiler });
+                        }}
+                        onToggleShellEscape={() => {
+                          void latexSettings.updateSettings({
+                            shellEscape: !latexSettings.settings.shellEscape,
+                          });
+                        }}
+                        onOpenBuildSettings={() => {
+                          setSettingsInitialTab("build");
+                          setShowLatexSettings(true);
+                        }}
+                        onSelectMainFile={() => setShowMainFileDialog(true)}
+                        onCleanAuxFiles={handleCleanAuxFiles}
+                        onForwardSync={handleLivePreviewForwardSync}
+                        onSynctexClick={handleLivePreviewSynctexClick}
+                        onJumpToDiagnostic={handleJumpToDiagnostic}
+                        onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
+                        onOpenBuildActivity={openBuildActivity}
+                        onClose={handleCloseLivePreview}
+                      />
+                    </div>
+                  </>
+                )}
               {isAgentsView && (
                 <div className="w-[clamp(11rem,25vw,20rem)] shrink-0 overflow-hidden">
                   <ProjectInspector

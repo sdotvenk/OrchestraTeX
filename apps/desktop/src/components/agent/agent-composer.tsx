@@ -1,22 +1,7 @@
 "use client";
 
 import type { FileNode } from "@orchestratex/shared";
-import {
-  ArrowUp,
-  CaretDown,
-  Check,
-  FileText,
-  Gauge,
-  Lightning,
-  Paperclip,
-  PencilSimple,
-  Plus,
-  Queue,
-  ShieldCheck,
-  Stop,
-  Trash,
-  X,
-} from "@phosphor-icons/react";
+import { ArrowUp, CaretDown, FileText, Plus, Stop, X } from "@phosphor-icons/react";
 import Image from "next/image";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type {
@@ -31,6 +16,7 @@ import type {
   SlashCommandInfo,
 } from "@/lib/agent/types";
 import { BUILTIN_SLASH_COMMANDS } from "@/lib/agent/use-agent";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { ProviderIcon } from "./icons";
 import { fileToAttachmentInput, flattenFileNodes } from "./utils";
 
@@ -148,8 +134,8 @@ export function AgentComposer({
   compactLabel,
   onCompactContext,
   usageTrigger,
-  compact: _compact = false,
-  latestBuildLogExcerpt: _latestBuildLogExcerpt = null,
+  compact = false,
+  latestBuildLogExcerpt = null,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<LocalAttachment[]>([]);
@@ -159,6 +145,9 @@ export function AgentComposer({
   const [activePopoverIdx, setActivePopoverIdx] = useState(0);
   const [dismissedPopoverKey, setDismissedPopoverKey] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [accessMenuOpen, setAccessMenuOpen] = useState(false);
+  const [includeBuildLog, setIncludeBuildLog] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -356,19 +345,25 @@ export function AgentComposer({
     async (mode: "auto" | "steer" | "queue" = "auto") => {
       const trimmed = text.trim();
       const activeChip = selectedLineRange ?? contextChip;
-      if (!trimmed && attachments.length === 0 && !activeChip) return;
+      const hasBuildLog = Boolean(includeBuildLog && latestBuildLogExcerpt?.trim());
+      if (!trimmed && attachments.length === 0 && !activeChip && !hasBuildLog) return;
 
       const chipPrefix = activeChip
         ? activeChip.snippet?.trim()
           ? `Regarding \`${activeChip.label}\`:\n\`\`\`latex\n${activeChip.snippet.trim()}\n\`\`\`\n\n`
           : `Regarding \`${activeChip.label}\`: `
         : "";
-      const composedContent = `${chipPrefix}${text}`.trim();
+      const buildLogPrefix =
+        hasBuildLog && latestBuildLogExcerpt
+          ? `Build log:\n\`\`\`\n${latestBuildLogExcerpt.trim()}\n\`\`\`\n\n`
+          : "";
+      const composedContent = `${chipPrefix}${buildLogPrefix}${text}`.trim();
       const currentAtts = attachments.map((a) => a.input);
 
       setText("");
       setAttachments([]);
       setContextChip(null);
+      setIncludeBuildLog(false);
       onRemoveSelectedLineRange?.();
       setDismissedPopoverKey(null);
       setActivePopoverIdx(0);
@@ -399,6 +394,9 @@ export function AgentComposer({
       providerObj?.supportsSteer,
       selectedLineRange,
       text,
+      latestBuildLogExcerpt?.trim,
+      latestBuildLogExcerpt,
+      includeBuildLog,
     ],
   );
 
@@ -533,91 +531,110 @@ export function AgentComposer({
         <div
           id={menuId}
           ref={menuRef}
-          className="absolute bottom-full left-3 mb-2 w-[320px] max-w-[calc(100%-24px)] max-h-[min(420px,50dvh)] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-2 space-y-2"
-          style={{ boxShadow: "var(--shadow-2)" }}
+          className="absolute bottom-full left-3 mb-2 w-[330px] max-w-[calc(100%-24px)] max-h-[min(440px,55dvh)] overflow-y-auto z-40 ox-popover p-1.5"
           role="dialog"
           aria-label="Thread settings"
         >
           {/* Harness */}
-          <div className="space-y-0.5">
-            <div className="px-2 py-0.5 text-[11px] font-medium text-muted">Harness</div>
-            {providers.map((p) => {
-              const isCurrentProvider = p.id === currentProviderId;
-              const availability = !p.installed ? "Not found" : !p.authenticated ? "Sign in" : null;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  aria-pressed={isCurrentProvider}
-                  onClick={() => void onChangeProvider(p.id)}
-                  className={`w-full px-2 py-1.5 rounded-lg flex items-center gap-2 text-left transition-colors ${
-                    isCurrentProvider
-                      ? "bg-accent-soft text-foreground-strong"
-                      : "hover:bg-subtle text-foreground"
-                  }`}
-                >
-                  <ProviderIcon providerId={p.id} className="size-3.5 shrink-0" />
-                  <span className="text-[12px] font-medium truncate">{p.name}</span>
-                  <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted shrink-0">
-                    {availability && <span>{availability}</span>}
-                    {isCurrentProvider && (
-                      <Check className="size-3.5 text-accent" aria-hidden="true" />
-                    )}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Model */}
-          {models.length > 0 && (
-            <div className="pt-2 border-t border-border space-y-0.5">
-              <div className="px-2 py-0.5 text-[11px] font-medium text-muted">Model</div>
-              <div className="space-y-0.5 max-h-36 overflow-y-auto">
-                {models.map((m) => {
-                  const isSelected = m.id === currentModel;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      aria-pressed={isSelected}
-                      onClick={() => void onChangeModel(m.id)}
-                      className={`w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] transition-colors ${
-                        isSelected
-                          ? "bg-accent-soft text-accent font-medium"
-                          : "text-foreground hover:bg-subtle"
-                      }`}
+          <div className="ox-sec px-2.5 pt-1.5 pb-1">Harness</div>
+          {providers.map((p) => {
+            const isCurrentProvider = p.id === currentProviderId;
+            const availability = !p.installed ? "Not found" : !p.authenticated ? "Sign in" : null;
+            const voice = VOICE_COLORS[p.id] ?? VOICE_COLORS.claude;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                aria-pressed={isCurrentProvider}
+                onClick={() => void onChangeProvider(p.id)}
+                className={`w-full h-[30px] px-2.5 rounded-[6px] flex items-center gap-2 text-left transition-colors ${
+                  isCurrentProvider
+                    ? "bg-subtle text-foreground-strong"
+                    : "hover:bg-subtle text-foreground"
+                }`}
+              >
+                <span style={{ color: voice.ink }} className="inline-flex shrink-0">
+                  <ProviderIcon providerId={p.id} className="size-3.5" />
+                </span>
+                <span className="text-[12px] font-medium truncate">{p.name}</span>
+                <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted shrink-0">
+                  {availability && <span>{availability}</span>}
+                  {isCurrentProvider && (
+                    <span
+                      className="font-mono text-[12px] text-foreground-strong"
+                      aria-hidden="true"
                     >
-                      <span className="truncate">{m.name}</span>
-                      {isSelected && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
-                    </button>
-                  );
-                })}
-              </div>
+                      ✓
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+
+          <div className="my-1 mx-1.5 h-px bg-border" />
+
+          {/* Model (compact collapsible) */}
+          {models.length > 0 && (
+            <div>
+              <button
+                type="button"
+                aria-expanded={modelMenuOpen}
+                onClick={() => setModelMenuOpen((open) => !open)}
+                className="w-full h-[30px] px-2.5 rounded-[6px] flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
+              >
+                <span>Model</span>
+                <span className="text-foreground-strong truncate">
+                  {modelLabel} {modelMenuOpen ? "▾" : "▸"}
+                </span>
+              </button>
+              {modelMenuOpen && (
+                <div className="mt-0.5 mb-1 pl-2 space-y-0.5 max-h-36 overflow-y-auto">
+                  {models.map((m) => {
+                    const isSelected = m.id === currentModel;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() => {
+                          void onChangeModel(m.id);
+                          setModelMenuOpen(false);
+                        }}
+                        className={`w-full h-[28px] px-2.5 rounded-[6px] text-left flex items-center justify-between gap-2 text-[12px] transition-colors ${
+                          isSelected
+                            ? "bg-subtle text-foreground-strong font-medium"
+                            : "text-foreground hover:bg-subtle"
+                        }`}
+                      >
+                        <span className="truncate">{m.name}</span>
+                        {isSelected && <span className="font-mono text-[11px]">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {/* Effort */}
           {supportedEfforts.length > 0 && (
-            <div className="pt-2 border-t border-border flex items-center justify-between gap-2 px-1">
-              <span className="inline-flex items-center gap-1.5 text-[12px] text-muted shrink-0">
-                <Gauge className="size-3.5" aria-hidden="true" />
-                <span>Effort</span>
-              </span>
-              <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5 flex-wrap justify-end">
+            <div className="h-[30px] px-2.5 flex items-center justify-between gap-2">
+              <span className="text-[12px] text-foreground shrink-0">Effort</span>
+              <div className="inline-flex p-0.5 rounded-[7px] bg-sunken gap-0.5">
                 {supportedEfforts.map((eff) => (
                   <button
                     key={eff}
                     type="button"
                     aria-pressed={currentEffort === eff}
                     onClick={() => void onChangeEffort(eff)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-medium capitalize transition-colors ${
+                    className={`px-2 py-0.5 rounded-[5px] text-[11px] font-medium capitalize transition-colors ${
                       currentEffort === eff
                         ? "bg-panel text-foreground-strong shadow-xs"
                         : "text-muted hover:text-foreground"
                     }`}
                   >
-                    {eff}
+                    {eff === "medium" ? "Med" : eff}
                   </button>
                 ))}
               </div>
@@ -625,16 +642,16 @@ export function AgentComposer({
           )}
 
           {/* Mode: Build / Plan */}
-          <div className="pt-2 border-t border-border flex items-center justify-between gap-2 px-1">
-            <span className="text-[12px] text-muted">Mode</span>
-            <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5">
+          <div className="h-[30px] px-2.5 flex items-center justify-between gap-2">
+            <span className="text-[12px] text-foreground">Mode</span>
+            <div className="inline-flex p-0.5 rounded-[7px] bg-sunken gap-0.5">
               {(["default", "plan"] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
                   aria-pressed={interactionMode === m}
                   onClick={() => void onChangeInteractionMode(m)}
-                  className={`px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors ${
+                  className={`px-2.5 py-0.5 rounded-[5px] text-[11px] font-medium transition-colors ${
                     interactionMode === m
                       ? "bg-panel text-foreground-strong shadow-xs"
                       : "text-muted hover:text-foreground"
@@ -646,95 +663,102 @@ export function AgentComposer({
             </div>
           </div>
 
-          {/* Access */}
-          <div className="pt-2 border-t border-border space-y-0.5">
-            <div className="px-2 py-0.5 text-[11px] font-medium text-muted">Access</div>
-            {RUNTIME_OPTIONS.map((opt) => {
-              const selected = runtimeMode === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => void onChangeRuntimeMode(opt.id)}
-                  className={`w-full px-2 py-1.5 rounded-lg text-left flex items-center gap-2 transition-colors ${
-                    selected ? "bg-accent-soft text-foreground-strong" : "hover:bg-subtle"
-                  }`}
-                >
-                  {opt.isAuto ? (
-                    <Lightning className="size-3.5 text-accent shrink-0" aria-hidden="true" />
-                  ) : (
-                    <ShieldCheck className="size-3.5 text-muted shrink-0" aria-hidden="true" />
-                  )}
-                  <span className="text-[12px] font-medium truncate flex-1">{opt.label}</span>
-                  {selected && (
-                    <Check className="size-3.5 text-accent shrink-0" aria-hidden="true" />
-                  )}
-                </button>
-              );
-            })}
+          {/* Access (compact collapsible) */}
+          <div>
+            <button
+              type="button"
+              aria-expanded={accessMenuOpen}
+              onClick={() => setAccessMenuOpen((open) => !open)}
+              className="w-full h-[30px] px-2.5 rounded-[6px] flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
+            >
+              <span>Access</span>
+              <span className="text-foreground-strong truncate">
+                {runtimeLabel} {accessMenuOpen ? "▾" : "▸"}
+              </span>
+            </button>
+            {accessMenuOpen && (
+              <div className="mt-0.5 mb-1 pl-2 space-y-0.5">
+                {RUNTIME_OPTIONS.map((opt) => {
+                  const selected = runtimeMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        void onChangeRuntimeMode(opt.id);
+                        setAccessMenuOpen(false);
+                      }}
+                      className={`w-full h-[28px] px-2.5 rounded-[6px] text-left flex items-center justify-between gap-2 text-[12px] transition-colors ${
+                        selected
+                          ? "bg-subtle text-foreground-strong font-medium"
+                          : "text-foreground hover:bg-subtle"
+                      }`}
+                    >
+                      <span className="truncate">{opt.label}</span>
+                      {selected && <span className="font-mono text-[11px]">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Optional Workspace / Compact */}
-          {(onOpenWorkspace || onCompactContext) && (
-            <div className="pt-2 border-t border-border space-y-0.5">
-              {onOpenWorkspace && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenWorkspace();
-                    closeSettings();
-                  }}
-                  className="w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
-                >
-                  <span>Workspace</span>
-                  <span className="font-mono text-[11px] text-muted truncate">
-                    {workspaceLabel ?? "Local"}
-                  </span>
-                </button>
-              )}
-              {onCompactContext && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void onCompactContext();
-                    closeSettings();
-                  }}
-                  className="w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
-                >
-                  <span>Compact context</span>
-                  {compactLabel && (
-                    <span className="font-mono text-[11px] text-muted">{compactLabel}</span>
-                  )}
-                </button>
-              )}
-            </div>
+          {/* Workspace */}
+          {onOpenWorkspace && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenWorkspace();
+                closeSettings();
+              }}
+              className="w-full h-[30px] px-2.5 rounded-[6px] text-left flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
+            >
+              <span>Workspace</span>
+              <span className="text-foreground-strong truncate">{workspaceLabel ?? "Local"} ▸</span>
+            </button>
+          )}
+
+          {/* Compact context */}
+          {onCompactContext && (
+            <>
+              <div className="my-1 mx-1.5 h-px bg-border" />
+              <button
+                type="button"
+                onClick={() => {
+                  void onCompactContext();
+                  closeSettings();
+                }}
+                className="w-full h-[30px] px-2.5 rounded-[6px] text-left flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
+              >
+                <span>Compact context</span>
+                {compactLabel && (
+                  <span className="font-mono text-[11.5px] text-muted">{compactLabel}</span>
+                )}
+              </button>
+            </>
           )}
         </div>
       )}
 
       {/* Queued Messages Strip */}
       {queuedMessages.length > 0 && activeThread && (
-        <div className="mb-2 space-y-1">
-          <div className="text-[11px] font-medium text-muted flex items-center gap-1 px-1">
-            <Queue className="size-3" aria-hidden="true" />
-            <span>Queued ({queuedMessages.length})</span>
-          </div>
+        <div className="space-y-1">
           {queuedMessages.map((q) => (
-            <div
-              key={q.id}
-              className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-border bg-subtle text-[12px]"
-            >
-              <span className="truncate text-foreground flex-1">
+            <div key={q.id} className="flex items-center gap-2 px-1 pb-2 text-[12px] text-muted">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.04em] text-foreground-strong shrink-0">
+                Queued
+              </span>
+              <span className="truncate flex-1">
                 {q.content || `${q.attachments.length} image(s)`}
               </span>
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="ml-auto flex items-center gap-2.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => void onSteerQueuedMessage(activeThread.summary.id, q)}
-                  className="px-2 py-0.5 rounded-md text-[11px] font-medium border border-border bg-panel hover:bg-accent-soft hover:text-accent transition-colors"
+                  className="hover:text-foreground transition-colors"
                 >
-                  Steer
+                  Steer now
                 </button>
                 <button
                   type="button"
@@ -756,20 +780,20 @@ export function AgentComposer({
                       textareaRef.current?.focus();
                     });
                   }}
-                  className="p-1 rounded-md text-muted hover:text-foreground hover:bg-panel"
+                  className="hover:text-foreground transition-colors"
                   title="Edit queued message"
                   aria-label="Edit queued message"
                 >
-                  <PencilSimple className="size-3" aria-hidden="true" />
+                  Edit
                 </button>
                 <button
                   type="button"
                   onClick={() => onRemoveQueuedMessage(activeThread.summary.id, q.id)}
-                  className="p-1 rounded-md text-muted hover:text-error hover:bg-panel"
+                  className="hover:text-foreground transition-colors"
                   title="Remove from queue"
                   aria-label="Remove from queue"
                 >
-                  <Trash className="size-3" aria-hidden="true" />
+                  ✕
                 </button>
               </div>
             </div>
@@ -779,18 +803,21 @@ export function AgentComposer({
 
       {/* Raised Rounded Composer Card */}
       <div
-        className={`rounded-xl border bg-panel transition-colors ${
-          dragOver
-            ? "border-accent ring-2 ring-accent/20"
-            : "border-border-dark focus-within:border-accent"
+        className={`rounded-[12px] border-[1.5px] border-[var(--composer-border)] bg-[var(--composer-bg)] shadow-[var(--composer-shadow)] px-3 pt-2.5 pb-2 transition-colors ${
+          dragOver ? "ring-2 ring-accent/30" : ""
         }`}
       >
-        {/* Connected Context Chip & Image Attachments */}
-        {(selectedLineRange || contextChip || attachments.length > 0) && (
-          <div className="px-3 pt-2.5 flex flex-wrap items-center gap-1.5">
+        {/* Connected Context Chip, Build Log Chip & Image Attachments */}
+        {(selectedLineRange || contextChip || latestBuildLogExcerpt || attachments.length > 0) && (
+          <div className="pb-2 flex flex-wrap items-center gap-1.5">
             {(selectedLineRange ?? contextChip) && (
-              <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-accent-soft text-accent text-[11.5px] font-mono">
-                <FileText className="size-3 shrink-0" aria-hidden="true" />
+              <span
+                className="inline-flex items-center gap-1.5 font-mono text-[11.5px] rounded-[6px] px-2 py-0.5"
+                style={{
+                  backgroundColor: (VOICE_COLORS[currentProviderId] ?? VOICE_COLORS.claude).tint,
+                  color: (VOICE_COLORS[currentProviderId] ?? VOICE_COLORS.claude).text,
+                }}
+              >
                 <span className="truncate max-w-[200px]">
                   {(selectedLineRange ?? contextChip)?.label}
                 </span>
@@ -803,12 +830,27 @@ export function AgentComposer({
                       setContextChip(null);
                     }
                   }}
-                  className="p-0.5 rounded hover:bg-panel/60"
+                  className="p-0.5 rounded hover:bg-panel/40"
                   aria-label="Remove selection context"
                 >
                   <X className="size-2.5" aria-hidden="true" />
                 </button>
               </span>
+            )}
+
+            {latestBuildLogExcerpt && (
+              <button
+                type="button"
+                aria-pressed={includeBuildLog}
+                onClick={() => setIncludeBuildLog((prev) => !prev)}
+                className={`font-mono text-[11.5px] rounded-[6px] px-2 py-0.5 border transition-colors ${
+                  includeBuildLog
+                    ? "bg-accent-soft border-accent text-accent font-medium"
+                    : "bg-subtle border-border text-muted hover:text-foreground"
+                }`}
+              >
+                build log
+              </button>
             )}
 
             {attachments.map((att) => (
@@ -849,7 +891,7 @@ export function AgentComposer({
         )}
 
         {/* Textarea */}
-        <div className="px-3 pt-2.5 pb-1.5">
+        <div className="pb-1.5">
           <textarea
             ref={textareaRef}
             value={text}
@@ -878,8 +920,8 @@ export function AgentComposer({
         </div>
 
         {/* Seamless Bottom Control Row */}
-        <div className="flex flex-wrap items-center justify-between gap-1 pt-1.5">
-          {/* Left: Compact Model · Effort chip + Attach + Usage */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+          {/* Left: Compact Model · Effort chip + Attach */}
           <div className="flex items-center gap-1 min-w-0">
             <button
               ref={settingsButtonRef}
@@ -888,23 +930,26 @@ export function AgentComposer({
               aria-controls={settingsOpen ? menuId : undefined}
               aria-expanded={settingsOpen}
               onClick={() => setSettingsOpen((open) => !open)}
-              className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-[12px] transition-colors min-w-0 ${
-                settingsOpen
-                  ? "bg-accent-soft text-accent"
-                  : "text-muted hover:text-foreground hover:bg-subtle"
+              className={`h-7 px-2.5 rounded-[7px] bg-subtle inline-flex items-center gap-1.5 text-[12px] transition-colors min-w-0 ${
+                settingsOpen ? "ring-[1.5px] ring-foreground" : "hover:bg-sunken"
               }`}
               title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}${currentEffort ? ` · ${currentEffort}` : ""} · ${interactionMode === "plan" ? "Plan" : "Build"} · ${runtimeLabel}`}
               aria-label={`Thread settings: ${modelLabel}${currentEffort ? `, ${currentEffort}` : ""}, ${interactionMode === "plan" ? "Plan" : "Build"}, ${runtimeLabel}`}
             >
-              <ProviderIcon providerId={currentProviderId} className="size-3.5 shrink-0" />
+              <span
+                style={{ color: (VOICE_COLORS[currentProviderId] ?? VOICE_COLORS.claude).ink }}
+                className="inline-flex shrink-0"
+              >
+                <ProviderIcon providerId={currentProviderId} className="size-3.5" />
+              </span>
               <span className="truncate font-medium text-foreground">{modelLabel}</span>
               {currentEffort && (
                 <>
-                  <span className="text-muted-foreground shrink-0" aria-hidden="true">
+                  <span className="text-muted shrink-0" aria-hidden="true">
                     ·
                   </span>
-                  <span className="truncate text-[11.5px] text-muted-foreground capitalize">
-                    {currentEffort}
+                  <span className="truncate text-[11.5px] text-muted capitalize">
+                    {currentEffort === "medium" ? "Med" : currentEffort}
                   </span>
                 </>
               )}
@@ -929,59 +974,55 @@ export function AgentComposer({
               type="button"
               disabled={!projectPath}
               onClick={() => fileInputRef.current?.click()}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors shrink-0"
+              className="size-7 rounded-[7px] inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors shrink-0"
               title="Attach image (or paste / drop)"
               aria-label="Attach image"
             >
-              <Paperclip className="size-4" aria-hidden="true" />
+              <Plus className="size-4" aria-hidden="true" />
             </button>
-
-            {usageTrigger}
           </div>
 
-          {/* Right: Send/Stop */}
-          <div className="ml-auto flex items-center justify-end gap-1 shrink-0">
+          {/* Right: Usage + Send/Stop */}
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            {usageTrigger}
             {isRunning && activeThread ? (
-              <div className="flex items-center gap-1 shrink-0">
-                {canSend && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void handleSubmit(providerObj?.supportsSteer ? "steer" : "queue")
-                    }
-                    className="h-7 px-2 rounded-full border border-border bg-subtle hover:bg-accent-soft hover:text-accent text-[11px] font-medium inline-flex items-center gap-1 transition-colors"
-                    title={providerObj?.supportsSteer ? "Steer active turn" : "Queue for next turn"}
-                  >
-                    {providerObj?.supportsSteer ? (
-                      <span>Steer</span>
-                    ) : (
-                      <>
-                        <Plus className="size-3" aria-hidden="true" />
-                        <span>Queue</span>
-                      </>
-                    )}
-                  </button>
-                )}
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => void onInterruptTurn(activeThread.summary.id)}
-                  className="size-7 rounded-full bg-error-bg text-error hover:brightness-95 inline-flex items-center justify-center transition-all"
+                  className="size-[30px] rounded-[8px] border border-border-dark bg-panel text-foreground hover:bg-subtle inline-flex items-center justify-center transition-colors"
                   title="Stop generation"
                   aria-label="Stop generation"
                 >
-                  <Stop className="size-3.5" weight="fill" aria-hidden="true" />
+                  <Stop className="size-3" weight="fill" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  disabled={!canSend}
+                  onClick={() => void handleSubmit(providerObj?.supportsSteer ? "steer" : "queue")}
+                  className="size-[30px] rounded-[8px] btn-primary inline-flex items-center justify-center disabled:opacity-40"
+                  title={providerObj?.supportsSteer ? "Steer active turn" : "Queue for next turn"}
+                  aria-label={providerObj?.supportsSteer ? "Steer active turn" : "Queue message"}
+                >
+                  <ArrowUp className="size-3.5" weight="bold" aria-hidden="true" />
                 </button>
               </div>
+            ) : compact ? (
+              <button
+                type="button"
+                disabled={!canSend}
+                onClick={() => void handleSubmit("auto")}
+                className="h-[30px] px-3 rounded-[8px] text-[12.5px] font-semibold btn-primary inline-flex items-center justify-center disabled:opacity-40 shrink-0"
+                title="Send message (Enter)"
+              >
+                Send
+              </button>
             ) : (
               <button
                 type="button"
                 disabled={!canSend}
                 onClick={() => void handleSubmit("auto")}
-                className={`size-7 rounded-full inline-flex items-center justify-center transition-all shrink-0 ${
-                  canSend
-                    ? "bg-primary text-primary-text hover:bg-primary-hover"
-                    : "bg-sunken text-muted-foreground cursor-default"
-                }`}
+                className="size-[30px] rounded-[8px] btn-primary inline-flex items-center justify-center disabled:opacity-40 shrink-0"
                 title="Send message (Enter)"
                 aria-label="Send message"
               >
@@ -990,6 +1031,13 @@ export function AgentComposer({
             )}
           </div>
         </div>
+      </div>
+
+      <div className="flex justify-center gap-3.5 text-[11px] text-muted mt-1.5 select-none">
+        <span>@ file</span>
+        <span>/ command</span>
+        <span>⇧↵ newline</span>
+        <span>⌘. stop</span>
       </div>
 
       {/* Image Lightbox Preview */}

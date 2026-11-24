@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  ArrowDown,
-  CaretDown,
-  CaretRight,
-  CheckCircle,
-  FileText,
-  SpinnerGap,
-  WarningCircle,
-} from "@phosphor-icons/react";
+import { ArrowDown, CaretDown, CaretRight, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 import Image from "next/image";
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { AgentMessage, AgentPart, AgentThread, InteractionResponse } from "@/lib/agent/types";
@@ -93,7 +85,7 @@ function ReasoningBlock({
       : "Thought process";
 
   return (
-    <div className="my-1 rounded-lg border border-border bg-subtle/40">
+    <div className={expanded ? "my-1 rounded-lg border border-border bg-subtle/40" : "my-0.5"}>
       <button
         type="button"
         aria-expanded={expanded}
@@ -102,14 +94,18 @@ function ReasoningBlock({
           if (!expanded) followStreamRef.current = true;
           setUserExpanded(!expanded);
         }}
-        className="flex min-h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-[12px] text-muted hover:bg-subtle hover:text-foreground transition-colors"
+        className={
+          expanded
+            ? "flex min-h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-[12px] text-muted hover:bg-subtle hover:text-foreground transition-colors"
+            : "text-[12px] italic text-muted hover:text-foreground inline-flex items-center gap-1.5 py-0.5 transition-colors"
+        }
       >
         {expanded ? (
           <CaretDown className="size-3 shrink-0" aria-hidden="true" />
         ) : (
           <CaretRight className="size-3 shrink-0" aria-hidden="true" />
         )}
-        <span className="font-medium tabular-nums">{label}</span>
+        <span className={expanded ? "font-medium tabular-nums" : "tabular-nums"}>{label}</span>
         {isActivelyThinking && (
           <SpinnerGap
             className="ml-auto size-3.5 shrink-0 motion-safe:animate-spin"
@@ -136,59 +132,6 @@ function ReasoningBlock({
           {text}
         </section>
       </div>
-    </div>
-  );
-}
-
-function ChangedFilesCard({
-  files,
-  projectPath,
-  onFileClick,
-}: {
-  files: string[];
-  projectPath: string | null;
-  onFileClick?: (path: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  if (files.length === 0) return null;
-
-  return (
-    <div className="mt-2.5 rounded-xl border border-border bg-panel overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded((p) => !p)}
-        className="w-full px-3 py-2 bg-success-bg/70 hover:bg-success-bg flex items-center justify-between gap-2 text-left transition-colors"
-      >
-        <div className="flex items-center gap-1.5 text-[12px] font-medium text-success">
-          <CheckCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
-          <span>
-            {files.length} {files.length === 1 ? "file" : "files"} updated
-          </span>
-        </div>
-        {expanded ? (
-          <CaretDown className="size-3 text-success" aria-hidden="true" />
-        ) : (
-          <CaretRight className="size-3 text-success" aria-hidden="true" />
-        )}
-      </button>
-      {expanded && (
-        <div className="px-2.5 py-2 flex flex-wrap gap-1.5 bg-panel">
-          {files.map((fp) => {
-            const rel = toRelativeProjectPath(fp, projectPath);
-            return (
-              <button
-                key={fp}
-                type="button"
-                onClick={() => onFileClick?.(rel)}
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11.5px] font-mono bg-subtle hover:bg-accent-soft hover:text-accent text-foreground transition-colors"
-              >
-                <FileText className="size-3 text-muted shrink-0" aria-hidden="true" />
-                <span>{rel}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
@@ -233,9 +176,30 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
   const voice = message.providerId === "custom-acp" ? "custom" : message.providerId;
   const voiceInk = voice ? `var(--voice-${voice}-ink)` : "var(--line)";
   const voiceText = voice ? `var(--voice-${voice}-text)` : "var(--text-muted)";
+  const providerDisplayName =
+    message.providerId === "claude"
+      ? "Claude"
+      : message.providerId === "codex"
+        ? "Codex"
+        : message.providerId === "antigravity"
+          ? "Antigravity"
+          : message.providerId === "custom-acp"
+            ? "Custom ACP"
+            : "Assistant";
+
+  const lastVisibleTextIdx = (() => {
+    for (let i = message.parts.length - 1; i >= 0; i -= 1) {
+      const p = message.parts[i];
+      if (p?.type === "text" && p.text.trim().length > 0) return i;
+    }
+    return -1;
+  })();
 
   return (
     <div className="space-y-2 py-1 border-l-2 pl-3" style={{ borderColor: voiceInk }}>
+      <div className="text-[11.5px] font-semibold leading-none" style={{ color: voiceText }}>
+        {providerDisplayName}
+      </div>
       <div className="space-y-1.5">
         {message.parts.map((part, idx) => {
           if (part.type === "reasoning") {
@@ -287,13 +251,22 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           }
           if (part.type === "text") {
             if (!part.text.trim()) return null;
+            const showStreamingCursor = isLast && isStreaming && idx === lastVisibleTextIdx;
             return (
-              <MarkdownText
-                key={part.id}
-                text={part.text}
-                projectFiles={projectFiles}
-                onFileClick={onFileClick}
-              />
+              <div key={part.id}>
+                <MarkdownText
+                  text={part.text}
+                  projectFiles={projectFiles}
+                  onFileClick={onFileClick}
+                />
+                {showStreamingCursor && (
+                  <span
+                    className="inline-block w-[7px] h-[14px] rounded-[1px] ml-1 align-[-2px] animate-pulse"
+                    style={{ backgroundColor: voiceInk }}
+                    aria-hidden="true"
+                  />
+                )}
+              </div>
             );
           }
           if (part.type === "image") {
@@ -330,12 +303,6 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
           <span className="break-words">{message.error}</span>
         </div>
       )}
-
-      <ChangedFilesCard
-        files={message.changedFiles}
-        projectPath={projectPath}
-        onFileClick={onFileClick}
-      />
 
       {!isStreaming && hasAnyVisibleParts && (
         <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
