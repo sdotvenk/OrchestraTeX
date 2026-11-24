@@ -43,7 +43,8 @@ export function WorkspaceChanges({ directory, status, onChanged }: WorkspaceChan
     run(async () => {
       await invoke(change.staged ? "git_unstage" : "git_add", {
         dir: directory,
-        files: [change.path],
+        files:
+          change.staged && change.originalPath ? [change.path, change.originalPath] : [change.path],
       });
       setDiff(null);
       await onChanged();

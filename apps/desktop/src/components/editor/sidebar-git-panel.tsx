@@ -37,9 +37,9 @@ const STATUS_SHORT: Record<GitFileChange["status"], string> = {
 };
 
 const STATUS_STYLE: Record<GitFileChange["status"], string> = {
-  modified: "bg-warning/15 text-warning",
-  added: "bg-success/15 text-success",
-  deleted: "bg-destructive/15 text-destructive",
+  modified: "bg-warn-bg text-warn",
+  added: "bg-success-bg text-success",
+  deleted: "bg-error-bg text-error",
   renamed: "bg-accent-soft text-accent",
   untracked: "bg-surface-tertiary text-muted",
 };
