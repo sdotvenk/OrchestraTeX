@@ -670,7 +670,10 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
 
       if (cmdToken === "/plan" || cmdToken === "/default") {
         const targetMode: InteractionMode = cmdToken === "/plan" ? "plan" : "default";
-        await updateThread(thread.summary.id, { interactionMode: targetMode });
+        const updated = await updateThread(thread.summary.id, { interactionMode: targetMode });
+        if (!updated) {
+          throw new Error(stateRef.current.error ?? "Failed to update thread mode");
+        }
         if (!cmdRest) return;
       }
 

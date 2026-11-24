@@ -361,6 +361,11 @@ export function AgentComposer({
       const composedContent = `${chipPrefix}${buildLogPrefix}${text}`.trim();
       const currentAtts = attachments.map((a) => a.input);
 
+      const savedText = text;
+      const savedAttachments = attachments;
+      const savedContextChip = contextChip;
+      const savedIncludeBuildLog = includeBuildLog;
+
       setText("");
       setAttachments([]);
       setContextChip(null);
@@ -371,17 +376,25 @@ export function AgentComposer({
       setSettingsOpen(false);
       requestAnimationFrame(() => adjustTextareaHeight());
 
-      if (mode === "steer" && activeThread && providerObj?.supportsSteer) {
-        await onSteerActiveTurn(activeThread.summary.id, composedContent, currentAtts);
-        return;
-      }
+      try {
+        if (mode === "steer" && activeThread && providerObj?.supportsSteer) {
+          await onSteerActiveTurn(activeThread.summary.id, composedContent, currentAtts);
+          return;
+        }
 
-      if (mode === "queue" && activeThread) {
-        onQueueMessage(activeThread.summary.id, composedContent, currentAtts);
-        return;
-      }
+        if (mode === "queue" && activeThread) {
+          onQueueMessage(activeThread.summary.id, composedContent, currentAtts);
+          return;
+        }
 
-      await onSendMessage(composedContent, currentAtts);
+        await onSendMessage(composedContent, currentAtts);
+      } catch {
+        setText(savedText);
+        setAttachments(savedAttachments);
+        setContextChip(savedContextChip);
+        setIncludeBuildLog(savedIncludeBuildLog);
+        requestAnimationFrame(() => adjustTextareaHeight());
+      }
     },
     [
       activeThread,
