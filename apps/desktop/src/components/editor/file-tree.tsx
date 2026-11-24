@@ -9,6 +9,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -123,6 +124,7 @@ import {
   TerminalWindowIcon,
   TrashIcon,
   VideoCameraIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 import type { AgentProviderId } from "@/lib/agent/types";
 import { VOICE_COLORS } from "@/lib/editor/voice-colors";
@@ -139,6 +141,7 @@ export interface FileOperations {
     referenceUpdates?: Array<{ path: string; before: string; after: string }>,
   ) => Promise<void>;
   deletePath: (path: string) => Promise<void>;
+  duplicateFile: (path: string) => Promise<string | null>;
 }
 
 export interface FileVoiceDot {
@@ -438,6 +441,9 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
   const voiceDots = fileVoiceDots?.[node.data.path];
   const isRenaming = inlineRename?.node.path === node.data.path;
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const updateReferencesRef = useRef<HTMLButtonElement>(null);
+  const renamePromptId = useId();
+  const showRefsPrompt = isRenaming && inlineRename?.status === "confirm-refs";
 
   useEffect(() => {
     if (!isRenaming) return;
@@ -452,6 +458,10 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
       input.setSelectionRange(0, value.length);
     }
   }, [isRenaming]);
+
+  useEffect(() => {
+    if (showRefsPrompt) updateReferencesRef.current?.focus();
+  }, [showRefsPrompt]);
 
   const isDirectory = node.data.type === "directory";
   const isSelected = selectedFile === node.data.path;
@@ -516,7 +526,6 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
 
   if (isRenaming && inlineRename) {
     const isBusy = inlineRename.status === "planning" || inlineRename.status === "applying";
-    const showRefsPrompt = inlineRename.status === "confirm-refs";
     return (
       <div
         style={style}
@@ -575,10 +584,15 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
             className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted"
             style={{ paddingLeft: `${node.level * 12 + 20}px` }}
           >
-            <span className="truncate">{inlineRename.referenceCount} input references</span>
+            <span id={renamePromptId} className="truncate">
+              {inlineRename.referenceCount}{" "}
+              {inlineRename.referenceCount === 1 ? "reference" : "references"}
+            </span>
             <div className="flex items-center gap-1 flex-shrink-0">
               <button
                 type="button"
+                ref={updateReferencesRef}
+                aria-describedby={renamePromptId}
                 disabled={isBusy}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onInlineRenameResolveRefs?.(true)}
@@ -610,7 +624,7 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
         {inlineRename.error && (
           <div
             role="alert"
-            className="mt-0.5 text-[11px] text-destructive break-words whitespace-normal leading-tight"
+            className="mt-0.5 text-[11px] text-error break-words whitespace-normal leading-tight"
             style={{ paddingLeft: `${node.level * 12 + 20}px` }}
             title={inlineRename.error}
           >
@@ -640,7 +654,7 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
         isDragOver
           ? "bg-accent-soft ring-2 ring-accent ring-inset"
           : isSelected
-            ? "bg-panel text-foreground-strong font-semibold ring-1 ring-border-dark ring-inset"
+            ? "bg-accent-soft text-foreground-strong font-semibold ring-1 ring-accent ring-inset"
             : isFocused
               ? "bg-sunken text-foreground-strong"
               : "text-foreground-strong hover:bg-sunken"
@@ -723,6 +737,7 @@ function FileTreeInner({
 
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
   const [inlineRename, setInlineRename] = useState<InlineRenameState | null>(null);
@@ -1219,6 +1234,22 @@ function FileTreeInner({
         });
       }
 
+      if (!isDirectory && fileOperations) {
+        items.push({
+          label: "Duplicate",
+          onClick: async () => {
+            setDuplicateError(null);
+            try {
+              const duplicate = await fileOperations.duplicateFile(node.path);
+              if (duplicate) onFileSelect?.(duplicate);
+            } catch (error) {
+              setDuplicateError(error instanceof Error ? error.message : String(error));
+            }
+          },
+          icon: <CopyIcon size={16} />,
+        });
+      }
+
       if (!isDirectory && onSetMainFile && node.name.toLowerCase().endsWith(".tex")) {
         items.push({
           label: "Set as Main File",
@@ -1314,6 +1345,7 @@ function FileTreeInner({
       onSetMainFile,
       onAskAgentOpening,
       startInlineRename,
+      onFileSelect,
     ],
   );
 
@@ -1646,6 +1678,22 @@ function FileTreeInner({
           )}
         </FileTreeContext.Provider>
       </div>
+
+      {duplicateError && (
+        <div className="flex shrink-0 items-start gap-1 rounded-md bg-error-bg p-2 text-xs text-error">
+          <p className="min-w-0 flex-1 wrap-break-word" role="alert">
+            {duplicateError}
+          </p>
+          <button
+            type="button"
+            aria-label="Dismiss duplicate error"
+            className="rounded p-0.5 hover:bg-subtle"
+            onClick={() => setDuplicateError(null)}
+          >
+            <XIcon className="size-3" aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       {contextMenu && (
         <ContextMenu

@@ -3,6 +3,7 @@
 import type { FileNode, GitInfo, GitLogEntry, GitStatus } from "@orchestratex/shared";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FileChangeEvent } from "@/lib/editor/file-change";
 import { pathSync } from "@/lib/path";
 
 function debounce<T extends (...args: Parameters<T>) => void>(
@@ -87,11 +88,6 @@ interface OperationState {
   isOpeningProject: boolean;
   isStaging: boolean;
   lastError: { message: string; operation: string } | null;
-}
-
-interface FileChangeEvent {
-  path: string;
-  kind: "create" | "modify" | "remove" | "rename" | "access" | "other" | "unknown";
 }
 
 function stripWrappingQuotes(value: string): string {
@@ -351,16 +347,17 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
   );
 
   const refreshFiles = useCallback(async () => {
-    if (!projectState.projectPath) return;
+    const projectPath = projectState.projectPath;
+    if (!projectPath) return;
 
     try {
       const rawFiles = await invoke<unknown[]>("get_file_tree", {
-        dir: projectState.projectPath,
+        dir: projectPath,
       });
       const files = rawFiles.map((f) =>
         convertFileNode(f as Parameters<typeof convertFileNode>[0]),
       );
-      setProjectState((s) => ({ ...s, files }));
+      setProjectState((s) => (s.projectPath === projectPath ? { ...s, files } : s));
     } catch (error) {
       console.error("Failed to refresh files:", error);
     }
@@ -451,6 +448,18 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       }
     },
     [projectState.projectPath, refreshFiles, setError],
+  );
+
+  const duplicateFile = useCallback(
+    async (relativePath: string) => {
+      const projectPath = projectState.projectPath;
+      if (!projectPath) throw new Error("No project open");
+      const path = resolvePathWithinProject(projectPath, relativePath);
+      const duplicate = await invoke<string>("duplicate_file", { path });
+      await refreshFiles();
+      return projectPathRef.current === projectPath ? duplicate : null;
+    },
+    [projectState.projectPath, refreshFiles],
   );
 
   const refreshGitStatus = useCallback(
@@ -949,6 +958,7 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       createDirectory,
       renamePath,
       deletePath,
+      duplicateFile,
       gitAdd,
       gitUnstage,
       gitCommit,
@@ -980,6 +990,7 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       createDirectory,
       renamePath,
       deletePath,
+      duplicateFile,
       gitAdd,
       gitUnstage,
       gitCommit,

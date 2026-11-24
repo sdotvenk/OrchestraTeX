@@ -568,15 +568,20 @@ kbd {
   cursor: not-allowed;
 }
 
-.btn-primary {
+.btn-primary,
+.btn-solid {
   background: var(--primary-bg);
   border-color: var(--primary-bg);
   color: var(--primary-text);
   font-weight: 600;
+}
+
+.btn-primary {
   box-shadow: 2px 2px 0 var(--primary-offset, transparent);
 }
 
-.btn-primary:hover:not(:disabled) {
+.btn-primary:hover:not(:disabled),
+.btn-solid:hover:not(:disabled) {
   background: var(--primary-bg-hover);
   border-color: var(--primary-bg-hover);
 }

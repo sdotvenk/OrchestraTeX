@@ -534,6 +534,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                 <ApprovalCard
                   key={pendingInteraction.id}
                   interaction={pendingInteraction}
+                  sessionDirectory={thread?.summary.workspacePath ?? projectPath}
                   onDecide={(decision) =>
                     onRespondInteraction(pendingInteraction.id, {
                       kind: "approvalDecision",

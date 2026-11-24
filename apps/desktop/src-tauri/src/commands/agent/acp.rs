@@ -934,7 +934,7 @@ pub async fn probe_acp(
             plan_type: None,
             windows: Vec::new(),
             credits_balance: None,
-            note: Some("Antigravity ACP reports session context usage (`usage_update`), not account quota windows.".to_string()),
+            note: Some("Session context usage only".to_string()),
         })
     } else {
         None

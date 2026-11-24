@@ -55,6 +55,7 @@ pub fn run() {
             commands::fs::watch_directory,
             commands::fs::stop_watch,
             commands::fs::create_file,
+            commands::fs::duplicate_file,
             commands::fs::create_latex_project,
             commands::fs::create_directory,
             commands::fs::rename_path,

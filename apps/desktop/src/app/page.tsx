@@ -64,6 +64,7 @@ import { useAgentEdits } from "@/lib/agent/use-agent-edits";
 import { useOrchestration } from "@/lib/agent/use-orchestration";
 import { useScore } from "@/lib/agent/use-score";
 import { useEditorSettings } from "@/lib/editor";
+import { mayHaveNewContents } from "@/lib/editor/file-change";
 import { UI_PALETTES } from "@/lib/editor/types";
 import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import {
@@ -1410,34 +1411,25 @@ export default function EditorPage() {
 
         return newTabs;
       });
-    } else if (kind === "modify") {
-      // Reload file content if the currently selected file was modified externally
-      // Preserve dirty text and ignore the watcher echo after a local save.
-      const isOurSave = isLocallyModified(path);
-
-      if (path === selectedFile && !isOurSave) {
+    } else if (mayHaveNewContents(kind) && !isLocallyModified(path)) {
+      const projectPath = daemon.projectPath;
+      const reloadPrimary = path === selectedFile && getFileType(path) === "text";
+      const reloadSplit = path === splitPane?.selectedFile && !splitPane.binaryPreviewUrl;
+      if (reloadPrimary || reloadSplit) {
         daemon
           .readFile(path)
           .then((content) => {
-            if (content !== null) {
+            if (
+              content === null ||
+              currentProjectRef.current !== projectPath ||
+              isLocallyModified(path)
+            ) {
+              return;
+            }
+            if (reloadPrimary && selectedFileRef.current === path) {
               setFileContent(content);
             }
-          })
-          .catch((err) => {
-            console.error("Failed to reload modified file:", err);
-          });
-      }
-
-      if (
-        splitPane &&
-        path === splitPane.selectedFile &&
-        !splitPane.binaryPreviewUrl &&
-        !isOurSave
-      ) {
-        daemon
-          .readFile(path)
-          .then((content) => {
-            if (content !== null) {
+            if (reloadSplit) {
               setSplitPane((prev) => {
                 if (!prev || prev.selectedFile !== path) return prev;
                 return {
@@ -1449,7 +1441,7 @@ export default function EditorPage() {
             }
           })
           .catch((err) => {
-            console.error("Failed to reload modified split file:", err);
+            console.error("Failed to reload changed file:", err);
           });
       }
       // Trigger OverLeaf auto-compile on external TeX/Bib edits (e.g. by AI agent or git)
@@ -1457,7 +1449,6 @@ export default function EditorPage() {
         daemon.projectPath &&
         latexSettings.settings.mainFile &&
         hasAnyCompiler &&
-        !isOurSave &&
         /\.(tex|bib|sty|cls)$/i.test(path)
       ) {
         latexCompiler.scheduleAutoCompile({
@@ -1473,6 +1464,7 @@ export default function EditorPage() {
     latexCompiler,
     latexSettings.settings.mainFile,
     selectedFile,
+    getFileType,
     handleFileSelect,
     isLocallyModified,
     daemon,
@@ -3332,6 +3324,7 @@ export default function EditorPage() {
     UI_PALETTES.find((p) => p.id === editorSettings.settings.uiPalette) ?? UI_PALETTES[0];
 
   const effectiveRightPanelWidth = agentExpanded ? Math.max(rightPanelWidth, 520) : rightPanelWidth;
+  const isWorkspaceVisible = !showHomeWorkspace && !showUsageDashboard;
   const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
     setShowHomeWorkspace(false);
     setShowUsageDashboard(false);
@@ -3421,10 +3414,10 @@ export default function EditorPage() {
               id="workspace-tab-write"
               aria-controls="workspace-panel-write"
               tabIndex={workspaceView === "write" ? 0 : -1}
-              aria-selected={workspaceView === "write"}
+              aria-selected={isWorkspaceVisible && workspaceView === "write"}
               onClick={() => activateWorkspaceTab("write")}
               className={`px-3 py-1 rounded-md text-[12.5px] transition-colors ${
-                workspaceView === "write"
+                isWorkspaceVisible && workspaceView === "write"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs"
                   : "text-muted hover:text-foreground"
               }`}
@@ -3437,10 +3430,10 @@ export default function EditorPage() {
               id="workspace-tab-agents"
               aria-controls={workspaceView === "agents" ? "workspace-panel-agents" : undefined}
               tabIndex={workspaceView === "agents" ? 0 : -1}
-              aria-selected={workspaceView === "agents"}
+              aria-selected={isWorkspaceVisible && workspaceView === "agents"}
               onClick={() => activateWorkspaceTab("agents")}
               className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
-                workspaceView === "agents"
+                isWorkspaceVisible && workspaceView === "agents"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs"
                   : "text-muted hover:text-foreground"
               }`}
@@ -3458,10 +3451,10 @@ export default function EditorPage() {
               id="workspace-tab-history"
               aria-controls={workspaceView === "history" ? "workspace-panel-history" : undefined}
               tabIndex={workspaceView === "history" ? 0 : -1}
-              aria-selected={workspaceView === "history"}
+              aria-selected={isWorkspaceVisible && workspaceView === "history"}
               onClick={() => activateWorkspaceTab("history")}
               className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
-                workspaceView === "history"
+                isWorkspaceVisible && workspaceView === "history"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs"
                   : "text-muted hover:text-foreground"
               }`}
@@ -3483,7 +3476,7 @@ export default function EditorPage() {
           {daemon.projectPath && (
             <button
               type="button"
-              className="btn btn-ghost btn-sm"
+              className={`btn btn-sm ${showHomeWorkspace && !showUsageDashboard ? "btn-secondary" : "btn-ghost"}`}
               aria-pressed={showHomeWorkspace && !showUsageDashboard}
               onClick={() => {
                 setShowUsageDashboard(false);
@@ -3495,7 +3488,7 @@ export default function EditorPage() {
           )}
           <button
             type="button"
-            className="btn btn-ghost btn-sm"
+            className={`btn btn-sm ${showUsageDashboard ? "btn-secondary" : "btn-ghost"}`}
             aria-pressed={showUsageDashboard}
             onClick={() => setShowUsageDashboard((open) => !open)}
           >
@@ -3826,6 +3819,7 @@ export default function EditorPage() {
                             createDirectory: daemon.createDirectory,
                             renamePath: daemon.renamePath,
                             deletePath: daemon.deletePath,
+                            duplicateFile: daemon.duplicateFile,
                           }}
                         />
                       )}
@@ -4196,7 +4190,9 @@ export default function EditorPage() {
                       : () => handleJumpToDiagnostic(diagnostic);
                   return (
                     <button type="button" className="btn btn-ghost btn-sm mt-1" onClick={action}>
-                      Did you mean <span className="font-mono">{suggestion.suggestedArg}</span>?
+                      <span>
+                        Did you mean <code className="font-mono">{suggestion.suggestedArg}</code>?
+                      </span>
                     </button>
                   );
                 }}

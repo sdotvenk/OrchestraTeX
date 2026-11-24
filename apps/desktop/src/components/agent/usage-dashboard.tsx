@@ -402,7 +402,7 @@ export function UsageDashboard({
             ) : (
               <>
                 <div
-                  className="flex items-end gap-1.5 h-[132px] border-b border-[var(--line-strong)] px-1"
+                  className="flex h-[132px] items-end justify-center gap-1.5 border-b border-[var(--line-strong)] px-1"
                   role="img"
                   aria-label={`Daily input tokens across ${dailyBuckets.days.length} days, totaling ${formatTokenCount(dailyBuckets.totalInput)}`}
                 >
@@ -411,7 +411,7 @@ export function UsageDashboard({
                     return (
                       <div
                         key={day.date}
-                        className="flex-1 flex flex-col justify-end gap-0.5 h-full min-w-[6px]"
+                        className="flex h-full min-w-[6px] flex-1 flex-col items-center justify-end gap-0.5"
                         title={`${day.date}: ${formatTokenCount(day.dayTotal)}`}
                       >
                         {day.rows.map((r) => {
@@ -421,7 +421,7 @@ export function UsageDashboard({
                           return (
                             <span
                               key={`${day.date}-${r.provider}`}
-                              className="w-full rounded-[2px]"
+                              className="w-full max-w-10 rounded-[2px]"
                               style={{
                                 height: `${pct}%`,
                                 backgroundColor: VOICE_TOKENS[r.provider].ink,
@@ -433,9 +433,15 @@ export function UsageDashboard({
                     );
                   })}
                 </div>
-                <div className="mt-1.5 flex justify-between text-[10.5px] font-mono text-[var(--muted)]">
+                <div
+                  className={`mt-1.5 flex font-mono text-[10.5px] text-[var(--muted)] ${
+                    dailyBuckets.days.length === 1 ? "justify-center" : "justify-between"
+                  }`}
+                >
                   <span>{dailyBuckets.days[0]?.date.slice(5)}</span>
-                  <span>{dailyBuckets.days[dailyBuckets.days.length - 1]?.date.slice(5)}</span>
+                  {dailyBuckets.days.length > 1 && (
+                    <span>{dailyBuckets.days.at(-1)?.date.slice(5)}</span>
+                  )}
                 </div>
               </>
             )}

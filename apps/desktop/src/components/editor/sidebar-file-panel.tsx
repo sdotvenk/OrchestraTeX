@@ -128,6 +128,7 @@ export function FileSidebarPanel({
       </div>
       <EditorErrorBoundary>
         <FileTree
+          key={projectPath}
           {...fileActions}
           files={files}
           selectedFile={selectedFile}

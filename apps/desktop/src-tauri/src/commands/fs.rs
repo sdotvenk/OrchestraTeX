@@ -353,6 +353,80 @@ pub async fn create_file(path: String, encoding: Option<String>) -> Result<(), S
     write_utf8_file(&path, "").await
 }
 
+async fn duplicate_file_inner(project_path: &str, path: &str) -> Result<String, String> {
+    let _write_guard = PROJECT_WRITES.lock().await;
+    let root = fs::canonicalize(project_path)
+        .await
+        .map_err(|e| format!("Invalid project path: {e}"))?;
+    let source = root.join(path);
+    let parent = fs::canonicalize(source.parent().ok_or("Invalid parent directory")?)
+        .await
+        .map_err(|e| format!("Invalid parent directory: {e}"))?;
+    if !parent.starts_with(&root) {
+        return Err("Access denied: path is outside project directory".to_string());
+    }
+    let source = parent.join(source.file_name().ok_or("Invalid file name")?);
+    let metadata = fs::symlink_metadata(&source)
+        .await
+        .map_err(|e| format!("Could not read source file: {e}"))?;
+    if !metadata.is_file() {
+        return Err("Only files can be duplicated".to_string());
+    }
+    let mut name = source
+        .file_stem()
+        .ok_or("Invalid file name")?
+        .to_os_string();
+    name.push(" copy");
+    if let Some(extension) = source.extension() {
+        name.push(".");
+        name.push(extension);
+    }
+    let destination = parent.join(&name);
+    let mut input = fs::File::open(&source).await.map_err(|e| e.to_string())?;
+    let mut output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+        .await
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                format!("{} already exists", name.to_string_lossy())
+            }
+            _ => format!("Could not create duplicate: {e}"),
+        })?;
+    let result = async {
+        tokio::io::copy(&mut input, &mut output).await?;
+        output.flush().await
+    }
+    .await;
+    if let Err(error) = result {
+        drop(output);
+        let _ = fs::remove_file(&destination).await;
+        return Err(format!("Could not write duplicate: {error}"));
+    }
+    Ok(destination
+        .strip_prefix(root)
+        .map_err(|e| e.to_string())?
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
+#[tauri::command]
+pub async fn duplicate_file(
+    state: tauri::State<'_, Mutex<ProjectState>>,
+    path: String,
+) -> Result<String, String> {
+    let project_path = state
+        .lock()
+        .map_err(|e| e.to_string())?
+        .project_path
+        .clone()
+        .ok_or("No project open")?;
+    duplicate_file_inner(&project_path, &path).await
+}
+
 #[tauri::command]
 pub async fn create_directory(path: String) -> Result<(), String> {
     // Check if directory already exists
@@ -840,6 +914,72 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_file_preserves_bytes_and_extension() {
+        let project = TempDir::new().unwrap();
+        let sections = project.path().join("sections");
+        fs::create_dir(&sections).unwrap();
+        let bytes = [0, 255, 20];
+        fs::write(sections.join("plot.v2.pdf"), bytes).unwrap();
+        fs::write(project.path().join("README"), "Notes").unwrap();
+        let root = project.path().to_string_lossy();
+
+        let duplicate = duplicate_file_inner(&root, "sections/plot.v2.pdf")
+            .await
+            .unwrap();
+        assert_eq!(duplicate, "sections/plot.v2 copy.pdf");
+        assert_eq!(fs::read(project.path().join(duplicate)).unwrap(), bytes);
+
+        let source = project.path().join("README");
+        let duplicate = duplicate_file_inner(&root, &source.to_string_lossy())
+            .await
+            .unwrap();
+        assert_eq!(duplicate, "README copy");
+        assert_eq!(
+            fs::read_to_string(project.path().join(duplicate)).unwrap(),
+            "Notes"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_duplicate_file_rejects_collisions_and_paths_outside_project() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("sections")).unwrap();
+        fs::write(project.join("draft.tex"), "Draft").unwrap();
+        fs::write(project.join("draft copy.tex"), "Existing copy").unwrap();
+        fs::write(temp.path().join("outside.tex"), "Outside").unwrap();
+        let root = project.to_string_lossy();
+
+        assert!(duplicate_file_inner(&root, "draft.tex").await.is_err());
+        assert_eq!(
+            fs::read_to_string(project.join("draft copy.tex")).unwrap(),
+            "Existing copy"
+        );
+        assert!(duplicate_file_inner(&root, "sections").await.is_err());
+        assert!(duplicate_file_inner(&root, "../outside.tex").await.is_err());
+        assert!(!temp.path().join("outside copy.tex").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_duplicate_file_rejects_symlink_escapes() {
+        let temp = TempDir::new().unwrap();
+        let project = temp.path().join("project");
+        fs::create_dir(&project).unwrap();
+        let outside = temp.path().join("outside.tex");
+        fs::write(&outside, "Outside").unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("link.tex")).unwrap();
+        std::os::unix::fs::symlink(temp.path(), project.join("parent")).unwrap();
+        let root = project.to_string_lossy();
+
+        assert!(duplicate_file_inner(&root, "link.tex").await.is_err());
+        assert!(duplicate_file_inner(&root, "parent/outside.tex")
+            .await
+            .is_err());
+        assert!(!temp.path().join("outside copy.tex").exists());
     }
 
     #[tokio::test]

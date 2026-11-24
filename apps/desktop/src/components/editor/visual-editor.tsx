@@ -779,10 +779,12 @@ function OpaqueBlockView({
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="flex w-full items-center justify-between font-mono text-[11px] text-[var(--muted)] hover:text-[var(--text-strong)]"
+        className="flex w-full items-center justify-between gap-2 font-mono text-[11px] text-[var(--muted)] hover:text-[var(--text-strong)]"
       >
-        <span>{block.summary}</span>
-        <span>{expanded ? "Hide" : "Source"}</span>
+        <span className="min-w-0 truncate" title={block.summary}>
+          {block.summary}
+        </span>
+        <span className="shrink-0 font-sans">{expanded ? "Hide" : "Source"}</span>
       </button>
       {expanded && (
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] text-[var(--muted)]">
