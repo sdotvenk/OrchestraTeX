@@ -98,40 +98,39 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
 export function useEditorSettings() {
   const { resolvedTheme } = useTheme();
 
-  const [settings, setSettings] = useState<EditorSettings>(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_EDITOR_SETTINGS;
-    }
+  const [settings, setSettings] = useState(DEFAULT_EDITOR_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        return migrateSettings(parsed);
+        setSettings(migrateSettings(JSON.parse(saved)));
       }
     } catch {
       // Ignore parse errors
     }
-    return DEFAULT_EDITOR_SETTINGS;
-  });
+    setSettingsLoaded(true);
+  }, []);
 
   // Derive editor theme from app theme
   const editorTheme: EditorTheme = resolvedTheme === "dark" ? "one-dark" : "one-light";
 
   // Apply UI color palette attribute to <html>
   useEffect(() => {
-    if (typeof document === "undefined") return;
+    if (!settingsLoaded) return;
     document.documentElement.dataset.palette = settings.uiPalette;
-  }, [settings.uiPalette]);
+  }, [settings.uiPalette, settingsLoaded]);
 
   // Persist settings to localStorage
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!settingsLoaded) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     } catch {
       // Ignore storage errors
     }
-  }, [settings]);
+  }, [settings, settingsLoaded]);
 
   const updateSettings = useCallback((updates: Partial<EditorSettings>) => {
     setSettings((prev) => ({ ...prev, ...updates }));
