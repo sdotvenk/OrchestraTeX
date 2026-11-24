@@ -230,6 +230,14 @@ export interface AgentMessage {
   error?: string | null;
 }
 
+export interface ThreadSchedule {
+  runAt: number;
+  prompt: string;
+  repeatIntervalMs?: number | null;
+  lastResult?: string | null;
+  lastRunAt?: number | null;
+}
+
 export interface ThreadSummary {
   id: string;
   projectPath: string;
@@ -247,6 +255,10 @@ export interface ThreadSummary {
   messageCount: number;
   lastPreview?: string | null;
   status: ThreadStatus | string;
+  workspacePath?: string | null;
+  workspaceBranch?: string | null;
+  parentThreadId?: string | null;
+  schedule?: ThreadSchedule | null;
 }
 
 export interface AgentThread {
@@ -261,6 +273,11 @@ export type AgentStreamEvent =
   | {
       type: "threadUpdated";
       thread: ThreadSummary;
+    }
+  | {
+      type: "threadDeleted";
+      projectPath: string;
+      threadId: string;
     }
   | {
       type: "messageAdded";

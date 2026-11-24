@@ -29,6 +29,12 @@ interface GitInitResult {
   error?: string;
 }
 
+export interface RenameReferenceUpdate {
+  path: string;
+  before: string;
+  after: string;
+}
+
 export interface GhStatus {
   installed: boolean;
   authenticated: boolean;
@@ -251,11 +257,11 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
     }
   }, []);
 
+  const openingProjectRef = useRef(false);
   const setProject = useCallback(
     async (path: string) => {
-      let isMounted = true;
-
-      setProjectState((s) => ({ ...s, projectPath: path }));
+      if (openingProjectRef.current) throw new Error("A project is already opening");
+      openingProjectRef.current = true;
       setOperationState((s) => ({
         ...s,
         isOpeningProject: true,
@@ -263,38 +269,29 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       }));
 
       try {
-        await invoke("set_project_path", { path });
-        if (!isMounted) return;
-
         const rawFiles = await invoke<unknown[]>("get_file_tree", {
           dir: path,
         });
-        if (!isMounted) return;
-
         const files = rawFiles.map((f) =>
           convertFileNode(f as Parameters<typeof convertFileNode>[0]),
         );
+        await invoke("set_project_path", { path });
 
         setProjectState((s) => ({
           ...s,
+          projectPath: path,
           files,
           projectInfo: { path },
         }));
 
-        refreshGitStatusInternal(path);
+        void refreshGitStatusInternal(path);
       } catch (error) {
-        if (!isMounted) return;
-        console.error("Failed to set project:", error);
         setError(String(error), "open project");
+        throw error;
       } finally {
-        if (isMounted) {
-          setOperationState((s) => ({ ...s, isOpeningProject: false }));
-        }
+        openingProjectRef.current = false;
+        setOperationState((s) => ({ ...s, isOpeningProject: false }));
       }
-
-      return () => {
-        isMounted = false;
-      };
     },
     [setError, refreshGitStatusInternal],
   );
@@ -407,15 +404,27 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
   );
 
   const renamePath = useCallback(
-    async (oldRelativePath: string, newRelativePath: string) => {
+    async (
+      oldRelativePath: string,
+      newRelativePath: string,
+      referenceUpdates?: RenameReferenceUpdate[],
+    ) => {
       if (!projectState.projectPath) return;
 
       try {
         const oldFullPath = resolvePathWithinProject(projectState.projectPath, oldRelativePath);
         const newFullPath = resolvePathWithinProject(projectState.projectPath, newRelativePath);
+        const resolvedUpdates = referenceUpdates?.map((update) => ({
+          path: resolvePathWithinProject(projectState.projectPath as string, update.path),
+          before: update.before,
+          after: update.after,
+        }));
         await invoke("rename_path", {
           oldPath: oldFullPath,
           newPath: newFullPath,
+          ...(resolvedUpdates && resolvedUpdates.length > 0
+            ? { referenceUpdates: resolvedUpdates }
+            : {}),
         });
         await refreshFiles();
       } catch (error) {

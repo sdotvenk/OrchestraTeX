@@ -9,11 +9,15 @@ import {
   UploadSimpleIcon,
 } from "@phosphor-icons/react";
 import { invoke } from "@tauri-apps/api/core";
+import type { ComponentProps } from "react";
 import { EditorErrorBoundary } from "@/components/editor/editor-error-boundary";
 import { type FileOperations, FileTree, type FileVoiceDot } from "@/components/editor/file-tree";
 import { pathSync } from "@/lib/path";
 
-type FileSidebarPanelProps = {
+type FileSidebarPanelProps = Pick<
+  ComponentProps<typeof FileTree>,
+  "onPlanRename" | "onApplyRename" | "onSetMainFile" | "onAskAgentOpening"
+> & {
   projectPath: string | null;
   files: FileNode[];
   selectedFile?: string;
@@ -37,6 +41,7 @@ export function FileSidebarPanel({
   onRefreshFiles,
   fileOperations,
   fileVoiceDots,
+  ...fileActions
 }: FileSidebarPanelProps) {
   if (!projectPath) {
     return (
@@ -123,11 +128,12 @@ export function FileSidebarPanel({
       </div>
       <EditorErrorBoundary>
         <FileTree
+          {...fileActions}
           files={files}
           selectedFile={selectedFile}
           highlightedFile={highlightedFile}
           onFileSelect={onFileSelect}
-          className="flex-1 min-h-0 overflow-hidden"
+          className="flex-1 min-h-0 overflow-hidden rounded-lg border border-border bg-panel"
           fileOperations={fileOperations}
           projectPath={projectPath}
           onRefresh={onRefreshFiles}

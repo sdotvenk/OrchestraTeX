@@ -46,6 +46,8 @@ interface AgentPanelProps {
   onFileClick?: (path: string) => void;
   onRunTerminalCommand: (command: string) => void;
   onOpenAgentSettings: () => void;
+  onOpenWorkspace?: () => void;
+  onApproveInteraction?: (threadId: string, interactionId: string) => void;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
   onClose?: () => void;
@@ -67,6 +69,8 @@ export function AgentPanel({
   onFileClick,
   onRunTerminalCommand,
   onOpenAgentSettings,
+  onOpenWorkspace,
+  onApproveInteraction,
   isExpanded = false,
   onToggleExpand,
   onClose,
@@ -335,6 +339,12 @@ export function AgentPanel({
             onRespondInteraction={async (interactionId, response) => {
               if (!activeThread) return;
               await agent.respondInteraction(activeThread.summary.id, interactionId, response);
+              if (
+                (response.kind === "approvalDecision" && response.decision !== "deny") ||
+                (response.kind === "planDecision" && response.approved)
+              ) {
+                onApproveInteraction?.(activeThread.summary.id, interactionId);
+              }
             }}
           />
 
@@ -364,6 +374,13 @@ export function AgentPanel({
             onChangeEffort={handleChangeEffort}
             onChangeInteractionMode={handleChangeInteractionMode}
             onChangeRuntimeMode={handleChangeRuntimeMode}
+            onOpenWorkspace={onOpenWorkspace}
+            workspaceLabel={activeThread?.summary.workspaceBranch ?? "Local"}
+            onCompactContext={
+              activeThread && activeProvider?.supportsCompact
+                ? () => agent.compactThread(activeThread.summary.id)
+                : undefined
+            }
             usageTrigger={
               <UsagePopover
                 open={usageOpen}

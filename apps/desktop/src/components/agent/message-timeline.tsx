@@ -230,8 +230,12 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       ((p.type === "text" || p.type === "reasoning") && p.text.trim().length > 0),
   );
 
+  const voice = message.providerId === "custom-acp" ? "custom" : message.providerId;
+  const voiceInk = voice ? `var(--voice-${voice}-ink)` : "var(--line)";
+  const voiceText = voice ? `var(--voice-${voice}-text)` : "var(--text-muted)";
+
   return (
-    <div className="space-y-2 py-1">
+    <div className="space-y-2 py-1 border-l-2 pl-3" style={{ borderColor: voiceInk }}>
       <div className="space-y-1.5">
         {message.parts.map((part, idx) => {
           if (part.type === "reasoning") {
@@ -254,17 +258,31 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             );
           }
           if (part.type === "tool") {
-            if (part.parentToolCallId && knownCallIds.has(part.parentToolCallId)) {
-              return null;
+            if (idx > 0 && message.parts[idx - 1]?.type === "tool") return null;
+            const group: ToolPart[] = [];
+            for (const next of message.parts.slice(idx)) {
+              if (next.type !== "tool") break;
+              if (!next.parentToolCallId || !knownCallIds.has(next.parentToolCallId))
+                group.push(next);
             }
+            if (group.length === 0) return null;
             return (
-              <ToolDisplay
-                key={part.id}
-                part={part}
-                childrenTools={childToolsByParent.get(part.callId) ?? EMPTY_TOOLS}
-                projectPath={projectPath}
-                onFileClick={onFileClick}
-              />
+              <details key={part.id} className="text-[12px]">
+                <summary className="cursor-pointer py-1 font-medium" style={{ color: voiceText }}>
+                  {group.length} {group.length === 1 ? "tool call" : "tool calls"}
+                </summary>
+                <div className="space-y-1">
+                  {group.map((tool) => (
+                    <ToolDisplay
+                      key={tool.id}
+                      part={tool}
+                      childrenTools={childToolsByParent.get(tool.callId) ?? EMPTY_TOOLS}
+                      projectPath={projectPath}
+                      onFileClick={onFileClick}
+                    />
+                  ))}
+                </div>
+              </details>
             );
           }
           if (part.type === "text") {

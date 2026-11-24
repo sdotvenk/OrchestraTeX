@@ -16,6 +16,7 @@ import type {
 export interface UseLatexCompilerOptions {
   settings: LaTeXSettings;
   projectPath: string | null;
+  onCompileStart?: (mainFile: string) => void;
 }
 
 export interface CompileInvocationOptions {
@@ -48,7 +49,11 @@ export function resolveEffectiveCompiler(
   return "latexmk";
 }
 
-export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOptions) {
+export function useLatexCompiler({
+  settings,
+  projectPath,
+  onCompileStart,
+}: UseLatexCompilerOptions) {
   const [compilersStatus, setCompilersStatus] = useState<LaTeXCompilersStatus | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
 
@@ -62,6 +67,8 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
   const [lastPdfBuildStartedAt, setLastPdfBuildStartedAt] = useState<number | null>(null);
 
   const settingsRef = useRef(settings);
+  const onCompileStartRef = useRef(onCompileStart);
+  onCompileStartRef.current = onCompileStart;
   const projectPathRef = useRef(projectPath);
   const compilersStatusRef = useRef(compilersStatus);
   const autoCompileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,6 +203,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
       pendingLogRef.current = [];
       setCompileStatus("compiling");
       setCompileLog([]);
+      onCompileStartRef.current?.(mainFile);
 
       try {
         const result = await invoke<CompilationResult>("latex_compile", {

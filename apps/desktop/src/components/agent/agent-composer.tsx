@@ -78,6 +78,12 @@ interface AgentComposerProps {
   onChangeEffort: (effort: string) => Promise<void> | void;
   onChangeInteractionMode: (mode: InteractionMode) => Promise<void> | void;
   onChangeRuntimeMode: (mode: RuntimeMode) => Promise<void> | void;
+  selectedLineRange?: { label: string; snippet?: string } | null;
+  onRemoveSelectedLineRange?: () => void;
+  workspaceLabel?: string;
+  onOpenWorkspace?: () => void;
+  compactLabel?: string;
+  onCompactContext?: () => Promise<void> | void;
   usageTrigger?: React.ReactNode;
 }
 
@@ -133,6 +139,12 @@ export function AgentComposer({
   onChangeEffort,
   onChangeInteractionMode,
   onChangeRuntimeMode,
+  selectedLineRange,
+  onRemoveSelectedLineRange,
+  workspaceLabel,
+  onOpenWorkspace,
+  compactLabel,
+  onCompactContext,
   usageTrigger,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
@@ -142,17 +154,16 @@ export function AgentComposer({
   const [dragOver, setDragOver] = useState(false);
   const [activePopoverIdx, setActivePopoverIdx] = useState(0);
   const [dismissedPopoverKey, setDismissedPopoverKey] = useState<string | null>(null);
-  const [openMenu, setOpenMenu] = useState<"modes" | "model" | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const modesButtonRef = useRef<HTMLButtonElement>(null);
-  const modelButtonRef = useRef<HTMLButtonElement>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const menuId = useId();
-  const closeMenu = useCallback((menu: "modes" | "model") => {
-    setOpenMenu(null);
-    (menu === "modes" ? modesButtonRef : modelButtonRef).current?.focus();
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    settingsButtonRef.current?.focus();
   }, []);
 
   const adjustTextareaHeight = useCallback(() => {
@@ -162,22 +173,18 @@ export function AgentComposer({
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   }, []);
 
-  // Close mode/model popovers on outside click or Escape
+  // Close settings popover on outside click or Escape
   useEffect(() => {
-    if (!openMenu) return;
+    if (!settingsOpen) return;
     menuRef.current?.querySelector("button")?.focus();
     const handleOutside = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (
-        !menuRef.current?.contains(target) &&
-        !modesButtonRef.current?.contains(target) &&
-        !modelButtonRef.current?.contains(target)
-      ) {
-        setOpenMenu(null);
+      if (!menuRef.current?.contains(target) && !settingsButtonRef.current?.contains(target)) {
+        setSettingsOpen(false);
       }
     };
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMenu(openMenu);
+      if (e.key === "Escape") closeSettings();
     };
     document.addEventListener("mousedown", handleOutside);
     window.addEventListener("keydown", handleEsc);
@@ -185,7 +192,7 @@ export function AgentComposer({
       document.removeEventListener("mousedown", handleOutside);
       window.removeEventListener("keydown", handleEsc);
     };
-  }, [closeMenu, openMenu]);
+  }, [closeSettings, settingsOpen]);
 
   // Inject external selection as a connected context chip (or plain draft)
   useEffect(() => {
@@ -228,7 +235,6 @@ export function AgentComposer({
   const interactionMode = activeThread?.summary.interactionMode ?? defaultInteractionMode;
   const runtimeMode = activeThread?.summary.runtimeMode ?? defaultRuntimeMode;
   const isRunning = activeThread?.summary.status === "running";
-  const isAutoRuntime = runtimeMode !== "approval-required";
 
   const projectFilePaths = useMemo(
     () => flattenFileNodes(files, projectPath),
@@ -345,12 +351,13 @@ export function AgentComposer({
   const handleSubmit = useCallback(
     async (mode: "auto" | "steer" | "queue" = "auto") => {
       const trimmed = text.trim();
-      if (!trimmed && attachments.length === 0 && !contextChip) return;
+      const activeChip = selectedLineRange ?? contextChip;
+      if (!trimmed && attachments.length === 0 && !activeChip) return;
 
-      const chipPrefix = contextChip
-        ? contextChip.snippet.trim()
-          ? `Regarding \`${contextChip.label}\`:\n\`\`\`latex\n${contextChip.snippet.trim()}\n\`\`\`\n\n`
-          : `Regarding \`${contextChip.label}\`: `
+      const chipPrefix = activeChip
+        ? activeChip.snippet?.trim()
+          ? `Regarding \`${activeChip.label}\`:\n\`\`\`latex\n${activeChip.snippet.trim()}\n\`\`\`\n\n`
+          : `Regarding \`${activeChip.label}\`: `
         : "";
       const composedContent = `${chipPrefix}${text}`.trim();
       const currentAtts = attachments.map((a) => a.input);
@@ -358,9 +365,10 @@ export function AgentComposer({
       setText("");
       setAttachments([]);
       setContextChip(null);
+      onRemoveSelectedLineRange?.();
       setDismissedPopoverKey(null);
       setActivePopoverIdx(0);
-      setOpenMenu(null);
+      setSettingsOpen(false);
       requestAnimationFrame(() => adjustTextareaHeight());
 
       if (mode === "steer" && activeThread && providerObj?.supportsSteer) {
@@ -381,14 +389,17 @@ export function AgentComposer({
       attachments,
       contextChip,
       onQueueMessage,
+      onRemoveSelectedLineRange,
       onSendMessage,
       onSteerActiveTurn,
       providerObj?.supportsSteer,
+      selectedLineRange,
       text,
     ],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing) return;
     if (popoverState) {
       const maxIdx = popoverState.items.length - 1;
       if (e.key === "ArrowDown") {
@@ -431,7 +442,10 @@ export function AgentComposer({
 
   const canSend =
     Boolean(projectPath) &&
-    (text.trim().length > 0 || attachments.length > 0 || Boolean(contextChip));
+    (text.trim().length > 0 ||
+      attachments.length > 0 ||
+      Boolean(contextChip) ||
+      Boolean(selectedLineRange));
   const modelLabel = selectedModelInfo?.name ?? currentModel ?? providerObj?.name ?? "Default";
   const runtimeLabel =
     RUNTIME_OPTIONS.find((r) => r.id === runtimeMode)?.label ?? "Auto-accept edits";
@@ -510,70 +524,78 @@ export function AgentComposer({
         </div>
       )}
 
-      {/* Silkscreen-style Consolidated Chat Modes Popover */}
-      {openMenu === "modes" && (
+      {/* Consolidated Thread Settings Popover */}
+      {settingsOpen && (
         <div
           id={menuId}
           ref={menuRef}
-          className="absolute bottom-full left-3 mb-2 w-[290px] max-w-[calc(100%-24px)] max-h-[min(320px,40dvh)] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-2.5 space-y-2.5"
+          className="absolute bottom-full left-3 mb-2 w-[320px] max-w-[calc(100%-24px)] max-h-[min(420px,50dvh)] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-2 space-y-2"
           style={{ boxShadow: "var(--shadow-2)" }}
           role="dialog"
-          aria-label={`Chat settings, ${runtimeLabel}${interactionMode === "plan" ? ", plan mode" : ""}`}
+          aria-label="Thread settings"
         >
-          <div className="space-y-1">
-            {RUNTIME_OPTIONS.map((opt) => {
-              const selected = runtimeMode === opt.id;
+          {/* Harness */}
+          <div className="space-y-0.5">
+            <div className="px-2 py-0.5 text-[11px] font-medium text-muted">Harness</div>
+            {providers.map((p) => {
+              const isCurrentProvider = p.id === currentProviderId;
+              const availability = !p.installed ? "Not found" : !p.authenticated ? "Sign in" : null;
               return (
                 <button
-                  key={opt.id}
+                  key={p.id}
                   type="button"
-                  aria-pressed={selected}
-                  onClick={() => void onChangeRuntimeMode(opt.id)}
-                  className={`w-full px-2.5 py-2 rounded-lg text-left flex items-start gap-2.5 transition-colors ${
-                    selected ? "bg-accent-soft" : "hover:bg-subtle"
+                  aria-pressed={isCurrentProvider}
+                  onClick={() => void onChangeProvider(p.id)}
+                  className={`w-full px-2 py-1.5 rounded-lg flex items-center gap-2 text-left transition-colors ${
+                    isCurrentProvider
+                      ? "bg-accent-soft text-foreground-strong"
+                      : "hover:bg-subtle text-foreground"
                   }`}
                 >
-                  {opt.isAuto ? (
-                    <Lightning className="size-4 text-accent mt-0.5 shrink-0" aria-hidden="true" />
-                  ) : (
-                    <ShieldCheck className="size-4 text-muted mt-0.5 shrink-0" aria-hidden="true" />
-                  )}
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-[12.5px] font-medium text-foreground-strong">
-                      {opt.label}
-                    </span>
-                    <span className="block text-[11px] text-muted leading-snug">{opt.note}</span>
+                  <ProviderIcon providerId={p.id} className="size-3.5 shrink-0" />
+                  <span className="text-[12px] font-medium truncate">{p.name}</span>
+                  <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted shrink-0">
+                    {availability && <span>{availability}</span>}
+                    {isCurrentProvider && (
+                      <Check className="size-3.5 text-accent" aria-hidden="true" />
+                    )}
                   </span>
-                  {selected && (
-                    <Check className="size-3.5 text-accent mt-1 shrink-0" aria-hidden="true" />
-                  )}
                 </button>
               );
             })}
           </div>
 
-          <div className="pt-2 border-t border-border flex items-center justify-between gap-2">
-            <span className="text-[12px] text-muted">Mode</span>
-            <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5">
-              {(["default", "plan"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => void onChangeInteractionMode(m)}
-                  className={`px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors ${
-                    interactionMode === m
-                      ? "bg-panel text-foreground-strong shadow-xs"
-                      : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  {m === "plan" ? "Plan" : "Edit"}
-                </button>
-              ))}
+          {/* Model */}
+          {models.length > 0 && (
+            <div className="pt-2 border-t border-border space-y-0.5">
+              <div className="px-2 py-0.5 text-[11px] font-medium text-muted">Model</div>
+              <div className="space-y-0.5 max-h-36 overflow-y-auto">
+                {models.map((m) => {
+                  const isSelected = m.id === currentModel;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => void onChangeModel(m.id)}
+                      className={`w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] transition-colors ${
+                        isSelected
+                          ? "bg-accent-soft text-accent font-medium"
+                          : "text-foreground hover:bg-subtle"
+                      }`}
+                    >
+                      <span className="truncate">{m.name}</span>
+                      {isSelected && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
+          {/* Effort */}
           {supportedEfforts.length > 0 && (
-            <div className="pt-2 border-t border-border flex items-center justify-between gap-2">
+            <div className="pt-2 border-t border-border flex items-center justify-between gap-2 px-1">
               <span className="inline-flex items-center gap-1.5 text-[12px] text-muted shrink-0">
                 <Gauge className="size-3.5" aria-hidden="true" />
                 <span>Effort</span>
@@ -583,6 +605,7 @@ export function AgentComposer({
                   <button
                     key={eff}
                     type="button"
+                    aria-pressed={currentEffort === eff}
                     onClick={() => void onChangeEffort(eff)}
                     className={`px-2 py-1 rounded-md text-[11px] font-medium capitalize transition-colors ${
                       currentEffort === eff
@@ -596,70 +619,93 @@ export function AgentComposer({
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Silkscreen-style Grouped Provider & Model Popover */}
-      {openMenu === "model" && (
-        <div
-          id={menuId}
-          ref={menuRef}
-          className="absolute bottom-full right-3 mb-2 w-[270px] max-w-[calc(100%-24px)] max-h-[min(320px,40dvh)] overflow-y-auto z-40 rounded-xl border border-border bg-panel p-1.5 space-y-2"
-          style={{ boxShadow: "var(--shadow-2)" }}
-          role="dialog"
-          aria-label="Choose provider and model"
-        >
-          {providers.map((p) => {
-            const isCurrentProvider = p.id === currentProviderId;
-            return (
-              <div key={p.id} className="space-y-0.5">
+          {/* Mode: Build / Plan */}
+          <div className="pt-2 border-t border-border flex items-center justify-between gap-2 px-1">
+            <span className="text-[12px] text-muted">Mode</span>
+            <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5">
+              {(["default", "plan"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={interactionMode === m}
+                  onClick={() => void onChangeInteractionMode(m)}
+                  className={`px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors ${
+                    interactionMode === m
+                      ? "bg-panel text-foreground-strong shadow-xs"
+                      : "text-muted hover:text-foreground"
+                  }`}
+                >
+                  {m === "plan" ? "Plan" : "Build"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Access */}
+          <div className="pt-2 border-t border-border space-y-0.5">
+            <div className="px-2 py-0.5 text-[11px] font-medium text-muted">Access</div>
+            {RUNTIME_OPTIONS.map((opt) => {
+              const selected = runtimeMode === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => void onChangeRuntimeMode(opt.id)}
+                  className={`w-full px-2 py-1.5 rounded-lg text-left flex items-center gap-2 transition-colors ${
+                    selected ? "bg-accent-soft text-foreground-strong" : "hover:bg-subtle"
+                  }`}
+                >
+                  {opt.isAuto ? (
+                    <Lightning className="size-3.5 text-accent shrink-0" aria-hidden="true" />
+                  ) : (
+                    <ShieldCheck className="size-3.5 text-muted shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="text-[12px] font-medium truncate flex-1">{opt.label}</span>
+                  {selected && (
+                    <Check className="size-3.5 text-accent shrink-0" aria-hidden="true" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Optional Workspace / Compact */}
+          {(onOpenWorkspace || onCompactContext) && (
+            <div className="pt-2 border-t border-border space-y-0.5">
+              {onOpenWorkspace && (
                 <button
                   type="button"
                   onClick={() => {
-                    void onChangeProvider(p.id);
-                    if (p.models.length === 0) closeMenu("model");
+                    onOpenWorkspace();
+                    closeSettings();
                   }}
-                  className="w-full px-2 py-1 rounded-md flex items-center gap-2 text-left hover:bg-subtle transition-colors"
+                  className="w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
                 >
-                  <ProviderIcon providerId={p.id} className="size-3.5 shrink-0" />
-                  <span className="text-[11.5px] font-semibold text-foreground-strong truncate">
-                    {p.name}
-                  </span>
-                  <span className="ml-auto text-[10.5px] text-muted">
-                    {!p.installed ? "Not found" : !p.authenticated ? "Sign in" : ""}
+                  <span>Workspace</span>
+                  <span className="font-mono text-[11px] text-muted truncate">
+                    {workspaceLabel ?? "Local"}
                   </span>
                 </button>
-                {p.models.length > 0 && (
-                  <div className="pl-2 space-y-0.5">
-                    {p.models.map((m) => {
-                      const isSelected = isCurrentProvider && m.id === currentModel;
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={async () => {
-                            if (!isCurrentProvider) {
-                              await onChangeProvider(p.id);
-                            }
-                            await onChangeModel(m.id);
-                            closeMenu("model");
-                          }}
-                          className={`w-full px-2.5 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] transition-colors ${
-                            isSelected
-                              ? "bg-accent-soft text-accent font-medium"
-                              : "text-foreground hover:bg-subtle"
-                          }`}
-                        >
-                          <span className="truncate">{m.name}</span>
-                          {isSelected && <Check className="size-3.5 shrink-0" aria-hidden="true" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              )}
+              {onCompactContext && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void onCompactContext();
+                    closeSettings();
+                  }}
+                  className="w-full px-2 py-1.5 rounded-lg text-left flex items-center justify-between gap-2 text-[12px] text-foreground hover:bg-subtle transition-colors"
+                >
+                  <span>Compact context</span>
+                  {compactLabel && (
+                    <span className="font-mono text-[11px] text-muted">{compactLabel}</span>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -736,15 +782,23 @@ export function AgentComposer({
         }`}
       >
         {/* Connected Context Chip & Image Attachments */}
-        {(contextChip || attachments.length > 0) && (
+        {(selectedLineRange || contextChip || attachments.length > 0) && (
           <div className="px-3 pt-2.5 flex flex-wrap items-center gap-1.5">
-            {contextChip && (
+            {(selectedLineRange ?? contextChip) && (
               <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-0.5 rounded-md bg-accent-soft text-accent text-[11.5px] font-mono">
                 <FileText className="size-3 shrink-0" aria-hidden="true" />
-                <span className="truncate max-w-[200px]">{contextChip.label}</span>
+                <span className="truncate max-w-[200px]">
+                  {(selectedLineRange ?? contextChip)?.label}
+                </span>
                 <button
                   type="button"
-                  onClick={() => setContextChip(null)}
+                  onClick={() => {
+                    if (selectedLineRange) {
+                      onRemoveSelectedLineRange?.();
+                    } else {
+                      setContextChip(null);
+                    }
+                  }}
                   className="p-0.5 rounded hover:bg-panel/60"
                   aria-label="Remove selection context"
                 >
@@ -819,10 +873,40 @@ export function AgentComposer({
           />
         </div>
 
-        {/* Bottom Control Row (Silkscreen v1.3.1 compact layout) */}
+        {/* Bottom Control Row */}
         <div className="flex flex-wrap items-center justify-between gap-1 border-t border-border bg-subtle/35 rounded-b-xl p-1.5">
-          {/* Left: Attach + Consolidated ChatModes button */}
-          <div className="flex items-center gap-0.5 shrink-0">
+          {/* Left: Compact Model · Effort chip + Attach + Usage */}
+          <div className="flex items-center gap-1 min-w-0">
+            <button
+              ref={settingsButtonRef}
+              type="button"
+              aria-haspopup="dialog"
+              aria-controls={settingsOpen ? menuId : undefined}
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen((open) => !open)}
+              className={`h-7 px-2 rounded-lg inline-flex items-center gap-1.5 text-[12px] transition-colors min-w-0 ${
+                settingsOpen
+                  ? "bg-accent-soft text-accent"
+                  : "text-muted hover:text-foreground hover:bg-subtle"
+              }`}
+              title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}${currentEffort ? ` · ${currentEffort}` : ""} · ${interactionMode === "plan" ? "Plan" : "Build"} · ${runtimeLabel}`}
+              aria-label={`Thread settings: ${modelLabel}${currentEffort ? `, ${currentEffort}` : ""}, ${interactionMode === "plan" ? "Plan" : "Build"}, ${runtimeLabel}`}
+            >
+              <ProviderIcon providerId={currentProviderId} className="size-3.5 shrink-0" />
+              <span className="truncate font-medium text-foreground">{modelLabel}</span>
+              {currentEffort && (
+                <>
+                  <span className="text-muted-foreground shrink-0" aria-hidden="true">
+                    ·
+                  </span>
+                  <span className="truncate text-[11.5px] text-muted-foreground capitalize">
+                    {currentEffort}
+                  </span>
+                </>
+              )}
+              <CaretDown className="size-2.5 opacity-75 shrink-0" aria-hidden="true" />
+            </button>
+
             <input
               ref={fileInputRef}
               type="file"
@@ -841,65 +925,18 @@ export function AgentComposer({
               type="button"
               disabled={!projectPath}
               onClick={() => fileInputRef.current?.click()}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors shrink-0"
               title="Attach image (or paste / drop)"
               aria-label="Attach image"
             >
               <Paperclip className="size-4" aria-hidden="true" />
             </button>
 
-            <button
-              ref={modesButtonRef}
-              type="button"
-              aria-controls={openMenu === "modes" ? menuId : undefined}
-              onClick={() => setOpenMenu((m) => (m === "modes" ? null : "modes"))}
-              className={`h-7 px-2 rounded-lg inline-flex items-center gap-1 text-[11.5px] transition-colors ${
-                openMenu === "modes" || interactionMode === "plan"
-                  ? "bg-accent-soft text-accent"
-                  : "text-muted hover:text-foreground hover:bg-subtle"
-              }`}
-              title={`${runtimeLabel}${interactionMode === "plan" ? " · Plan mode" : ""}${currentEffort ? ` · ${currentEffort} effort` : ""}`}
-              aria-label={`Chat settings, ${runtimeLabel}${interactionMode === "plan" ? ", plan mode" : ""}`}
-              aria-expanded={openMenu === "modes"}
-            >
-              {isAutoRuntime ? (
-                <Lightning className="size-3.5" aria-hidden="true" />
-              ) : (
-                <ShieldCheck className="size-3.5" aria-hidden="true" />
-              )}
-              {interactionMode === "plan" && <span className="font-medium">Plan</span>}
-              <CaretDown className="size-2.5 opacity-75" aria-hidden="true" />
-            </button>
-
             {usageTrigger}
           </div>
 
-          {/* Right: ModelChip + Send/Stop */}
-          <div className="ml-auto flex flex-1 basis-32 items-center justify-end gap-1 min-w-0">
-            <button
-              ref={modelButtonRef}
-              type="button"
-              aria-controls={openMenu === "model" ? menuId : undefined}
-              onClick={() => setOpenMenu((m) => (m === "model" ? null : "model"))}
-              className={`h-7 px-1.5 rounded-lg inline-flex items-center gap-1 text-[12px] transition-colors min-w-0 ${
-                openMenu === "model"
-                  ? "bg-accent-soft text-accent"
-                  : "text-muted hover:text-foreground hover:bg-subtle"
-              }`}
-              title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}${currentEffort ? ` · ${currentEffort} effort` : ""}`}
-              aria-label={`Choose agent and model, currently ${modelLabel}${currentEffort ? ` with ${currentEffort} effort` : ""}`}
-              aria-expanded={openMenu === "model"}
-            >
-              <ProviderIcon providerId={currentProviderId} className="size-3.5 shrink-0" />
-              <span className="truncate font-medium text-foreground">{modelLabel}</span>
-              {currentEffort && (
-                <span className="min-w-0 truncate text-[11px] text-muted-foreground capitalize">
-                  {currentEffort}
-                </span>
-              )}
-              <CaretDown className="size-2.5 opacity-75 shrink-0" aria-hidden="true" />
-            </button>
-
+          {/* Right: Send/Stop */}
+          <div className="ml-auto flex items-center justify-end gap-1 shrink-0">
             {isRunning && activeThread ? (
               <div className="flex items-center gap-1 shrink-0">
                 {canSend && (

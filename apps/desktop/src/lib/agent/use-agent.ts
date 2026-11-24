@@ -101,6 +101,7 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
   const pendingDeltasRef = useRef<Map<string, BufferedDelta>>(new Map());
   const rafIdRef = useRef<number | null>(null);
   const dispatchingQueueIdsRef = useRef<Set<string>>(new Set());
+  const threadLoadGeneration = useRef(0);
 
   const drainPendingDeltas = useCallback((): BufferedDelta[] => {
     if (rafIdRef.current !== null) {
@@ -132,6 +133,19 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
     const unlistenPromise = listen<AgentStreamEvent>("agent-event", (event) => {
       if (!active) return;
       const payload = event.payload;
+      if (
+        payload.type === "threadUpdated" &&
+        payload.thread.projectPath !== projectPathRef.current
+      ) {
+        return;
+      }
+      if (
+        payload.type === "turnStatus" &&
+        stateRef.current.activeThread?.summary.id !== payload.threadId &&
+        !stateRef.current.threads.some((thread) => thread.id === payload.threadId)
+      ) {
+        return;
+      }
       if (payload.type === "partDelta") {
         const key = `${payload.threadId}::${payload.messageId}::${payload.partId}::${payload.partType}`;
         const existing = pendingDeltasRef.current.get(key);
@@ -211,11 +225,15 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
     async (threadId: string, overrideProjectPath?: string): Promise<AgentThread | null> => {
       const targetProject = overrideProjectPath ?? projectPathRef.current;
       if (!targetProject) return null;
+      const generation = ++threadLoadGeneration.current;
       const buffered = drainPendingDeltas();
       const loaded = await invoke<AgentThread>("agent_load_thread", {
         projectPath: targetProject,
         threadId,
       });
+      if (generation !== threadLoadGeneration.current || targetProject !== projectPathRef.current) {
+        return null;
+      }
       setState((prev) => {
         const flushed = buffered.length > 0 ? applyPartDeltas(prev, buffered) : prev;
         return {
@@ -238,10 +256,12 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
         return [];
       }
       setState((prev) => ({ ...prev, loadingThreads: true }));
+      const priorSelection = threadLoadGeneration.current;
       try {
         const threads = await invoke<ThreadSummary[]>("agent_list_threads", {
           projectPath: targetProject,
         });
+        if (targetProject !== projectPathRef.current) return [];
         setState((prev) => ({
           ...prev,
           threads,
@@ -249,7 +269,7 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
         }));
         const currentActive = stateRef.current.activeThread;
         const activeMatchesProject = currentActive?.summary.projectPath === targetProject;
-        if (!activeMatchesProject) {
+        if (!activeMatchesProject && priorSelection === threadLoadGeneration.current) {
           const first = threads.find((t) => !t.archived) ?? threads[0];
           if (first) {
             await loadThread(first.id, targetProject);
@@ -259,6 +279,7 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
         }
         return threads;
       } catch (err) {
+        if (targetProject !== projectPathRef.current) return [];
         const message = err instanceof Error ? err.message : String(err);
         setState((prev) => ({
           ...prev,

@@ -31,6 +31,14 @@ export function ApprovalCard({ interaction, onDecide }: ApprovalCardProps) {
     }
   };
 
+  const cwd =
+    interaction.input &&
+    typeof interaction.input === "object" &&
+    "cwd" in interaction.input &&
+    typeof interaction.input.cwd === "string"
+      ? interaction.input.cwd
+      : null;
+
   const hasCustomAcpOptions = interaction.options && interaction.options.length > 0;
 
   return (
@@ -57,6 +65,12 @@ export function ApprovalCard({ interaction, onDecide }: ApprovalCardProps) {
           <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all flex-1">
             {interaction.command}
           </pre>
+        </div>
+      )}
+
+      {cwd && (
+        <div className="text-[11px] font-mono text-foreground-secondary border border-border bg-background px-2 py-1">
+          cwd: {cwd}
         </div>
       )}
 

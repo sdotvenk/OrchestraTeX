@@ -55,6 +55,7 @@ interface LivePdfPreviewProps {
   onSynctexClick: (page: number, x: number, y: number) => void;
   onJumpToDiagnostic: (diag: LatexDiagnostic) => void;
   onFixDiagnosticsWithAi: (diags: LatexDiagnostic[]) => void;
+  onOpenBuildActivity?: (tab: "problems" | "build-log") => void;
   onClose: () => void;
 }
 
@@ -85,6 +86,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   onSynctexClick,
   onJumpToDiagnostic,
   onFixDiagnosticsWithAi,
+  onOpenBuildActivity,
   onClose,
 }: LivePdfPreviewProps) {
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null);
@@ -148,10 +150,14 @@ export const LivePdfPreview = memo(function LivePdfPreview({
 
   useEffect(() => {
     if (compileStatus === "error" && (errorDiags.length > 0 || lastResult?.error)) {
-      setDrawerOpen(true);
-      setDrawerTab(errorDiags.length > 0 ? "issues" : "log");
+      if (onOpenBuildActivity) {
+        onOpenBuildActivity(errorDiags.length > 0 ? "problems" : "build-log");
+      } else {
+        setDrawerOpen(true);
+        setDrawerTab(errorDiags.length > 0 ? "issues" : "log");
+      }
     }
-  }, [compileStatus, errorDiags.length, lastResult?.error]);
+  }, [compileStatus, errorDiags.length, lastResult?.error, onOpenBuildActivity]);
 
   useEffect(() => {
     if (drawerOpen && drawerTab === "log" && compileLog.length > 0) {
@@ -316,8 +322,14 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           <button
             type="button"
             onClick={() => {
+              const targetTab =
+                errorDiags.length > 0 || warningDiags.length > 0 ? "problems" : "build-log";
+              if (onOpenBuildActivity) {
+                onOpenBuildActivity(targetTab);
+                return;
+              }
               setDrawerOpen((p) => !p);
-              setDrawerTab(errorDiags.length > 0 || warningDiags.length > 0 ? "issues" : "log");
+              setDrawerTab(targetTab === "problems" ? "issues" : "log");
             }}
             className={`h-6 px-2.5 rounded-full text-[11.5px] font-medium inline-flex items-center gap-1.5 truncate transition-colors ${
               compileStatus === "error" || errorDiags.length > 0
@@ -401,6 +413,10 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           <button
             type="button"
             onClick={() => {
+              if (onOpenBuildActivity) {
+                onOpenBuildActivity("build-log");
+                return;
+              }
               setDrawerOpen((open) => !open || drawerTab !== "log");
               setDrawerTab("log");
             }}
@@ -476,7 +492,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
       </div>
 
       {/* Collapsible Bottom Issues & Raw Log Sheet */}
-      {drawerOpen && (
+      {drawerOpen && !onOpenBuildActivity && (
         <div className="h-52 border-t border-border bg-panel flex flex-col shrink-0">
           <div className="px-3 py-1.5 border-b border-border bg-panel flex items-center justify-between gap-2">
             <div className="inline-flex p-0.5 rounded-lg bg-sunken gap-0.5">

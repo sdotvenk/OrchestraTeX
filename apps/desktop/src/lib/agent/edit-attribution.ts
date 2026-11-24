@@ -25,7 +25,16 @@ export interface AttributedEdit extends PendingEdit {
   endLine: number;
 }
 
-const EDIT_TOOLS = new Set(["edit", "write", "multiedit", "notebookedit", "delete"]);
+const EDIT_TOOLS = new Set([
+  "edit",
+  "editfile",
+  "write",
+  "writefile",
+  "applypatch",
+  "multiedit",
+  "notebookedit",
+  "delete",
+]);
 export const EDIT_CORRELATION_MS = 1_500;
 
 export function normalizePath(path: string): string {
@@ -50,7 +59,8 @@ export function projectRelativePath(projectPath: string, filePath: string): stri
 }
 
 export function editToolPaths(part: ToolPart): string[] {
-  if (part.status === "error" || !EDIT_TOOLS.has(part.tool.toLowerCase())) return [];
+  const tool = part.tool.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (part.status === "error" || !EDIT_TOOLS.has(tool)) return [];
   const paths = Array.isArray(part.input.changes)
     ? part.input.changes.flatMap((change) => {
         if (typeof change !== "object" || change === null || !("path" in change)) return [];

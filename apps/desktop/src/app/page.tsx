@@ -1,5 +1,6 @@
 "use client";
 
+import type { FileNode, GitStatus } from "@orchestratex/shared";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion, type PanInfo, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
@@ -8,7 +9,19 @@ import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDraftInjection } from "@/components/agent/agent-composer";
 import { AgentStatusCard } from "@/components/agent/agent-status-card";
+import { OrchestrationSidebar } from "@/components/agent/orchestration-sidebar";
+import {
+  type DelegateTaskInput,
+  ProjectInspector,
+  type ScheduleThreadInput,
+} from "@/components/agent/project-inspector";
+import { UsageDashboard } from "@/components/agent/usage-dashboard";
 import { flattenFileNodes } from "@/components/agent/utils";
+import { WorkspaceChanges } from "@/components/agent/workspace-changes";
+import {
+  BuildActivityDrawer,
+  type BuildActivityTab,
+} from "@/components/editor/build-activity-drawer";
 import {
   type DockviewPanelItem,
   DockviewPanelLayout,
@@ -16,20 +29,23 @@ import {
 import { EditorErrorBoundary } from "@/components/editor/editor-error-boundary";
 import { EditorSkeleton } from "@/components/editor/editor-skeleton";
 import { GitHubPublishDialog } from "@/components/editor/github-publish-dialog";
+import { HistoryWorkspace } from "@/components/editor/history-workspace";
+import { HomeWorkspace, type ProjectThreadCounts } from "@/components/editor/home-workspace";
 import type { PdfHighlightTarget } from "@/components/editor/pdf-viewer";
 import { ProjectSwitcher } from "@/components/editor/project-switcher";
+import { ScoreDrawer } from "@/components/editor/score-drawer";
 import { FileSidebarPanel } from "@/components/editor/sidebar-file-panel";
 import { GitSidebarPanel } from "@/components/editor/sidebar-git-panel";
 import { SidebarOutlinePanel } from "@/components/editor/sidebar-outline-panel";
 import { StatusBar } from "@/components/editor/status-bar";
 import { TerminalPanel } from "@/components/editor/terminal-panel";
+import { VisualEditor } from "@/components/editor/visual-editor";
 import {
   LaTeXInstallPrompt,
   LaTeXSettingsDialog,
   MainFileSelectionDialog,
   SynctexInstallDialog,
 } from "@/components/latex";
-import { RecentProjects } from "@/components/recent-projects";
 import { CommandPalette } from "@/components/ui/command-palette";
 import { InputDialog } from "@/components/ui/input-dialog";
 import {
@@ -41,8 +57,12 @@ import {
 } from "@/components/ui/tab-bar";
 import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
-import type { AttributedEdit } from "@/lib/agent/edit-attribution";
+import { type AttributedEdit, projectRelativePath } from "@/lib/agent/edit-attribution";
+import type { ScoreMark } from "@/lib/agent/score";
+import type { AgentThread, ThreadSummary } from "@/lib/agent/types";
 import { useAgentEdits } from "@/lib/agent/use-agent-edits";
+import { useOrchestration } from "@/lib/agent/use-orchestration";
+import { useScore } from "@/lib/agent/use-score";
 import { useEditorSettings } from "@/lib/editor";
 import { UI_PALETTES } from "@/lib/editor/types";
 import { VOICE_COLORS } from "@/lib/editor/voice-colors";
@@ -58,10 +78,16 @@ import {
   useLatexCompiler,
   useLatexSettings,
 } from "@/lib/latex";
+import {
+  findMissingFileSuggestion,
+  type RecentRenameRecord,
+} from "@/lib/latex/missing-file-suggestions";
+import { planRenameReferences } from "@/lib/latex/rename-references";
 import type { LatexDiagnostic, MainFileDetectionResult, SynctexResult } from "@/lib/latex/types";
 import { pathSync, pathsEqual } from "@/lib/path";
 import { useRecentProjects } from "@/lib/recent-projects";
 import { useTauriDaemon } from "@/lib/tauri";
+import type { RenameReferenceUpdate } from "@/lib/tauri/use-tauri-daemon";
 
 const PdfViewer = dynamic(
   () => import("@/components/editor/pdf-viewer").then((mod) => mod.PdfViewer),
@@ -75,7 +101,6 @@ const LivePdfPreview = dynamic(
 
 import {
   FilePdfIcon,
-  FolderOpenIcon,
   GearIcon,
   GitBranchIcon,
   MagnifyingGlassIcon,
@@ -316,6 +341,8 @@ export default function EditorPage() {
   const recentProjects = useRecentProjects();
 
   const [selectedFile, setSelectedFile] = useState<string>();
+  const [failedSourceWrites, setFailedSourceWrites] = useState<Record<string, string>>({});
+  const [recentRenames, setRecentRenames] = useState<RecentRenameRecord[]>([]);
   const [fileContent, setFileContent] = useState<string>("");
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("file");
   const [gitDiffPreview, setGitDiffPreview] = useState<GitDiffPreviewState | null>(null);
@@ -328,7 +355,15 @@ export default function EditorPage() {
   const [pendingGoToLine, setPendingGoToLine] = useState(0);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(false);
-  const [showTerminal, setShowTerminal] = useState(false);
+  const [buildActivityTab, setBuildActivityTab] = useState<BuildActivityTab>("score");
+  const [buildActivityCollapsed, setBuildActivityCollapsed] = useState(true);
+  const [terminalMounted, setTerminalMounted] = useState(false);
+  const showTerminal = !buildActivityCollapsed && buildActivityTab === "terminal";
+  const openBuildActivity = useCallback((tab: BuildActivityTab) => {
+    setBuildActivityTab(tab);
+    setBuildActivityCollapsed(false);
+    if (tab === "terminal") setTerminalMounted(true);
+  }, []);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("sidebarWidth");
@@ -345,6 +380,18 @@ export default function EditorPage() {
   });
   const [resizing, setResizing] = useState<"sidebar" | "right" | "preview" | null>(null);
   const [workspaceView, setWorkspaceView] = useState<"write" | "agents" | "history">("write");
+  const [showUsageDashboard, setShowUsageDashboard] = useState(false);
+  const [showHomeWorkspace, setShowHomeWorkspace] = useState(false);
+  const [showThreadHistory, setShowThreadHistory] = useState(false);
+  const [showCloneDialog, setShowCloneDialog] = useState(false);
+  const [openingThread, setOpeningThread] = useState<ThreadSummary | null>(null);
+  const [worktreeGitStatus, setWorktreeGitStatus] = useState<GitStatus | null>(null);
+  const [pullRequestDraft, setPullRequestDraft] = useState<ThreadSummary | null>(null);
+  const toggleTerminal = useCallback(() => {
+    setWorkspaceView("write");
+    if (showTerminal && workspaceView === "write") setBuildActivityCollapsed(true);
+    else openBuildActivity("terminal");
+  }, [openBuildActivity, showTerminal, workspaceView]);
   const [sidebarTab, setSidebarTab] = useState<"files" | "outline" | "threads" | "git">("files");
   const [highlightedFile, _setHighlightedFile] = useState<string | null>(null);
 
@@ -363,6 +410,7 @@ export default function EditorPage() {
   );
 
   const [showLivePreview, setShowLivePreview] = useState(false);
+  const [visualMode, setVisualMode] = useState(false);
   const [livePreviewWidth, setLivePreviewWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("livePreviewWidth");
@@ -392,6 +440,86 @@ export default function EditorPage() {
     settings: agentSettings.settings,
     onOpenUsage: handleOpenUsagePopover,
   });
+  const orchestration = useOrchestration(agentSettings.settings);
+  const threadCountsByProject = useMemo(() => {
+    const counts: Record<string, ProjectThreadCounts> = {};
+    for (const thread of orchestration.threads) {
+      if (thread.archived) continue;
+      const project = counts[thread.projectPath] ?? { total: 0, running: 0, waiting: 0 };
+      project.total++;
+      if (thread.status === "running") project.running++;
+      if (thread.status === "waiting_input") project.waiting++;
+      counts[thread.projectPath] = project;
+    }
+    return counts;
+  }, [orchestration.threads]);
+  const activeWorkspaceThread =
+    agent.activeThread?.summary.projectPath === daemon.projectPath
+      ? agent.activeThread.summary
+      : null;
+  const activeWorktreePath = activeWorkspaceThread?.workspacePath;
+  const activeThreadBranch = activeWorkspaceThread?.workspaceBranch;
+  const activeWorkspaceThreadId = activeWorkspaceThread?.id;
+  const { loadThread } = agent;
+  const { refreshPullRequest } = orchestration;
+  const refreshWorktreeStatus = useCallback(async () => {
+    if (!activeWorktreePath) return;
+    const status = await invoke<GitStatus>("git_status", { dir: activeWorktreePath });
+    setWorktreeGitStatus(status);
+  }, [activeWorktreePath]);
+
+  useEffect(() => {
+    if (
+      !openingThread ||
+      daemon.isOpeningProject ||
+      openingThread.projectPath !== daemon.projectPath
+    ) {
+      return;
+    }
+    setOpeningThread(null);
+    void loadThread(openingThread.id, openingThread.projectPath).catch((error: unknown) =>
+      toast(String(error), "error"),
+    );
+  }, [daemon.isOpeningProject, daemon.projectPath, loadThread, openingThread, toast]);
+
+  useEffect(() => {
+    if (workspaceView !== "agents") return;
+    let active = true;
+    const updateStatus = async () => {
+      if (!activeWorktreePath) return;
+      try {
+        const status = await invoke<GitStatus>("git_status", { dir: activeWorktreePath });
+        if (active) setWorktreeGitStatus(status);
+      } catch {
+        if (active) setWorktreeGitStatus(null);
+      }
+    };
+    setWorktreeGitStatus(null);
+    void updateStatus();
+    const timer = setInterval(() => void updateStatus(), 10_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [activeWorktreePath, workspaceView]);
+
+  useEffect(() => {
+    if (workspaceView !== "agents" || !activeWorkspaceThreadId || !daemon.projectPath) return;
+    void refreshPullRequest({
+      id: activeWorkspaceThreadId,
+      projectPath: daemon.projectPath,
+      workspaceBranch: activeThreadBranch,
+      workspacePath: activeWorktreePath,
+    });
+  }, [
+    activeThreadBranch,
+    activeWorktreePath,
+    activeWorkspaceThreadId,
+    daemon.projectPath,
+    refreshPullRequest,
+    workspaceView,
+  ]);
+
   const projectThreads = useMemo(
     () => agent.threads.filter((thread) => !thread.archived),
     [agent.threads],
@@ -426,13 +554,33 @@ export default function EditorPage() {
   const savingVisualTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSaveTimesRef = useRef(new Map<string, number>());
   const pendingSourceWritesRef = useRef<{ primary?: string; split?: string }>({});
+  const shouldIgnoreRenameChangeRef = useRef<((path: string) => boolean) | null>(null);
+  const processedFileChangeRef = useRef(daemon.lastFileChange);
+  const renamePlanRef = useRef<{
+    projectPath: string;
+    oldPath: string;
+    newPath: string;
+    updates: RenameReferenceUpdate[];
+  } | null>(null);
   const currentProjectRef = useRef(daemon.projectPath);
   const selectedFileRef = useRef(selectedFile);
   currentProjectRef.current = daemon.projectPath;
   selectedFileRef.current = selectedFile;
-  const sourceIsDirty = useCallback((path: string) => {
-    const pending = pendingSourceWritesRef.current;
-    return pending.primary === path || pending.split === path;
+  const sourceIsDirty = useCallback(
+    (path: string) => {
+      const pending = pendingSourceWritesRef.current;
+      return pending.primary === path || pending.split === path || path in failedSourceWrites;
+    },
+    [failedSourceWrites],
+  );
+  const rememberSaveResult = useCallback((path: string, content: string, saved: boolean) => {
+    setFailedSourceWrites((previous) => {
+      if (!saved) return { ...previous, [path]: content };
+      if (!(path in previous)) return previous;
+      const next = { ...previous };
+      delete next[path];
+      return next;
+    });
   }, []);
   const isLocallyModified = useCallback(
     (path: string) =>
@@ -496,17 +644,26 @@ export default function EditorPage() {
 
   // Auto-detect main file when project opens
   useEffect(() => {
-    if (daemon.files.length > 0 && !latexSettings.settings.mainFile) {
+    if (
+      daemon.files.length > 0 &&
+      !texFiles.some(
+        (path) =>
+          latexSettings.settings.mainFile && pathsEqual(path, latexSettings.settings.mainFile),
+      )
+    ) {
       const mainFile = findMainTexFile(daemon.files);
-      if (mainFile) {
+      if (mainFile !== latexSettings.settings.mainFile) {
         latexSettings.setMainFile(mainFile);
       }
     }
-  }, [daemon.files, latexSettings.settings.mainFile, latexSettings]);
+  }, [daemon.files, latexSettings.settings.mainFile, latexSettings, texFiles]);
+
+  const score = useScore(daemon.projectPath, agent.threads);
 
   const latexCompiler = useLatexCompiler({
     settings: latexSettings.settings,
     projectPath: daemon.projectPath,
+    onCompileStart: (mainFile) => score.recordUser("compile", mainFile),
   });
   const staleAgentEdits = latexCompiler.pdfPath
     ? attributedEdits.filter(
@@ -543,6 +700,7 @@ export default function EditorPage() {
       try {
         await daemon.writeFileIfUnchanged(edit.filePath, edit.after, edit.before);
         if (currentProjectRef.current !== projectPath) return;
+        lastSaveTimesRef.current.set(edit.filePath, Date.now());
         markRejected(edit.id);
         rememberAgentEditFile(edit.filePath, edit.before, projectPath);
         if (selectedFileRef.current === edit.filePath) {
@@ -670,6 +828,15 @@ export default function EditorPage() {
   }, [pendingGoToLine]);
 
   useEffect(() => {
+    setOpenTabs([]);
+    setSelectedFile(undefined);
+    setFileContent("");
+    setBinaryPreviewUrl(null);
+    setSplitPane(null);
+    setEditorViewMode("file");
+    setShowThreadHistory(false);
+    setFailedSourceWrites({});
+    setRecentRenames([]);
     const timers = [contentSaveTimeoutRef, splitContentSaveTimeoutRef, savingVisualTimeoutRef];
     for (const timer of timers) {
       if (timer.current) clearTimeout(timer.current);
@@ -679,7 +846,6 @@ export default function EditorPage() {
     lastSaveTimesRef.current.clear();
     setIsSaving(false);
     if (!daemon.projectPath) {
-      setSplitPane(null);
       setShowLivePreview(false);
       setBibEntries([]);
       setTexLabels([]);
@@ -687,7 +853,10 @@ export default function EditorPage() {
   }, [daemon.projectPath]);
 
   useEffect(() => {
-    setShowTerminal(Boolean(daemon.projectPath));
+    void daemon.projectPath;
+    setTerminalMounted(false);
+    setBuildActivityTab("score");
+    setBuildActivityCollapsed(true);
   }, [daemon.projectPath]);
 
   useEffect(() => {
@@ -917,6 +1086,7 @@ export default function EditorPage() {
         if (prev.includes(resolvedPath)) return prev;
         return [...prev, resolvedPath];
       });
+      selectedFileRef.current = resolvedPath;
       setSelectedFile(resolvedPath);
       setBinaryPreviewUrl(null);
 
@@ -924,8 +1094,13 @@ export default function EditorPage() {
         setIsLoadingFile(true);
         try {
           const content = await daemon.readFile(resolvedPath);
+          if (
+            currentProjectRef.current !== daemon.projectPath ||
+            selectedFileRef.current !== resolvedPath
+          )
+            return;
           if (content !== null) rememberAgentEditFile(resolvedPath, content, daemon.projectPath);
-          setFileContent(content ?? "");
+          setFileContent(failedSourceWrites[resolvedPath] ?? content ?? "");
         } catch (err) {
           const errorStr = String(err);
 
@@ -969,7 +1144,7 @@ export default function EditorPage() {
         setFileContent("");
       }
     },
-    [daemon, getFileType, rememberAgentEditFile, resolveSelectablePath, toast],
+    [daemon, failedSourceWrites, getFileType, rememberAgentEditFile, resolveSelectablePath, toast],
   );
 
   const runInverseSynctex = useCallback(
@@ -1201,9 +1376,11 @@ export default function EditorPage() {
 
   // Handle file changes - deletion and external modifications
   useEffect(() => {
-    if (!daemon.lastFileChange) return;
+    if (!daemon.lastFileChange || processedFileChangeRef.current === daemon.lastFileChange) return;
+    processedFileChangeRef.current = daemon.lastFileChange;
 
     const { path, kind } = daemon.lastFileChange;
+    if (shouldIgnoreRenameChangeRef.current?.(path)) return;
 
     if (kind === "remove") {
       if (splitPane?.openTabs.includes(path)) {
@@ -1477,7 +1654,7 @@ export default function EditorPage() {
             return {
               ...prev,
               side,
-              content: content ?? "",
+              content: failedSourceWrites[resolvedPath] ?? content ?? "",
               isLoading: false,
               error: null,
               binaryPreviewUrl: null,
@@ -1534,6 +1711,7 @@ export default function EditorPage() {
     },
     [
       daemon,
+      failedSourceWrites,
       getFileType,
       resolveSelectablePath,
       toast,
@@ -1568,6 +1746,7 @@ export default function EditorPage() {
           if (!saved || currentProjectRef.current !== daemon.projectPath) return;
           lastSaveTimesRef.current.set(fileToSave, Date.now());
           rememberAgentEditFile(fileToSave, content, daemon.projectPath);
+          score.recordUser("edit", fileToSave);
           if (
             daemon.projectPath &&
             latexSettings.settings.mainFile &&
@@ -1584,7 +1763,10 @@ export default function EditorPage() {
         } finally {
           if (splitContentSaveTimeoutRef.current === timer) {
             splitContentSaveTimeoutRef.current = null;
-            if (saved) pendingSourceWritesRef.current.split = undefined;
+            pendingSourceWritesRef.current.split = undefined;
+            if (currentProjectRef.current === daemon.projectPath) {
+              rememberSaveResult(fileToSave, content, saved);
+            }
           }
         }
       }, 500);
@@ -1596,6 +1778,8 @@ export default function EditorPage() {
       latexCompiler,
       latexSettings.settings.mainFile,
       rememberAgentEditFile,
+      rememberSaveResult,
+      score.recordUser,
       splitPane?.selectedFile,
     ],
   );
@@ -2038,6 +2222,7 @@ export default function EditorPage() {
             if (saved && currentProjectRef.current === daemon.projectPath) {
               lastSaveTimesRef.current.set(fileToSave, Date.now());
               rememberAgentEditFile(fileToSave, content, daemon.projectPath);
+              score.recordUser("edit", fileToSave);
             }
             if (
               saved &&
@@ -2058,7 +2243,10 @@ export default function EditorPage() {
         }
         if (contentSaveTimeoutRef.current !== timer) return;
         contentSaveTimeoutRef.current = null;
-        if (saved) pendingSourceWritesRef.current.primary = undefined;
+        pendingSourceWritesRef.current.primary = undefined;
+        if (fileToSave && currentProjectRef.current === daemon.projectPath) {
+          rememberSaveResult(fileToSave, content, saved);
+        }
         if (savingVisualTimeoutRef.current) {
           clearTimeout(savingVisualTimeoutRef.current);
           savingVisualTimeoutRef.current = null;
@@ -2074,6 +2262,8 @@ export default function EditorPage() {
       latexCompiler,
       latexSettings.settings.mainFile,
       rememberAgentEditFile,
+      rememberSaveResult,
+      score.recordUser,
     ],
   );
 
@@ -2087,30 +2277,365 @@ export default function EditorPage() {
       });
 
       if (selected && typeof selected === "string") {
+        if (
+          selected !== daemon.projectPath &&
+          (Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+            Object.keys(failedSourceWrites).length)
+        ) {
+          throw new Error("Wait for the editor to finish saving");
+        }
         await daemon.setProject(selected);
         await recentProjects.addProject(selected);
+        setShowHomeWorkspace(false);
         setShowSidebar(true);
         setShowRightPanel(true);
       }
     } catch (err) {
       console.error("Failed to open project:", err);
+      toast(String(err), "error");
     }
-  }, [daemon, recentProjects]);
+  }, [daemon, failedSourceWrites, recentProjects, toast]);
+
+  const retrySourceSave = async (path: string, content: string) => {
+    if (Object.values(pendingSourceWritesRef.current).includes(path)) return;
+    const projectPath = daemon.projectPath;
+    try {
+      if (!(await daemon.writeFile(path, content))) return;
+      if (currentProjectRef.current !== projectPath) return;
+      lastSaveTimesRef.current.set(path, Date.now());
+      rememberAgentEditFile(path, content, projectPath);
+      rememberSaveResult(path, content, true);
+      score.recordUser("edit", path);
+      if (
+        projectPath &&
+        hasAnyCompiler &&
+        latexSettings.settings.mainFile &&
+        /\.(tex|bib|sty|cls)$/i.test(path)
+      ) {
+        latexCompiler.scheduleAutoCompile({
+          directory: projectPath,
+          mainFile: latexSettings.settings.mainFile,
+        });
+      }
+    } catch (error) {
+      toast(String(error), "error");
+    }
+  };
 
   const handleOpenRecentProject = useCallback(
     async (path: string) => {
+      if (
+        path !== daemon.projectPath &&
+        (Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+          Object.keys(failedSourceWrites).length)
+      ) {
+        toast("Wait for the editor to finish saving", "error");
+        return false;
+      }
       try {
-        await daemon.setProject(path);
+        if (path !== daemon.projectPath) await daemon.setProject(path);
         await recentProjects.addProject(path);
+        setShowHomeWorkspace(false);
         setShowSidebar(true);
         setShowRightPanel(true);
+        return true;
       } catch (err) {
         console.error("Failed to open project:", err);
-        toast("Failed to open project", "error");
-        recentProjects.removeProject(path);
+        toast(String(err), "error");
+        return false;
       }
     },
-    [daemon, recentProjects, toast],
+    [daemon, failedSourceWrites, recentProjects, toast],
+  );
+
+  const handleNewLatexProject = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const directory = await open({ directory: true, title: "Choose a folder for the project" });
+      if (typeof directory !== "string") return;
+      await invoke("create_latex_project", { directory });
+      setWorkspaceView("write");
+      await handleOpenRecentProject(directory);
+    } catch (error) {
+      toast(String(error), "error");
+    }
+  };
+
+  const handleCloneProject = async (url: string) => {
+    setShowCloneDialog(false);
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const directory = await save({ title: "Choose a location for the cloned project" });
+      if (!directory) return;
+      const path = await invoke<string>("git_clone", { url: url.trim(), directory });
+      setWorkspaceView("write");
+      await handleOpenRecentProject(path);
+    } catch (error) {
+      toast(String(error), "error");
+    }
+  };
+
+  const handlePlanRename = useCallback(
+    async (node: FileNode, newPath: string) => {
+      renamePlanRef.current = null;
+      const projectPath = daemon.projectPath;
+      if (!projectPath || (node.type === "file" && !/\.tex$/i.test(node.path))) return 0;
+
+      const files = await Promise.all(
+        texFiles.map(async (path) => ({ path, content: await daemon.readFile(path) })),
+      );
+      if (currentProjectRef.current !== projectPath) throw new Error("The active project changed");
+      const sourceFiles = files.flatMap(({ path, content }) =>
+        content === null ? [] : [{ path, content }],
+      );
+      const edits = planRenameReferences({
+        oldPath: node.path,
+        newPath,
+        isDirectory: node.type === "directory",
+        projectRoot: projectPath,
+        mainFile: latexSettings.settings.mainFile,
+        files: sourceFiles,
+      });
+      const originalByPath = new Map(sourceFiles.map((file) => [file.path, file.content]));
+      const updatesByPath = new Map<string, RenameReferenceUpdate>();
+      for (const edit of edits.reverse()) {
+        const before = originalByPath.get(edit.filePath);
+        if (before === undefined) continue;
+        const previous = updatesByPath.get(edit.filePath)?.after ?? before;
+        updatesByPath.set(edit.filePath, {
+          path: edit.filePath,
+          before,
+          after: previous.slice(0, edit.startOffset) + edit.after + previous.slice(edit.endOffset),
+        });
+      }
+      renamePlanRef.current = {
+        projectPath,
+        oldPath: node.path,
+        newPath,
+        updates: [...updatesByPath.values()],
+      };
+      return edits.length;
+    },
+    [daemon.projectPath, daemon.readFile, latexSettings.settings.mainFile, texFiles],
+  );
+
+  const handleOpenOrchestrationThread = useCallback(
+    async (thread: ThreadSummary) => {
+      setWorkspaceView("agents");
+      if (thread.projectPath === daemon.projectPath) {
+        await loadThread(thread.id, thread.projectPath);
+      } else {
+        if (await handleOpenRecentProject(thread.projectPath)) setOpeningThread(thread);
+      }
+    },
+    [daemon.projectPath, handleOpenRecentProject, loadThread],
+  );
+
+  const handleDelegateTask = async ({ providerId, title, prompt }: DelegateTaskInput) => {
+    if (!activeWorkspaceThread) throw new Error("Open a parent thread");
+    const settings = agentSettings.settings;
+    await invoke<AgentThread>("agent_delegate_thread", {
+      projectPath: activeWorkspaceThread.projectPath,
+      parentThreadId: activeWorkspaceThread.id,
+      providerId,
+      brief: prompt,
+      title,
+      model: settings.defaultModelByProvider[providerId],
+      reasoningEffort: settings.defaultEffortByProvider[providerId],
+      customConfigs: orchestration.customConfigs,
+    });
+    await orchestration.refreshThreads();
+  };
+
+  const handleScheduleThread = async ({
+    providerId,
+    title,
+    prompt,
+    runAt,
+    repeatIntervalMs,
+  }: ScheduleThreadInput) => {
+    if (!daemon.projectPath) throw new Error("Open a project");
+    const settings = agentSettings.settings;
+    const thread = await invoke<AgentThread>("agent_create_thread", {
+      projectPath: daemon.projectPath,
+      providerId,
+      title,
+      model: settings.defaultModelByProvider[providerId],
+      reasoningEffort: settings.defaultEffortByProvider[providerId],
+      interactionMode: settings.defaultInteractionMode,
+      runtimeMode: settings.defaultRuntimeMode,
+    });
+    await invoke("agent_set_thread_schedule", {
+      projectPath: daemon.projectPath,
+      threadId: thread.summary.id,
+      schedule: { prompt, runAt, repeatIntervalMs },
+    });
+    await orchestration.refreshThreads();
+  };
+
+  const handleCreateThreadWorktree = async () => {
+    if (!activeWorkspaceThread) return;
+    await invoke("agent_create_worktree", {
+      projectPath: activeWorkspaceThread.projectPath,
+      threadId: activeWorkspaceThread.id,
+    });
+    await orchestration.refreshThreads();
+  };
+
+  const handleMergeThreadWorktree = async () => {
+    const projectPath = daemon.projectPath;
+    const targetBranch = gitStatus?.branch;
+    if (!projectPath || !activeWorktreePath || !activeThreadBranch || !targetBranch) return;
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    if (
+      !(await ask(`Merge ${activeThreadBranch} into ${targetBranch}?`, {
+        title: "Merge thread worktree",
+        kind: "warning",
+      }))
+    )
+      return;
+    if (
+      currentProjectRef.current !== projectPath ||
+      Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+      Object.keys(failedSourceWrites).length > 0 ||
+      projectThreads.some(
+        (thread) => thread.status === "running" || thread.status === "waiting_input",
+      )
+    ) {
+      throw new Error("Wait for project saves and active agent turns to finish before merging");
+    }
+    try {
+      await invoke("git_merge_thread_worktree", {
+        dir: projectPath,
+        workspace: activeWorktreePath,
+        targetBranch,
+      });
+    } finally {
+      void daemon.refreshGitStatus();
+      void daemon.refreshFiles();
+    }
+  };
+
+  const handlePublishBranch = async (thread: ThreadSummary, commitMessage?: string) => {
+    const dir = thread.workspacePath ?? thread.projectPath;
+    if (commitMessage) await invoke("git_commit", { dir, message: commitMessage });
+    const url = await invoke<string>("git_open_branch_pull_request", { dir });
+    await refreshPullRequest(thread);
+    if (thread.workspacePath) await refreshWorktreeStatus();
+    else void daemon.refreshGitStatus();
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(url);
+  };
+
+  const handleRequestPullRequest = async (thread: ThreadSummary, status: GitStatus) => {
+    if (status.changes.some((change) => change.staged)) {
+      setPullRequestDraft(thread);
+      return;
+    }
+    if (status.changes.length) throw new Error("Stage changes from the Diff tab before committing");
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    if (
+      await ask(`Push ${status.branch} and open a pull request?`, { title: "Open pull request" })
+    ) {
+      await handlePublishBranch(thread);
+    }
+  };
+
+  const handleApplyRename = useCallback(
+    async (
+      node: FileNode,
+      newPath: string,
+      { updateReferences }: { updateReferences: boolean },
+    ) => {
+      const plan = renamePlanRef.current;
+      const projectPath = daemon.projectPath;
+      if (
+        !projectPath ||
+        (updateReferences &&
+          (!plan ||
+            plan.projectPath !== projectPath ||
+            plan.oldPath !== node.path ||
+            plan.newPath !== newPath))
+      ) {
+        throw new Error("Enter the name again to review updated references");
+      }
+      const updates = updateReferences ? plan?.updates : undefined;
+      const movedPath = (path: string) => {
+        if (pathsEqual(path, node.path)) return newPath;
+        if (
+          node.type === "directory" &&
+          path.length > node.path.length &&
+          pathsEqual(path.slice(0, node.path.length), node.path) &&
+          /[/\\]/.test(path[node.path.length] ?? "")
+        ) {
+          return pathSync.join(newPath, path.slice(node.path.length + 1));
+        }
+        return path;
+      };
+      const affected = (path: string) =>
+        movedPath(path) !== path ||
+        (updates?.some((update) => pathsEqual(update.path, path)) ?? false);
+      if (
+        [...Object.keys(failedSourceWrites), ...Object.values(pendingSourceWritesRef.current)].some(
+          (path) => path && affected(path),
+        )
+      ) {
+        throw new Error("Wait for the affected files to finish saving and try again");
+      }
+      shouldIgnoreRenameChangeRef.current = affected;
+      try {
+        await daemon.renamePath(node.path, newPath, updates);
+      } finally {
+        shouldIgnoreRenameChangeRef.current = null;
+      }
+      if (currentProjectRef.current !== projectPath) return;
+      renamePlanRef.current = null;
+      const records = texFiles.flatMap((oldPath) => {
+        const target = movedPath(oldPath);
+        return target === oldPath ? [] : [{ oldPath, newPath: target }];
+      });
+      setRecentRenames((previous) => [...records, ...previous].slice(0, 200));
+      const mainFile = latexSettings.settings.mainFile;
+      const nextMainFile = mainFile && movedPath(mainFile);
+      if (mainFile && movedPath(mainFile) !== mainFile) {
+        latexSettings.setMainFile(movedPath(mainFile));
+      }
+      setOpenTabs((tabs) => tabs.map(movedPath));
+      setSplitPane((pane) => {
+        if (!pane) return pane;
+        const current = pane.selectedFile;
+        const after = current && updates?.find((update) => pathsEqual(update.path, current))?.after;
+        const target = current && movedPath(current);
+        return {
+          ...pane,
+          openTabs: pane.openTabs.map(movedPath),
+          selectedFile: target,
+          content: after ?? pane.content,
+          binaryPreviewUrl:
+            target && target !== current && pane.binaryPreviewUrl
+              ? convertFileSrc(pathSync.join(projectPath, target))
+              : pane.binaryPreviewUrl,
+        };
+      });
+      const currentFile = selectedFileRef.current;
+      if (currentFile && affected(currentFile)) {
+        selectedFileRef.current = movedPath(currentFile);
+        await handleFileSelect(selectedFileRef.current);
+      }
+      if (nextMainFile && records.length && hasAnyCompiler) {
+        latexCompiler.scheduleAutoCompile({ directory: projectPath, mainFile: nextMainFile });
+      }
+    },
+    [
+      daemon.projectPath,
+      daemon.renamePath,
+      failedSourceWrites,
+      handleFileSelect,
+      hasAnyCompiler,
+      latexCompiler,
+      latexSettings,
+      texFiles,
+    ],
   );
 
   const handleStageAll = useCallback(() => {
@@ -2406,6 +2931,7 @@ export default function EditorPage() {
 
       // Command Palette: Cmd/Ctrl+K
       if (isMod && !e.shiftKey && key === "k") {
+        if (workspaceView === "agents" && !showHomeWorkspace && !showUsageDashboard) return;
         e.preventDefault();
         setShowCommandPalette((prev) => !prev);
         return;
@@ -2432,7 +2958,16 @@ export default function EditorPage() {
 
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-  }, [daemon, handleOpenFolder, selectedFile, handleCloseTab, handleCompileWithDetection]);
+  }, [
+    daemon,
+    handleOpenFolder,
+    selectedFile,
+    handleCloseTab,
+    handleCompileWithDetection,
+    workspaceView,
+    showHomeWorkspace,
+    showUsageDashboard,
+  ]);
 
   const handleCompileShortcut = useCallback(() => {
     void handleCompileWithDetection();
@@ -2494,10 +3029,14 @@ export default function EditorPage() {
     },
     [handleFileSelect],
   );
-  const handleAgentRunTerminalCommand = useCallback((cmd: string) => {
-    setShowTerminal(true);
-    setPendingTerminalCommand({ id: Date.now(), command: cmd });
-  }, []);
+  const handleAgentRunTerminalCommand = useCallback(
+    (cmd: string) => {
+      setWorkspaceView("write");
+      openBuildActivity("terminal");
+      setPendingTerminalCommand({ id: Date.now(), command: cmd });
+    },
+    [openBuildActivity],
+  );
   const handleOpenAgentSettings = useCallback(() => {
     setSettingsInitialTab("agents");
     setShowLatexSettings(true);
@@ -2603,6 +3142,28 @@ export default function EditorPage() {
         />
       )}
 
+      {selectedFile && /\.tex$/i.test(selectedFile) && !isShowingGitDiff && !binaryPreviewUrl && (
+        <div className="border-b border-border px-3 py-1">
+          <fieldset aria-label="Editing mode" className="inline-flex rounded-lg bg-sunken p-0.5">
+            <button
+              type="button"
+              className={`btn btn-sm btn-ghost ${!visualMode ? "bg-panel text-foreground-strong" : ""}`}
+              aria-pressed={!visualMode}
+              onClick={() => setVisualMode(false)}
+            >
+              Code
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm btn-ghost ${visualMode ? "bg-panel text-foreground-strong" : ""}`}
+              aria-pressed={visualMode}
+              onClick={() => setVisualMode(true)}
+            >
+              Visual
+            </button>
+          </fieldset>
+        </div>
+      )}
       {selectedFile ? (
         isShowingGitDiff ? (
           <div className="flex-1 min-h-0 flex flex-col">
@@ -2685,32 +3246,41 @@ export default function EditorPage() {
             className="flex-1 min-h-0"
           >
             <EditorErrorBoundary>
-              <MonacoEditor
-                content={fileContent}
-                readOnly={false}
-                onContentChange={handleContentChange}
-                language={getFileLanguage(selectedFile)}
-                filePath={selectedFile}
-                attributedEdits={attributedEdits.filter(
-                  (edit) =>
-                    edit.status !== "rejected" &&
-                    edit.filePath === selectedFile &&
-                    edit.after === fileContent,
-                )}
-                onKeepEdit={keepAttributedEdit}
-                onUndoEdit={undoAttributedEdit}
-                diagnostics={activeFileDiagnostics}
-                bibEntries={bibEntries}
-                texLabels={texLabels}
-                onCompileShortcut={handleCompileShortcut}
-                onForwardSync={handleEditorForwardSync}
-                onAskAgent={handleAskAgentSelection}
-                onCursorChange={setCursorPosition}
-                editorSettings={editorSettings.settings}
-                editorTheme={editorSettings.editorTheme}
-                goToLine={pendingGoToLine}
-                className="h-full"
-              />
+              {visualMode && /\.tex$/i.test(selectedFile) ? (
+                <VisualEditor
+                  value={fileContent}
+                  onChange={handleContentChange}
+                  filePath={selectedFile}
+                  className="h-full"
+                />
+              ) : (
+                <MonacoEditor
+                  content={fileContent}
+                  readOnly={false}
+                  onContentChange={handleContentChange}
+                  language={getFileLanguage(selectedFile)}
+                  filePath={selectedFile}
+                  attributedEdits={attributedEdits.filter(
+                    (edit) =>
+                      edit.status !== "rejected" &&
+                      edit.filePath === selectedFile &&
+                      edit.after === fileContent,
+                  )}
+                  onKeepEdit={keepAttributedEdit}
+                  onUndoEdit={undoAttributedEdit}
+                  diagnostics={activeFileDiagnostics}
+                  bibEntries={bibEntries}
+                  texLabels={texLabels}
+                  onCompileShortcut={handleCompileShortcut}
+                  onForwardSync={handleEditorForwardSync}
+                  onAskAgent={handleAskAgentSelection}
+                  onCursorChange={setCursorPosition}
+                  editorSettings={editorSettings.settings}
+                  editorTheme={editorSettings.editorTheme}
+                  goToLine={pendingGoToLine}
+                  className="h-full"
+                />
+              )}
             </EditorErrorBoundary>
           </motion.div>
         )
@@ -2762,6 +3332,11 @@ export default function EditorPage() {
     UI_PALETTES.find((p) => p.id === editorSettings.settings.uiPalette) ?? UI_PALETTES[0];
 
   const effectiveRightPanelWidth = agentExpanded ? Math.max(rightPanelWidth, 520) : rightPanelWidth;
+  const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
+    setShowHomeWorkspace(false);
+    setShowUsageDashboard(false);
+    setWorkspaceView(view);
+  };
 
   return (
     <div className="h-dvh flex flex-col bg-bg text-foreground">
@@ -2835,7 +3410,7 @@ export default function EditorPage() {
               const nextView = WORKSPACE_VIEWS[nextIndex];
               if (!nextView) return;
               event.preventDefault();
-              setWorkspaceView(nextView);
+              activateWorkspaceTab(nextView);
               document.getElementById(`workspace-tab-${nextView}`)?.focus();
             }}
             className="inline-flex items-center bg-sunken rounded-lg p-0.5 gap-0.5 shrink-0"
@@ -2847,7 +3422,7 @@ export default function EditorPage() {
               aria-controls="workspace-panel-write"
               tabIndex={workspaceView === "write" ? 0 : -1}
               aria-selected={workspaceView === "write"}
-              onClick={() => setWorkspaceView("write")}
+              onClick={() => activateWorkspaceTab("write")}
               className={`px-3 py-1 rounded-md text-[12.5px] transition-colors ${
                 workspaceView === "write"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs"
@@ -2863,7 +3438,7 @@ export default function EditorPage() {
               aria-controls={workspaceView === "agents" ? "workspace-panel-agents" : undefined}
               tabIndex={workspaceView === "agents" ? 0 : -1}
               aria-selected={workspaceView === "agents"}
-              onClick={() => setWorkspaceView("agents")}
+              onClick={() => activateWorkspaceTab("agents")}
               className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
                 workspaceView === "agents"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs"
@@ -2884,7 +3459,7 @@ export default function EditorPage() {
               aria-controls={workspaceView === "history" ? "workspace-panel-history" : undefined}
               tabIndex={workspaceView === "history" ? 0 : -1}
               aria-selected={workspaceView === "history"}
-              onClick={() => setWorkspaceView("history")}
+              onClick={() => activateWorkspaceTab("history")}
               className={`px-3 py-1 rounded-md text-[12.5px] inline-flex items-center gap-1.5 transition-colors ${
                 workspaceView === "history"
                   ? "bg-panel text-foreground-strong font-medium shadow-xs"
@@ -2905,6 +3480,27 @@ export default function EditorPage() {
 
         {/* Right: Live Voice/Status + Panel Toggles */}
         <div className="flex items-center justify-end gap-1.5 flex-1 shrink-0">
+          {daemon.projectPath && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              aria-pressed={showHomeWorkspace && !showUsageDashboard}
+              onClick={() => {
+                setShowUsageDashboard(false);
+                setShowHomeWorkspace((open) => !open);
+              }}
+            >
+              Home
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            aria-pressed={showUsageDashboard}
+            onClick={() => setShowUsageDashboard((open) => !open)}
+          >
+            Usage
+          </button>
           {daemon.projectPath && projectThreads.length > 0 && (
             <div className="hidden lg:flex items-center gap-1.5 mr-1 text-[12px] text-muted">
               {Array.from(
@@ -3027,7 +3623,7 @@ export default function EditorPage() {
 
               <button
                 type="button"
-                onClick={() => setShowTerminal((prev) => !prev)}
+                onClick={toggleTerminal}
                 className={`size-7 rounded-md inline-flex items-center justify-center transition-colors ${
                   showTerminal
                     ? "bg-accent-soft text-accent"
@@ -3131,6 +3727,39 @@ export default function EditorPage() {
 
       {/* Main Workspace Area: Rail on Warm Paper + White Inset Frames */}
       <main className="flex-1 min-h-0 flex relative overflow-hidden px-2 pb-2 gap-2">
+        {showUsageDashboard ? (
+          <div className="min-w-0 flex-1 overflow-auto">
+            <UsageDashboard
+              providers={agent.providers}
+              currentProjectPath={daemon.projectPath}
+              recentProjects={recentProjects.projects}
+              threadTitles={Object.fromEntries(
+                orchestration.threads.map((thread) => [thread.id, thread.title]),
+              )}
+              onClose={() => setShowUsageDashboard(false)}
+            />
+          </div>
+        ) : !daemon.projectPath || showHomeWorkspace ? (
+          <div className="min-w-0 flex-1">
+            <HomeWorkspace
+              recentProjects={recentProjects.projects}
+              threadCounts={threadCountsByProject}
+              compilersStatus={latexCompiler.compilersStatus}
+              providers={agent.providers}
+              providersLoading={agent.loadingProviders}
+              onOpenProject={handleOpenRecentProject}
+              onRemoveProject={recentProjects.removeProject}
+              onClearProjects={recentProjects.clearAll}
+              onOpenFolder={handleOpenFolder}
+              onNewProject={() => void handleNewLatexProject()}
+              onCloneFromGit={() => setShowCloneDialog(true)}
+              onRefreshCompilers={latexCompiler.detectCompilers}
+              onRefreshProviders={agent.refreshProviders}
+              onRefreshRateLimits={agent.refreshRateLimits}
+              onOpenAgentSettings={handleOpenAgentSettings}
+            />
+          </div>
+        ) : null}
         <div
           id="workspace-panel-write"
           {...(daemon.projectPath && {
@@ -3138,43 +3767,15 @@ export default function EditorPage() {
             "aria-labelledby": "workspace-tab-write",
           })}
           className={
-            workspaceView === "write"
+            workspaceView === "write" &&
+            daemon.projectPath &&
+            !showUsageDashboard &&
+            !showHomeWorkspace
               ? "flex-1 min-w-0 min-h-0 flex relative overflow-hidden gap-2"
               : "hidden"
           }
         >
-          {/* Overleaf-style Project Sidebar (or Home Rail when no project is open) */}
-          {!daemon.projectPath ? (
-            <aside className="hidden md:flex w-[224px] flex-col shrink-0 justify-between px-1 pb-1">
-              <div className="space-y-4 pt-1 min-h-0 overflow-y-auto mb-3">
-                <div className="space-y-1">
-                  <button
-                    type="button"
-                    onClick={handleOpenFolder}
-                    className="w-full h-9 px-3 rounded-lg bg-accent-soft text-accent font-medium text-[13px] flex items-center gap-2.5 text-left transition-colors"
-                  >
-                    <FolderOpenIcon className="size-4 shrink-0" />
-                    <span>Open folder</span>
-                  </button>
-                </div>
-
-                <RecentProjects
-                  projects={recentProjects.projects}
-                  onSelect={handleOpenRecentProject}
-                  onRemove={recentProjects.removeProject}
-                  onClearAll={recentProjects.clearAll}
-                />
-              </div>
-
-              <AgentStatusCard
-                providers={agent.providers}
-                loading={agent.loadingProviders}
-                onRefreshProviders={agent.refreshProviders}
-                onRefreshRateLimits={agent.refreshRateLimits}
-                onOpenSettings={handleOpenAgentSettings}
-              />
-            </aside>
-          ) : (
+          {daemon.projectPath && (
             <AnimatePresence mode="wait">
               {showSidebar && (
                 <motion.div
@@ -3213,6 +3814,13 @@ export default function EditorPage() {
                           onCreateDirectory={() => setCreateDialog({ type: "directory" })}
                           onRefreshFiles={daemon.refreshFiles}
                           fileVoiceDots={fileVoiceDots}
+                          onPlanRename={handlePlanRename}
+                          onApplyRename={handleApplyRename}
+                          onSetMainFile={(node) => void latexSettings.setMainFile(node.path)}
+                          onAskAgentOpening={(node) => {
+                            setShowRightPanel(true);
+                            setAgentDraftInjection({ id: Date.now(), text: `@${node.path} ` });
+                          }}
                           fileOperations={{
                             createFile: daemon.createFile,
                             createDirectory: daemon.createDirectory,
@@ -3391,61 +3999,19 @@ export default function EditorPage() {
                   </div>
                 ) : (
                   <div className="flex-1 min-h-0 overflow-y-auto relative ox-home-grid">
-                    {daemon.projectPath ? (
-                      <div className="h-full flex flex-col items-center justify-center text-center px-6 space-y-2 relative z-10">
-                        <div className="text-[15px] font-semibold text-foreground-strong">
-                          No file open
-                        </div>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => setShowCommandPalette(true)}
-                        >
-                          <MagnifyingGlassIcon className="size-4" />
-                          Find a file
-                        </button>
+                    <div className="h-full flex flex-col items-center justify-center text-center px-6 space-y-2 relative z-10">
+                      <div className="text-[15px] font-semibold text-foreground-strong">
+                        No file open
                       </div>
-                    ) : (
-                      <div className="min-h-full flex flex-col items-center justify-center px-6 py-12 relative z-10 space-y-10">
-                        <div className="flex flex-col items-center text-center space-y-5 max-w-xl w-full">
-                          <h1 className="font-display text-3xl sm:text-[36px] font-semibold tracking-tight text-foreground-strong leading-tight">
-                            What are we writing today?
-                          </h1>
-
-                          <div className="flex flex-wrap items-center justify-center gap-2.5">
-                            <button
-                              type="button"
-                              onClick={handleOpenFolder}
-                              className="btn btn-primary h-10 px-5 rounded-full text-[13.5px]"
-                            >
-                              <FolderOpenIcon className="size-4" />
-                              <span>Open paper folder</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSettingsInitialTab("agents");
-                                setShowLatexSettings(true);
-                              }}
-                              className="btn btn-secondary h-10 px-4 rounded-full text-[13px]"
-                            >
-                              <GearIcon className="size-4 text-muted" />
-                              <span>Agent settings</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="w-full max-w-md md:hidden">
-                          <RecentProjects
-                            projects={recentProjects.projects}
-                            onSelect={handleOpenRecentProject}
-                            onRemove={recentProjects.removeProject}
-                            onClearAll={recentProjects.clearAll}
-                          />
-                        </div>
-                      </div>
-                    )}
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setShowCommandPalette(true)}
+                      >
+                        <MagnifyingGlassIcon className="size-4" />
+                        Find a file
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -3513,6 +4079,7 @@ export default function EditorPage() {
                       onSynctexClick={handleLivePreviewSynctexClick}
                       onJumpToDiagnostic={handleJumpToDiagnostic}
                       onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
+                      onOpenBuildActivity={openBuildActivity}
                       onClose={handleCloseLivePreview}
                     />
                   </div>
@@ -3530,27 +4097,130 @@ export default function EditorPage() {
                 </div>
               )}
 
-            <TerminalPanel
-              projectPath={daemon.projectPath}
-              open={showTerminal}
-              shellMode={editorSettings.settings.terminalShellMode}
-              customShell={editorSettings.settings.terminalShellPath}
-              fontFamily={editorSettings.settings.terminalFontFamily}
-              fontSize={editorSettings.settings.terminalFontSize}
-              lineHeight={editorSettings.settings.terminalLineHeight}
-              prefersReducedMotion={Boolean(prefersReducedMotion)}
-              onClose={() => setShowTerminal(false)}
-              pendingCommand={pendingTerminalCommand}
-              onPendingCommandSent={() => setPendingTerminalCommand(null)}
-            />
+            {Object.entries(failedSourceWrites).map(([path, content]) => (
+              <div
+                key={path}
+                className="flex items-center justify-between gap-2 rounded border border-error bg-error-bg px-3 py-1 text-xs text-error"
+              >
+                <span role="status">
+                  Could not save <span className="font-mono">{path}</span>
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => void retrySourceSave(path, content)}
+                >
+                  Retry save
+                </button>
+              </div>
+            ))}
+            {daemon.projectPath && (
+              <BuildActivityDrawer
+                activeTab={buildActivityTab}
+                onChange={openBuildActivity}
+                collapsed={buildActivityCollapsed}
+                onToggle={() => setBuildActivityCollapsed((p) => !p)}
+                scorePanel={
+                  <ScoreDrawer
+                    lanes={score.lanes}
+                    start={score.start}
+                    end={score.end}
+                    onMark={(mark: ScoreMark) => {
+                      if (mark.kind === "compile") {
+                        openBuildActivity("build-log");
+                        return;
+                      }
+                      const path = mark.filePath
+                        ? projectRelativePath(mark.projectPath, mark.filePath)
+                        : null;
+                      if (path) {
+                        handleAgentFileClick(path);
+                      }
+                      if (mark.threadId) {
+                        void agent.loadThread(mark.threadId);
+                        setShowRightPanel(true);
+                      }
+                    }}
+                  />
+                }
+                terminalPanel={
+                  <TerminalPanel
+                    embedded
+                    projectPath={daemon.projectPath}
+                    open={terminalMounted}
+                    shellMode={editorSettings.settings.terminalShellMode}
+                    customShell={editorSettings.settings.terminalShellPath}
+                    fontFamily={editorSettings.settings.terminalFontFamily}
+                    fontSize={editorSettings.settings.terminalFontSize}
+                    lineHeight={editorSettings.settings.terminalLineHeight}
+                    prefersReducedMotion={Boolean(prefersReducedMotion)}
+                    onClose={() => setBuildActivityCollapsed(true)}
+                    pendingCommand={pendingTerminalCommand}
+                    onPendingCommandSent={() => setPendingTerminalCommand(null)}
+                  />
+                }
+                diagnostics={latexCompiler.diagnostics}
+                log={latexCompiler.compileLog}
+                onJumpToDiagnostic={handleJumpToDiagnostic}
+                onFixDiagnostics={handleFixDiagnosticsWithAi}
+                fixLabel={
+                  agent.activeProviderStatus
+                    ? `Fix with ${agent.activeProviderStatus.name}`
+                    : undefined
+                }
+                diagnosticSuggestion={(diagnostic) => {
+                  const file = projectRelativePath(daemon.projectPath ?? "", diagnostic.file);
+                  const isCurrentFile = file === selectedFile;
+                  const suggestion = findMissingFileSuggestion({
+                    diagnostic,
+                    projectFiles: texFiles,
+                    projectRoot: daemon.projectPath ?? undefined,
+                    sourceContent: isCurrentFile ? fileContent : undefined,
+                    recentRenames,
+                  });
+                  if (!suggestion) return null;
+                  const { startOffset, endOffset, before, after } = suggestion;
+                  const action =
+                    isCurrentFile &&
+                    startOffset !== undefined &&
+                    endOffset !== undefined &&
+                    before !== undefined &&
+                    after !== undefined &&
+                    fileContent.slice(startOffset, endOffset) === before
+                      ? () =>
+                          handleContentChange(
+                            fileContent.slice(0, startOffset) +
+                              after +
+                              fileContent.slice(endOffset),
+                          )
+                      : () => handleJumpToDiagnostic(diagnostic);
+                  return (
+                    <button type="button" className="btn btn-ghost btn-sm mt-1" onClick={action}>
+                      Did you mean <span className="font-mono">{suggestion.suggestedArg}</span>?
+                    </button>
+                  );
+                }}
+              />
+            )}
           </div>
         </div>
 
         {/* Single persistent AgentPanel across Write (docked), Agents (full), and History (hidden) */}
         {(() => {
-          const isAgentsView = Boolean(daemon.projectPath && workspaceView === "agents");
-          const isDockedVisible = workspaceView === "write" && showRightPanel;
+          const isAgentsView = Boolean(
+            daemon.projectPath &&
+              workspaceView === "agents" &&
+              !showUsageDashboard &&
+              !showHomeWorkspace,
+          );
+          const isDockedVisible =
+            workspaceView === "write" &&
+            showRightPanel &&
+            !showUsageDashboard &&
+            !showHomeWorkspace;
           const isVisible = isAgentsView || isDockedVisible;
+          const inspectorGitStatus = activeWorktreePath ? worktreeGitStatus : gitStatus;
+          const checkoutPath = activeWorktreePath ?? daemon.projectPath;
 
           return (
             <div
@@ -3559,7 +4229,7 @@ export default function EditorPage() {
               aria-hidden={!isVisible}
               className={
                 isAgentsView
-                  ? "ox-frame flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+                  ? "flex-1 min-w-0 min-h-0 flex gap-2 overflow-hidden"
                   : isDockedVisible
                     ? "flex flex-shrink-0 overflow-hidden max-[1100px]:absolute max-[1100px]:inset-y-0 max-[1100px]:right-2 max-[1100px]:bottom-2 max-[1100px]:z-20"
                     : "hidden"
@@ -3575,6 +4245,27 @@ export default function EditorPage() {
                   : undefined
               }
             >
+              {isAgentsView && (
+                <div className="w-[clamp(10rem,22vw,17rem)] shrink-0 overflow-hidden">
+                  <OrchestrationSidebar
+                    threads={orchestration.threads}
+                    activeThreadId={activeWorkspaceThread?.id}
+                    activeProjectPath={daemon.projectPath}
+                    prByThreadId={orchestration.pullRequests}
+                    onOpenThread={(thread) =>
+                      void handleOpenOrchestrationThread(thread).catch((error: unknown) =>
+                        toast(String(error), "error"),
+                      )
+                    }
+                    onNewThread={() =>
+                      void agent
+                        .createThread()
+                        .catch((error: unknown) => toast(String(error), "error"))
+                    }
+                    onOpenUsage={() => setShowUsageDashboard(true)}
+                  />
+                </div>
+              )}
               {isDockedVisible && (
                 <div className="relative group w-1.5 flex-shrink-0 mr-0.5">
                   <motion.div
@@ -3609,7 +4300,7 @@ export default function EditorPage() {
                 }
                 className={
                   isAgentsView
-                    ? "flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+                    ? "ox-frame flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
                     : "ox-frame flex flex-col flex-shrink-0 max-[1100px]:shadow-md"
                 }
               >
@@ -3636,7 +4327,11 @@ export default function EditorPage() {
                         : handleAgentFileClick
                     }
                     onRunTerminalCommand={handleAgentRunTerminalCommand}
+                    onApproveInteraction={score.approveWait}
                     onOpenAgentSettings={handleOpenAgentSettings}
+                    onOpenWorkspace={
+                      daemon.projectPath ? () => setWorkspaceView("agents") : undefined
+                    }
                     isExpanded={isAgentsView ? true : agentExpanded}
                     onToggleExpand={
                       isAgentsView
@@ -3647,100 +4342,264 @@ export default function EditorPage() {
                   />
                 </AgentErrorBoundary>
               </aside>
+              {isAgentsView && (
+                <div className="w-[clamp(11rem,25vw,20rem)] shrink-0 overflow-hidden">
+                  <ProjectInspector
+                    key={activeWorkspaceThread?.id ?? daemon.projectPath}
+                    projectPath={daemon.projectPath}
+                    workspacePath={activeWorktreePath}
+                    workspaceBranch={activeThreadBranch}
+                    gitStatus={inspectorGitStatus?.isRepo ? inspectorGitStatus : null}
+                    branchPr={
+                      activeWorkspaceThread
+                        ? orchestration.pullRequests[activeWorkspaceThread.id]
+                        : null
+                    }
+                    activeThread={activeWorkspaceThread}
+                    threads={orchestration.threads}
+                    error={orchestration.error}
+                    onOpenThread={(thread) =>
+                      void handleOpenOrchestrationThread(thread).catch((error: unknown) =>
+                        toast(String(error), "error"),
+                      )
+                    }
+                    onDelegate={activeWorkspaceThread ? handleDelegateTask : undefined}
+                    onSchedule={handleScheduleThread}
+                    onCancelSchedule={
+                      activeWorkspaceThread?.schedule
+                        ? async () => {
+                            await invoke("agent_set_thread_schedule", {
+                              projectPath: activeWorkspaceThread.projectPath,
+                              threadId: activeWorkspaceThread.id,
+                              schedule: null,
+                            });
+                          }
+                        : undefined
+                    }
+                    onCreateWorktree={
+                      gitStatus?.hasCommits &&
+                      activeWorkspaceThread &&
+                      !activeWorktreePath &&
+                      !activeWorkspaceThread.providerSessionId &&
+                      activeWorkspaceThread.messageCount === 0
+                        ? handleCreateThreadWorktree
+                        : undefined
+                    }
+                    onMergeWorktree={
+                      activeWorktreePath && gitStatus?.branch
+                        ? handleMergeThreadWorktree
+                        : undefined
+                    }
+                    onCommitAndPr={
+                      inspectorGitStatus?.remote && activeWorkspaceThread
+                        ? () => handleRequestPullRequest(activeWorkspaceThread, inspectorGitStatus)
+                        : undefined
+                    }
+                    onReviewChanges={
+                      !activeWorktreePath && gitStatus?.isRepo
+                        ? () => setWorkspaceView("history")
+                        : undefined
+                    }
+                    onPull={!activeWorktreePath && gitStatus?.remote ? handleGitPull : undefined}
+                    onPush={!activeWorktreePath && gitStatus?.remote ? handleGitPush : undefined}
+                    diffPanel={
+                      checkoutPath && inspectorGitStatus?.isRepo ? (
+                        <WorkspaceChanges
+                          key={checkoutPath}
+                          directory={checkoutPath}
+                          status={inspectorGitStatus}
+                          onChanged={
+                            activeWorktreePath ? refreshWorktreeStatus : daemon.refreshGitStatus
+                          }
+                        />
+                      ) : undefined
+                    }
+                    pdfPanel={
+                      !activeWorktreePath && latexCompiler.pdfPath ? (
+                        <PdfViewer
+                          src={convertFileSrc(latexCompiler.pdfPath)}
+                          refreshKey={latexCompiler.pdfVersion}
+                        />
+                      ) : undefined
+                    }
+                    terminalPanel={
+                      <TerminalPanel
+                        embedded
+                        open
+                        projectPath={activeWorktreePath ?? daemon.projectPath}
+                        shellMode={editorSettings.settings.terminalShellMode}
+                        customShell={editorSettings.settings.terminalShellPath}
+                        fontFamily={editorSettings.settings.terminalFontFamily}
+                        fontSize={editorSettings.settings.terminalFontSize}
+                        lineHeight={editorSettings.settings.terminalLineHeight}
+                        prefersReducedMotion={Boolean(prefersReducedMotion)}
+                        onClose={() => setWorkspaceView("write")}
+                      />
+                    }
+                  />
+                </div>
+              )}
             </div>
           );
         })()}
 
-        {daemon.projectPath && workspaceView === "history" && (
-          <div
-            id="workspace-panel-history"
-            aria-labelledby="workspace-tab-history"
-            role="tabpanel"
-            className="ox-frame flex-1 min-w-0 min-h-0 flex overflow-hidden"
-          >
-            <div className="w-80 shrink-0 border-r border-border flex flex-col min-h-0 overflow-hidden">
-              <GitSidebarPanel
-                projectPath={daemon.projectPath}
-                gitStatus={gitStatus}
-                gitGraph={daemon.gitGraph}
-                gitLogEntries={daemon.gitLogEntries}
-                stagedChanges={stagedChanges}
-                unstagedChanges={unstagedChanges}
-                showRemoteInput={showRemoteInput}
-                remoteUrl={remoteUrl}
-                onRemoteUrlChange={(value) => setRemoteUrl(value)}
-                onShowRemoteInput={() => setShowRemoteInput(true)}
-                onHideRemoteInput={() => setShowRemoteInput(false)}
-                onSubmitRemote={handleRemoteSubmit}
-                onInitGit={daemon.gitInit}
-                isInitializingGit={daemon.isInitializingGit}
-                onRefreshStatus={handleRefreshGitStatus}
-                onStageAll={handleStageAll}
-                onDiscardAll={handleDiscardAll}
-                onDiscardFile={handleDiscardFile}
-                onStageFile={handleStageFile}
-                onUnstageFile={handleUnstageFile}
-                onUnstageAll={handleUnstageAll}
-                showCommitInput={showCommitInput}
-                commitMessage={commitMessage}
-                onCommitMessageChange={(value) => setCommitMessage(value)}
-                onShowCommitInput={() => setShowCommitInput(true)}
-                onHideCommitInput={() => setShowCommitInput(false)}
-                onCommit={handleCommit}
-                onPush={handleGitPush}
-                onPull={handleGitPull}
-                onPreviewDiff={handlePreviewHistoryDiff}
-                onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
-                onOpenFile={(path) => {
-                  setWorkspaceView("write");
-                  void handleFileSelect(path);
+        {daemon.projectPath &&
+          workspaceView === "history" &&
+          !showUsageDashboard &&
+          !showHomeWorkspace && (
+            <div
+              id="workspace-panel-history"
+              aria-labelledby="workspace-tab-history"
+              role="tabpanel"
+              className="flex-1 min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden"
+            >
+              {activeWorktreePath && (
+                <label className="flex items-center gap-2 text-xs text-muted">
+                  Checkout
+                  <select
+                    className="rounded border border-border bg-panel px-2 py-1 text-foreground"
+                    value={showThreadHistory ? "worktree" : "main"}
+                    onChange={(event) => setShowThreadHistory(event.target.value === "worktree")}
+                  >
+                    <option value="main">Project</option>
+                    <option value="worktree">{activeThreadBranch ?? "Thread worktree"}</option>
+                  </select>
+                </label>
+              )}
+              <HistoryWorkspace
+                key={
+                  showThreadHistory && activeWorktreePath ? activeWorktreePath : daemon.projectPath
+                }
+                className="flex-1"
+                projectDir={
+                  showThreadHistory && activeWorktreePath ? activeWorktreePath : daemon.projectPath
+                }
+                onOpenThread={(id) => {
+                  const thread = orchestration.threads.find((item) => item.id === id);
+                  if (thread)
+                    void handleOpenOrchestrationThread(thread).catch((error: unknown) =>
+                      toast(String(error), "error"),
+                    );
                 }}
-                onPublishToGitHub={handlePublishToGitHub}
-                isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
-                isPushing={daemon.isPushing}
-                isPulling={daemon.isPulling}
-                isAuthenticatingGh={daemon.isAuthenticatingGh}
+                beforeMutation={() => {
+                  const checkout =
+                    showThreadHistory && activeWorktreePath
+                      ? activeWorktreePath
+                      : daemon.projectPath;
+                  if (
+                    checkout === daemon.projectPath &&
+                    (Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+                      Object.keys(failedSourceWrites).length)
+                  ) {
+                    throw new Error("Wait for the editor to finish saving");
+                  }
+                  if (
+                    projectThreads.some(
+                      (thread) =>
+                        (thread.workspacePath ?? thread.projectPath) === checkout &&
+                        (thread.status === "running" || thread.status === "waiting_input"),
+                    )
+                  ) {
+                    throw new Error("Wait for active agent turns in this checkout to finish");
+                  }
+                }}
+                onFilesChanged={() => {
+                  if (!showThreadHistory || !activeWorktreePath) {
+                    void daemon.refreshFiles();
+                    void daemon.refreshGitStatus();
+                  } else {
+                    void refreshWorktreeStatus().catch((error: unknown) =>
+                      toast(String(error), "error"),
+                    );
+                  }
+                }}
+                gitSidebarPanel={
+                  showThreadHistory && activeWorktreePath ? undefined : (
+                    <GitSidebarPanel
+                      projectPath={daemon.projectPath}
+                      gitStatus={gitStatus}
+                      gitGraph={daemon.gitGraph}
+                      gitLogEntries={daemon.gitLogEntries}
+                      stagedChanges={stagedChanges}
+                      unstagedChanges={unstagedChanges}
+                      showRemoteInput={showRemoteInput}
+                      remoteUrl={remoteUrl}
+                      onRemoteUrlChange={(value) => setRemoteUrl(value)}
+                      onShowRemoteInput={() => setShowRemoteInput(true)}
+                      onHideRemoteInput={() => setShowRemoteInput(false)}
+                      onSubmitRemote={handleRemoteSubmit}
+                      onInitGit={daemon.gitInit}
+                      isInitializingGit={daemon.isInitializingGit}
+                      onRefreshStatus={handleRefreshGitStatus}
+                      onStageAll={handleStageAll}
+                      onDiscardAll={handleDiscardAll}
+                      onDiscardFile={handleDiscardFile}
+                      onStageFile={handleStageFile}
+                      onUnstageFile={handleUnstageFile}
+                      onUnstageAll={handleUnstageAll}
+                      showCommitInput={showCommitInput}
+                      commitMessage={commitMessage}
+                      onCommitMessageChange={(value) => setCommitMessage(value)}
+                      onShowCommitInput={() => setShowCommitInput(true)}
+                      onHideCommitInput={() => setShowCommitInput(false)}
+                      onCommit={handleCommit}
+                      onPush={handleGitPush}
+                      onPull={handleGitPull}
+                      onPreviewDiff={handlePreviewHistoryDiff}
+                      onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
+                      onOpenFile={(path) => {
+                        setWorkspaceView("write");
+                        void handleFileSelect(path);
+                      }}
+                      onPublishToGitHub={handlePublishToGitHub}
+                      isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
+                      isPushing={daemon.isPushing}
+                      isPulling={daemon.isPulling}
+                      isAuthenticatingGh={daemon.isAuthenticatingGh}
+                    />
+                  )
+                }
+                commitDiffPanel={
+                  <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-panel">
+                    {historyDiffPreview ? (
+                      <>
+                        <div className="h-10 px-4 border-b border-border flex items-center justify-between gap-2 shrink-0">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span className="text-[12.5px] font-mono font-medium truncate">
+                              {historyDiffPreview.path}
+                            </span>
+                            <span className="text-[11px] text-muted">
+                              {historyDiffPreview.staged ? "Staged" : "Working tree"}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setWorkspaceView("write");
+                              void handleFileSelect(historyDiffPreview.path);
+                            }}
+                            className="btn btn-secondary btn-sm h-7 px-2.5 text-[11.5px]"
+                          >
+                            Open in Write
+                          </button>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                          {renderGitDiffContent(historyDiffPreview, parsedHistoryDiff)}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-xs text-muted">
+                        Select a changed file to inspect its diff.
+                      </div>
+                    )}
+                  </div>
+                }
               />
             </div>
-
-            <div className="flex-1 min-w-0 min-h-0 flex flex-col bg-panel">
-              {historyDiffPreview ? (
-                <>
-                  <div className="h-10 px-4 border-b border-border flex items-center justify-between gap-2 shrink-0">
-                    <div className="min-w-0 flex items-center gap-2">
-                      <span className="text-[12.5px] font-mono font-medium truncate">
-                        {historyDiffPreview.path}
-                      </span>
-                      <span className="text-[11px] text-muted">
-                        {historyDiffPreview.staged ? "Staged" : "Working tree"}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setWorkspaceView("write");
-                        void handleFileSelect(historyDiffPreview.path);
-                      }}
-                      className="btn btn-secondary btn-sm h-7 px-2.5 text-[11.5px]"
-                    >
-                      Open in Write
-                    </button>
-                  </div>
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    {renderGitDiffContent(historyDiffPreview, parsedHistoryDiff)}
-                  </div>
-                </>
-              ) : (
-                <div className="h-full flex items-center justify-center text-xs text-muted">
-                  Select a changed file to inspect its diff.
-                </div>
-              )}
-            </div>
-          </div>
-        )}
+          )}
       </main>
 
-      {daemon.projectPath && (
+      {daemon.projectPath && !showUsageDashboard && !showHomeWorkspace && (
         <StatusBar
           gitStatus={gitStatus}
           compileStatus={latexCompiler.compileStatus}
@@ -3789,13 +4648,38 @@ export default function EditorPage() {
         onToggleSidebar={() => setShowSidebar((p) => !p)}
         onTogglePdf={() => setShowLivePreview((p) => !p)}
         onToggleAgent={handleToggleRightPanel}
-        onToggleTerminal={() => setShowTerminal((p) => !p)}
+        onToggleTerminal={toggleTerminal}
         onOpenSettings={() => {
           setSettingsInitialTab("editor");
           setShowLatexSettings(true);
         }}
         onCyclePalette={handleCyclePalette}
       />
+
+      {showCloneDialog && (
+        <InputDialog
+          title="Clone from Git"
+          placeholder="Repository URL"
+          onConfirm={(url) => void handleCloneProject(url)}
+          onCancel={() => setShowCloneDialog(false)}
+          validator={(url) => (url.trim() ? null : "Enter a repository URL")}
+        />
+      )}
+
+      {pullRequestDraft && (
+        <InputDialog
+          title="Commit staged changes and open a pull request"
+          placeholder="Commit message"
+          onConfirm={(message) => {
+            setPullRequestDraft(null);
+            void handlePublishBranch(pullRequestDraft, message.trim()).catch((error: unknown) =>
+              toast(String(error), "error"),
+            );
+          }}
+          onCancel={() => setPullRequestDraft(null)}
+          validator={(message) => (message.trim() ? null : "Enter a commit message")}
+        />
+      )}
 
       {createDialog && (
         <InputDialog

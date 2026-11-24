@@ -13,11 +13,9 @@ import {
   useRef,
   useState,
 } from "react";
-import type { NodeRendererProps, TreeApi } from "react-arborist";
+import type { NodeApi, NodeRendererProps, TreeApi } from "react-arborist";
 import { Tree } from "react-arborist";
 import { createPortal } from "react-dom";
-import type { AgentProviderId } from "@/lib/agent/types";
-import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { pathSync } from "@/lib/path";
 
 async function runCommand(cmd: string, args: string[]): Promise<boolean> {
@@ -126,6 +124,8 @@ import {
   TrashIcon,
   VideoCameraIcon,
 } from "@phosphor-icons/react";
+import type { AgentProviderId } from "@/lib/agent/types";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { ConfirmDialog } from "../ui/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "../ui/context-menu";
 import { InputDialog } from "../ui/input-dialog";
@@ -133,7 +133,11 @@ import { InputDialog } from "../ui/input-dialog";
 export interface FileOperations {
   createFile: (path: string) => Promise<void>;
   createDirectory: (path: string) => Promise<void>;
-  renamePath: (oldPath: string, newPath: string) => Promise<void>;
+  renamePath: (
+    oldPath: string,
+    newPath: string,
+    referenceUpdates?: Array<{ path: string; before: string; after: string }>,
+  ) => Promise<void>;
   deletePath: (path: string) => Promise<void>;
 }
 
@@ -153,7 +157,24 @@ type Props = {
   projectPath?: string;
   onRefresh?: () => void;
   fileVoiceDots?: Record<string, FileVoiceDot[]>;
+  onPlanRename?: (node: FileNode, newPath: string) => Promise<number>;
+  onApplyRename?: (
+    node: FileNode,
+    newPath: string,
+    options: { updateReferences: boolean },
+  ) => Promise<void>;
+  onSetMainFile?: (node: FileNode) => void;
+  onAskAgentOpening?: (node: FileNode) => void;
 };
+
+interface InlineRenameState {
+  node: FileNode;
+  draftName: string;
+  status: "editing" | "planning" | "confirm-refs" | "applying";
+  referenceCount: number;
+  pendingNewPath: string | null;
+  error: string | null;
+}
 
 interface ContextMenuState {
   x: number;
@@ -362,22 +383,6 @@ interface DragState {
   mouseY: number;
 }
 
-interface FileTreeContextValue {
-  selectedFile?: string;
-  highlightedFile?: string | null;
-  fileVoiceDots?: Record<string, FileVoiceDot[]>;
-  onContextMenu?: (e: React.MouseEvent, node: FileNode, parentPath: string) => void;
-  onFileSelect?: (path: string) => void;
-  // Mouse-based drag-and-drop
-  dragState: DragState;
-  onDragMouseDown?: (
-    e: React.MouseEvent,
-    path: string,
-    name: string,
-    type: "file" | "directory",
-  ) => void;
-}
-
 const initialDragState: DragState = {
   isDragging: false,
   draggedPath: null,
@@ -387,6 +392,26 @@ const initialDragState: DragState = {
   mouseX: 0,
   mouseY: 0,
 };
+
+interface FileTreeContextValue {
+  selectedFile?: string;
+  highlightedFile?: string | null;
+  fileVoiceDots?: Record<string, FileVoiceDot[]>;
+  onContextMenu?: (e: React.MouseEvent, node: FileNode, parentPath: string) => void;
+  onFileSelect?: (path: string) => void;
+  dragState: DragState;
+  onDragMouseDown?: (
+    e: React.MouseEvent,
+    path: string,
+    name: string,
+    type: "file" | "directory",
+  ) => void;
+  inlineRename?: InlineRenameState | null;
+  onInlineRenameChange?: (draftName: string) => void;
+  onInlineRenameSubmit?: () => void;
+  onInlineRenameCancel?: () => void;
+  onInlineRenameResolveRefs?: (updateReferences: boolean) => void;
+}
 
 const FileTreeContext = createContext<FileTreeContextValue>({
   dragState: initialDragState,
@@ -403,8 +428,30 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
     onFileSelect,
     dragState,
     onDragMouseDown,
+    inlineRename,
+    onInlineRenameChange,
+    onInlineRenameSubmit,
+    onInlineRenameCancel,
+    onInlineRenameResolveRefs,
   } = useContext(FileTreeContext);
+
   const voiceDots = fileVoiceDots?.[node.data.path];
+  const isRenaming = inlineRename?.node.path === node.data.path;
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isRenaming) return;
+    const input = renameInputRef.current;
+    if (!input) return;
+    input.focus();
+    const value = input.value;
+    const dotIndex = value.lastIndexOf(".");
+    if (dotIndex > 0) {
+      input.setSelectionRange(0, dotIndex);
+    } else {
+      input.setSelectionRange(0, value.length);
+    }
+  }, [isRenaming]);
 
   const isDirectory = node.data.type === "directory";
   const isSelected = selectedFile === node.data.path;
@@ -467,6 +514,113 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
     [onDragMouseDown, node.data.path, node.data.name, node.data.type],
   );
 
+  if (isRenaming && inlineRename) {
+    const isBusy = inlineRename.status === "planning" || inlineRename.status === "applying";
+    const showRefsPrompt = inlineRename.status === "confirm-refs";
+    return (
+      <div
+        style={style}
+        role="treeitem"
+        aria-selected={isSelected}
+        tabIndex={-1}
+        data-path={node.data.path}
+        data-type={node.data.type}
+        className="w-full px-2 py-1 flex flex-col justify-center bg-panel ring-1 ring-border-dark ring-inset"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onInlineRenameCancel?.();
+          }
+        }}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <div
+            className="w-3 h-3 flex-shrink-0"
+            style={{
+              marginLeft: `${node.level * 12}px`,
+            }}
+          />
+          <input
+            ref={renameInputRef}
+            type="text"
+            value={inlineRename.draftName}
+            disabled={isBusy || showRefsPrompt}
+            aria-label={`Rename ${node.data.name}`}
+            onChange={(e) => onInlineRenameChange?.(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (!isBusy && !showRefsPrompt) {
+                  onInlineRenameSubmit?.();
+                }
+              } else if (e.key === "Escape") {
+                e.preventDefault();
+                onInlineRenameCancel?.();
+              }
+            }}
+            onBlur={() => {
+              if (inlineRename.status === "editing") {
+                onInlineRenameCancel?.();
+              }
+            }}
+            className="flex-1 min-w-0 h-5 px-1.5 rounded bg-background border border-border text-foreground-strong font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-60"
+          />
+        </div>
+        {showRefsPrompt && (
+          <div
+            className="mt-1 flex items-center justify-between gap-2 text-[11px] text-muted"
+            style={{ paddingLeft: `${node.level * 12 + 20}px` }}
+          >
+            <span className="truncate">{inlineRename.referenceCount} input references</span>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <button
+                type="button"
+                disabled={isBusy}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onInlineRenameResolveRefs?.(true)}
+                className="px-1.5 py-0.5 rounded bg-accent-soft text-accent font-medium hover:opacity-90 disabled:opacity-50"
+              >
+                Update
+              </button>
+              <button
+                type="button"
+                disabled={isBusy}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onInlineRenameResolveRefs?.(false)}
+                className="px-1.5 py-0.5 rounded bg-sunken text-foreground-strong hover:bg-subtle disabled:opacity-50"
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                disabled={isBusy}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onInlineRenameCancel?.()}
+                className="px-1.5 py-0.5 rounded bg-sunken text-muted hover:text-foreground-strong hover:bg-subtle disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+        {inlineRename.error && (
+          <div
+            role="alert"
+            className="mt-0.5 text-[11px] text-destructive break-words whitespace-normal leading-tight"
+            style={{ paddingLeft: `${node.level * 12 + 20}px` }}
+            title={inlineRename.error}
+          >
+            {inlineRename.error}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       style={style}
@@ -502,16 +656,18 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
       <FileIcon type={node.data.type} expanded={node.isOpen} filename={node.data.name} />
       <span className="truncate">{node.data.name}</span>
       {voiceDots && voiceDots.length > 0 && (
-        <span className="ml-auto flex items-center gap-1 flex-shrink-0 pl-1">
+        <span className="ml-auto flex shrink-0 items-center gap-1 pl-1">
           {voiceDots.map((dot) => (
             <span
-              key={`${dot.provider}-${dot.label ?? "dot"}`}
-              className="inline-block w-[7px] h-[7px] rounded-full flex-shrink-0"
+              key={dot.provider}
+              className="inline-block size-[7px] shrink-0 rounded-full"
               style={{
                 backgroundColor: VOICE_COLORS[dot.provider].ink,
                 boxShadow: dot.pulse ? `0 0 0 3px ${VOICE_COLORS[dot.provider].tint}` : undefined,
               }}
               title={dot.label ?? dot.provider}
+              aria-label={dot.label ?? dot.provider}
+              role="img"
             />
           ))}
         </span>
@@ -556,6 +712,10 @@ function FileTreeInner({
   projectPath,
   onRefresh,
   fileVoiceDots,
+  onPlanRename,
+  onApplyRename,
+  onSetMainFile,
+  onAskAgentOpening,
 }: Props) {
   const treeRef = useRef<TreeApi<ArboristFileNode>>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -565,6 +725,20 @@ function FileTreeInner({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const confirmResolverRef = useRef<((value: boolean) => void) | null>(null);
+  const [inlineRename, setInlineRename] = useState<InlineRenameState | null>(null);
+  const planRequestIdRef = useRef(0);
+
+  const startInlineRename = useCallback((node: FileNode) => {
+    planRequestIdRef.current += 1;
+    setInlineRename({
+      node,
+      draftName: node.name,
+      status: "editing",
+      referenceCount: 0,
+      pendingNewPath: null,
+      error: null,
+    });
+  }, []);
 
   const requestConfirm = useCallback((payload: ConfirmDialogState) => {
     if (confirmResolverRef.current) {
@@ -715,13 +889,45 @@ function FileTreeInner({
       }
 
       try {
-        await fileOperations.renamePath(dragged.path, newPath);
+        const draggedNode = nodeMap.get(dragged.path);
+        if (draggedNode && onPlanRename) {
+          const requestId = ++planRequestIdRef.current;
+          setInlineRename({
+            node: draggedNode,
+            draftName: fileName,
+            status: "planning",
+            error: null,
+            referenceCount: 0,
+            pendingNewPath: null,
+          });
+          const refCount = await onPlanRename(draggedNode, newPath);
+          if (planRequestIdRef.current !== requestId) return;
+          if (refCount > 0) {
+            setInlineRename({
+              node: draggedNode,
+              draftName: fileName,
+              status: "confirm-refs",
+              referenceCount: refCount,
+              pendingNewPath: newPath,
+              error: null,
+            });
+            return;
+          }
+          setInlineRename(null);
+        }
+
+        if (draggedNode && onApplyRename) {
+          await onApplyRename(draggedNode, newPath, { updateReferences: false });
+        } else {
+          await fileOperations.renamePath(dragged.path, newPath);
+        }
       } catch (error) {
+        setInlineRename(null);
         console.error("Failed to move:", error);
         alert(`Failed to move "${fileName}": ${error}`);
       }
     },
-    [fileOperations, nodeMap, requestConfirm],
+    [fileOperations, nodeMap, onApplyRename, onPlanRename, requestConfirm],
   );
 
   // Mouse move handler (attached to document during drag)
@@ -891,8 +1097,8 @@ function FileTreeInner({
         // F2 - Rename
         case "F2": {
           e.preventDefault();
-          if (currentNode && fileOperations) {
-            setDialog({ type: "rename", node: currentNode });
+          if (currentNode && (fileOperations || onApplyRename)) {
+            startInlineRename(currentNode);
           }
           break;
         }
@@ -959,7 +1165,15 @@ function FileTreeInner({
         }
       }
     },
-    [nodeMap, fileOperations, onRefresh, projectPath, requestConfirm],
+    [
+      nodeMap,
+      fileOperations,
+      onRefresh,
+      projectPath,
+      requestConfirm,
+      onApplyRename,
+      startInlineRename,
+    ],
   );
 
   const getContextMenuItems = useCallback(
@@ -997,43 +1211,27 @@ function FileTreeInner({
       }
 
       // --- Edit actions ---
-      items.push({
-        label: "Rename",
-        onClick: () => setDialog({ type: "rename", node }),
-        icon: <PencilLineIcon size={16} />,
-      });
-
-      // Duplicate (for files only)
-      if (!isDirectory && fileOperations) {
+      if (fileOperations || onApplyRename) {
         items.push({
-          label: "Duplicate",
-          onClick: async () => {
-            const ext = node.name.includes(".")
-              ? node.name.substring(node.name.lastIndexOf("."))
-              : "";
-            const baseName = ext ? node.name.substring(0, node.name.lastIndexOf(".")) : node.name;
-            const parentPath = pathSync.dirname(node.path);
-            const newName = `${baseName}_copy${ext}`;
-            const newPath = parentPath ? pathSync.join(parentPath, newName) : newName;
+          label: "Rename",
+          onClick: () => startInlineRename(node),
+          icon: <PencilLineIcon size={16} />,
+        });
+      }
 
-            try {
-              // Read original file content
-              const response = await fetch(`tauri://localhost/${projectPath}/${node.path}`);
-              if (!response.ok) {
-                // Fallback: create empty file with same extension
-                await fileOperations.createFile(newPath);
-              } else {
-                const _content = await response.text();
-                await fileOperations.createFile(newPath);
-                // Note: We'd need a writeFile operation to copy content
-                // For now, just create the file structure
-              }
-            } catch {
-              // Fallback: just create empty file
-              await fileOperations.createFile(newPath);
-            }
-          },
-          icon: <CopyIcon size={16} />,
+      if (!isDirectory && onSetMainFile && node.name.toLowerCase().endsWith(".tex")) {
+        items.push({
+          label: "Set as Main File",
+          onClick: () => onSetMainFile(node),
+          icon: <BookOpenTextIcon size={16} />,
+        });
+      }
+
+      if (onAskAgentOpening) {
+        items.push({
+          label: "Ask Agent",
+          onClick: () => onAskAgentOpening(node),
+          icon: <TerminalWindowIcon size={16} />,
         });
       }
 
@@ -1107,7 +1305,16 @@ function FileTreeInner({
 
       return items;
     },
-    [fileOperations, projectPath, onRefresh, requestConfirm],
+    [
+      fileOperations,
+      projectPath,
+      onRefresh,
+      requestConfirm,
+      onApplyRename,
+      onSetMainFile,
+      onAskAgentOpening,
+      startInlineRename,
+    ],
   );
 
   // Context menu items for empty area (root level)
@@ -1214,6 +1421,164 @@ function FileTreeInner({
     [dialog, fileOperations, closeDialog],
   );
 
+  const cancelInlineRename = useCallback(() => {
+    planRequestIdRef.current += 1;
+    setInlineRename(null);
+  }, []);
+
+  const handleInlineRenameChange = useCallback((draftName: string) => {
+    setInlineRename((prev) => (prev ? { ...prev, draftName, error: null } : null));
+  }, []);
+
+  const applyRename = useCallback(
+    async (node: FileNode, newPath: string, updateReferences: boolean) => {
+      if (onApplyRename) {
+        await onApplyRename(node, newPath, { updateReferences });
+      } else if (fileOperations) {
+        await fileOperations.renamePath(node.path, newPath);
+      }
+    },
+    [onApplyRename, fileOperations],
+  );
+
+  const submitInlineRename = useCallback(async () => {
+    if (!inlineRename) return;
+    const trimmed = inlineRename.draftName.trim();
+    const validationError = validateFileName(trimmed);
+    if (validationError) {
+      setInlineRename((prev) => (prev ? { ...prev, error: validationError } : null));
+      return;
+    }
+
+    const parentPath = pathSync.dirname(inlineRename.node.path);
+    const newPath = parentPath ? pathSync.join(parentPath, trimmed) : trimmed;
+    if (newPath === inlineRename.node.path) {
+      cancelInlineRename();
+      return;
+    }
+
+    const requestId = ++planRequestIdRef.current;
+    const targetNode = inlineRename.node;
+
+    if (onPlanRename) {
+      setInlineRename((prev) => (prev ? { ...prev, status: "planning", error: null } : null));
+      try {
+        const refCount = await onPlanRename(targetNode, newPath);
+        if (planRequestIdRef.current !== requestId) return;
+        if (refCount > 0) {
+          setInlineRename((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: "confirm-refs",
+                  referenceCount: refCount,
+                  pendingNewPath: newPath,
+                  error: null,
+                }
+              : null,
+          );
+          return;
+        }
+      } catch (error) {
+        if (planRequestIdRef.current !== requestId) return;
+        setInlineRename((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "editing",
+                error: error instanceof Error ? error.message : String(error),
+              }
+            : null,
+        );
+        return;
+      }
+    }
+
+    setInlineRename((prev) => (prev ? { ...prev, status: "applying", error: null } : null));
+    try {
+      await applyRename(targetNode, newPath, false);
+      if (planRequestIdRef.current !== requestId) return;
+      setInlineRename(null);
+    } catch (error) {
+      if (planRequestIdRef.current !== requestId) return;
+      setInlineRename((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: "editing",
+              error: error instanceof Error ? error.message : String(error),
+            }
+          : null,
+      );
+    }
+  }, [inlineRename, validateFileName, cancelInlineRename, onPlanRename, applyRename]);
+
+  const resolveInlineRenameRefs = useCallback(
+    async (updateReferences: boolean) => {
+      if (!inlineRename?.pendingNewPath) return;
+      const targetNode = inlineRename.node;
+      const newPath = inlineRename.pendingNewPath;
+      const requestId = ++planRequestIdRef.current;
+      setInlineRename((prev) => (prev ? { ...prev, status: "applying", error: null } : null));
+      try {
+        await applyRename(targetNode, newPath, updateReferences);
+        if (planRequestIdRef.current !== requestId) return;
+        setInlineRename(null);
+      } catch (error) {
+        if (planRequestIdRef.current !== requestId) return;
+        setInlineRename((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: "editing",
+                pendingNewPath: null,
+                referenceCount: 0,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            : null,
+        );
+      }
+    },
+    [inlineRename, applyRename],
+  );
+
+  useEffect(() => {
+    if (inlineRename?.status !== "confirm-refs") return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelInlineRename();
+      }
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [inlineRename?.status, cancelInlineRename]);
+
+  const getRowHeight = useCallback(
+    (node: NodeApi<ArboristFileNode>) => {
+      if (inlineRename && node.data.path === inlineRename.node.path) {
+        if (inlineRename.error) {
+          return 72;
+        }
+        if (inlineRename.status === "confirm-refs") {
+          return 58;
+        }
+      }
+      return 28;
+    },
+    [inlineRename],
+  );
+
+  useEffect(() => {
+    void inlineRename;
+    const list = (
+      treeRef.current as unknown as {
+        list?: { current?: { resetAfterIndex?: (index: number) => void } };
+      } | null
+    )?.list?.current;
+    list?.resetAfterIndex?.(0);
+  }, [inlineRename]);
+
   const ctxValue = useMemo<FileTreeContextValue>(
     () => ({
       selectedFile,
@@ -1223,6 +1588,11 @@ function FileTreeInner({
       onFileSelect,
       dragState,
       onDragMouseDown: fileOperations ? handleDragMouseDown : undefined,
+      inlineRename,
+      onInlineRenameChange: handleInlineRenameChange,
+      onInlineRenameSubmit: submitInlineRename,
+      onInlineRenameCancel: cancelInlineRename,
+      onInlineRenameResolveRefs: resolveInlineRenameRefs,
     }),
     [
       selectedFile,
@@ -1233,6 +1603,11 @@ function FileTreeInner({
       dragState,
       fileOperations,
       handleDragMouseDown,
+      inlineRename,
+      handleInlineRenameChange,
+      submitInlineRename,
+      cancelInlineRename,
+      resolveInlineRenameRefs,
     ],
   );
 
@@ -1258,7 +1633,7 @@ function FileTreeInner({
               data={arboristData}
               width={containerSize.width}
               height={containerSize.height}
-              rowHeight={28}
+              rowHeight={getRowHeight}
               indent={12}
               openByDefault={true}
               disableDrag={true}
