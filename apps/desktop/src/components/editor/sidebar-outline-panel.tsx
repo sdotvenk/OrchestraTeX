@@ -13,6 +13,12 @@ interface SidebarOutlinePanelProps {
   cursorLine?: number;
 }
 
+function formatOutlineLabel(item: { kind: "heading" | "input"; title: string }): string {
+  if (item.kind !== "input") return item.title;
+  const baseName = item.title.split(/[\\/]/).pop() ?? item.title;
+  return `▸ ${baseName.replace(/\.tex$/i, "")}`;
+}
+
 export const SidebarOutlinePanel = memo(function SidebarOutlinePanel({
   activeFile,
   content,
@@ -113,7 +119,7 @@ export const SidebarOutlinePanel = memo(function SidebarOutlinePanel({
                           aria-hidden="true"
                         />
                       )}
-                      <span className="truncate">{item.title}</span>
+                      <span className="truncate">{formatOutlineLabel(item)}</span>
                     </button>
                   );
                 })
@@ -190,7 +196,7 @@ export const SidebarOutlinePanel = memo(function SidebarOutlinePanel({
                         aria-hidden="true"
                       />
                     )}
-                    <span className="truncate">{item.title}</span>
+                    <span className="truncate">{formatOutlineLabel(item)}</span>
                   </button>
                 );
               })
@@ -303,7 +309,7 @@ export const SidebarOutlinePanel = memo(function SidebarOutlinePanel({
                                   aria-hidden="true"
                                 />
                               )}
-                              <span className="truncate">{item.title}</span>
+                              <span className="truncate">{formatOutlineLabel(item)}</span>
                             </button>
                           );
                         })
@@ -352,7 +358,7 @@ export const SidebarOutlinePanel = memo(function SidebarOutlinePanel({
                           : "text-foreground-secondary"
                     }`}
                   >
-                    {item.title}
+                    {formatOutlineLabel(item)}
                   </span>
                 </div>
                 <span className="text-[10px] font-mono text-muted shrink-0">:{item.line}</span>

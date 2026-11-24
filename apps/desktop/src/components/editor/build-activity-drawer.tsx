@@ -1,7 +1,7 @@
 "use client";
 
 import { CaretDown, Plus } from "@phosphor-icons/react";
-import { type KeyboardEvent, type ReactNode, useId, useRef } from "react";
+import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "react";
 import type { AgentProviderId } from "@/lib/agent/types";
 import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import type { CompileOutputEvent, LatexDiagnostic } from "@/lib/latex/types";
@@ -20,6 +20,8 @@ export interface BuildActivityDrawerProps {
   onJumpToDiagnostic: (diagnostic: LatexDiagnostic) => void;
   onFixDiagnostics: (diagnostics: LatexDiagnostic[]) => void;
   fixLabel?: string;
+  fixProviders?: Array<{ id: AgentProviderId; label: string }>;
+  onSelectFixProvider?: (providerId: AgentProviderId, diagnostics: LatexDiagnostic[]) => void;
   diagnosticSuggestion?: (diagnostic: LatexDiagnostic) => ReactNode;
   threadStatuses?: Array<{ id: string; providerId: AgentProviderId; label: string }>;
   buildSummary?: string;
@@ -33,6 +35,10 @@ const tabs: { id: BuildActivityTab; label: string }[] = [
   { id: "terminal", label: "Terminal" },
 ];
 
+function normalizeFixLabel(label: string): string {
+  return label.replace(/\bClaude Code\b/g, "Claude").replace(/\bOpenAI Codex\b/g, "Codex");
+}
+
 export function BuildActivityDrawer({
   activeTab,
   onChange,
@@ -44,7 +50,9 @@ export function BuildActivityDrawer({
   log,
   onJumpToDiagnostic,
   onFixDiagnostics,
-  fixLabel = "Fix with agent",
+  fixLabel = "Fix with Claude",
+  fixProviders,
+  onSelectFixProvider,
   diagnosticSuggestion,
   threadStatuses,
   buildSummary,
@@ -52,6 +60,9 @@ export function BuildActivityDrawer({
 }: BuildActivityDrawerProps) {
   const id = useId();
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [selectedDiagIndex, setSelectedDiagIndex] = useState<number>(0);
+  const [openFixPickerIndex, setOpenFixPickerIndex] = useState<number | null>(null);
+  const shortFixLabel = normalizeFixLabel(fixLabel);
   const errors = diagnostics.filter((d) => d.severity === "error");
   const warnings = diagnostics.filter((d) => d.severity === "warning");
   function handleKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -87,12 +98,18 @@ export function BuildActivityDrawer({
             ▸ Score
           </button>
           <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
-            {threadStatuses?.slice(0, 3).map((thread) => {
+            {threadStatuses?.slice(0, 3).map((thread, index) => {
               const voice = VOICE_COLORS[thread.providerId] ?? VOICE_COLORS["custom-acp"];
               return (
                 <span
                   key={thread.id}
-                  className="inline-flex items-center gap-1.5 min-w-0 truncate shrink"
+                  className={`items-center gap-1.5 min-w-0 max-w-[140px] truncate ${
+                    index === 0
+                      ? "inline-flex"
+                      : index === 1
+                        ? "hidden sm:inline-flex"
+                        : "hidden lg:inline-flex"
+                  }`}
                   title={thread.label}
                 >
                   <span
@@ -276,53 +293,120 @@ export function BuildActivityDrawer({
               <p className="py-6 text-center text-xs text-muted">No LaTeX errors or warnings.</p>
             ) : (
               <div>
-                {diagnostics.map((d, index) => (
-                  <div
-                    // biome-ignore lint/suspicious/noArrayIndexKey: identical diagnostics need distinct keys.
-                    key={`${d.severity}-${d.file}-${d.line}-${d.message}-${index}`}
-                    className={`min-h-[34px] px-3 py-1.5 border-b border-border/60 flex items-center gap-2.5 text-[12.5px] ${
-                      d.severity === "error" ? "bg-error-bg/35" : ""
-                    }`}
-                  >
-                    <span
-                      className={`w-[44px] shrink-0 rounded text-[10px] font-semibold text-center uppercase border ${
-                        d.severity === "error"
-                          ? "bg-error-bg border-[var(--danger-line)] text-error"
-                          : "bg-warn-bg border-[var(--warn-line)] text-warn"
+                {diagnostics.map((d, index) => {
+                  const isSelectedError = d.severity === "error" && selectedDiagIndex === index;
+                  return (
+                    <div
+                      // biome-ignore lint/suspicious/noArrayIndexKey: identical diagnostics need distinct keys.
+                      key={`${d.severity}-${d.file}-${d.line}-${d.message}-${index}`}
+                      className={`h-[34px] px-3 border-b border-border/60 flex items-center gap-2.5 text-[12.5px] transition-colors ${
+                        isSelectedError ? "bg-error-bg/35" : ""
                       }`}
                     >
-                      {d.severity === "error" ? "ERROR" : "WARN"}
-                    </span>
-                    <span className="font-mono text-foreground-strong shrink-0">
-                      {d.file}
-                      {d.line > 0 ? `:${d.line}` : ""}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-foreground">{d.message}</span>
-                    {diagnosticSuggestion?.(d)}
-                    <div className="ml-auto flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
-                        onClick={() => onJumpToDiagnostic(d)}
-                        className="btn btn-secondary btn-sm h-6 px-2 text-[11.5px]"
+                        onClick={() => setSelectedDiagIndex(index)}
+                        className="min-w-0 flex-1 flex items-center gap-2.5 text-left"
                       >
-                        Go to line
+                        <span
+                          className={`w-[44px] shrink-0 rounded text-[10px] font-semibold text-center uppercase border ${
+                            d.severity === "error"
+                              ? "bg-error-bg border-[var(--danger-line)] text-error"
+                              : "bg-warn-bg border-[var(--warn-line)] text-warn"
+                          }`}
+                        >
+                          {d.severity === "error" ? "ERROR" : "WARN"}
+                        </span>
+                        <span className="font-mono text-foreground-strong shrink-0">
+                          {d.file}
+                          {d.line > 0 ? `:${d.line}` : ""}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-foreground">{d.message}</span>
                       </button>
-                      {d.severity === "error" && (
+                      {diagnosticSuggestion?.(d)}
+                      <div className="ml-auto flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
-                          onClick={() => onFixDiagnostics([d])}
-                          className="btn btn-secondary btn-sm h-6 px-2 text-[11.5px] inline-flex items-center gap-1.5"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedDiagIndex(index);
+                            onJumpToDiagnostic(d);
+                          }}
+                          className="btn btn-secondary btn-sm h-[23px] px-2 text-[12px]"
                         >
-                          <span
-                            className="size-[7px] rounded-full bg-[var(--voice-claude-ink)]"
-                            aria-hidden="true"
-                          />
-                          <span>{fixLabel}</span>
+                          Go to line
                         </button>
-                      )}
+                        {d.severity === "error" && (
+                          <div className="relative inline-flex items-center">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDiagIndex(index);
+                                onFixDiagnostics([d]);
+                              }}
+                              className={`btn btn-secondary btn-sm h-[23px] px-2 text-[12px] inline-flex items-center gap-1.5 ${
+                                fixProviders && fixProviders.length > 1
+                                  ? "rounded-r-none border-r-0"
+                                  : ""
+                              }`}
+                            >
+                              <span
+                                className="size-[7px] rounded-full bg-[var(--voice-claude-ink)]"
+                                aria-hidden="true"
+                              />
+                              <span>{shortFixLabel}</span>
+                            </button>
+                            {fixProviders && fixProviders.length > 1 && (
+                              <button
+                                type="button"
+                                aria-label="Choose agent harness"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenFixPickerIndex((prev) => (prev === index ? null : index));
+                                }}
+                                className="btn btn-secondary btn-sm h-[23px] w-[20px] px-0 rounded-l-none inline-flex items-center justify-center"
+                              >
+                                <CaretDown className="size-2.5" aria-hidden="true" />
+                              </button>
+                            )}
+                            {openFixPickerIndex === index && fixProviders && (
+                              <div className="ox-popover absolute right-0 top-full mt-1 w-40 p-1 z-50 text-[12px]">
+                                {fixProviders.map((provider) => (
+                                  <button
+                                    key={provider.id}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenFixPickerIndex(null);
+                                      if (onSelectFixProvider) {
+                                        onSelectFixProvider(provider.id, [d]);
+                                      } else {
+                                        onFixDiagnostics([d]);
+                                      }
+                                    }}
+                                    className="w-full px-2 py-1 rounded text-left flex items-center gap-1.5 hover:bg-subtle text-foreground"
+                                  >
+                                    <span
+                                      className="size-[6px] rounded-full shrink-0"
+                                      style={{
+                                        backgroundColor: (
+                                          VOICE_COLORS[provider.id] ?? VOICE_COLORS["custom-acp"]
+                                        ).ink,
+                                      }}
+                                      aria-hidden="true"
+                                    />
+                                    <span className="truncate">{provider.label}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 <div className="px-3 py-2 flex items-center gap-2 text-[12px] text-muted">
                   <button
                     type="button"

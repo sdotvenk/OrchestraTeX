@@ -6,7 +6,7 @@ import {
   CaretDown,
   CaretLeft,
   CaretRight,
-  CheckCircle,
+  Check,
   Crosshair,
   DownloadSimple,
   FilePdf,
@@ -40,6 +40,7 @@ interface LivePdfPreviewProps {
   lastResult: CompilationResult | null;
   lastCompileDurationMs: number | null;
   autoCompile: boolean;
+  autoCompileDebounceMs?: number;
   staleAgentEdits?: number;
   compiler?: LaTeXCompiler;
   compilersStatus?: LaTeXCompilersStatus | null;
@@ -72,6 +73,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
   lastResult,
   lastCompileDurationMs: _lastCompileDurationMs,
   autoCompile,
+  autoCompileDebounceMs = 800,
   staleAgentEdits = 0,
   compiler = "pdflatex",
   compilersStatus = null,
@@ -231,13 +233,17 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                 type="button"
                 disabled={!projectPath}
                 onClick={onCompile}
-                className="h-7 pl-2.5 pr-2 rounded-l-lg border-[1.5px] border-primary bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors"
+                className="h-7 pl-2.5 pr-2 rounded-l-lg border-[1.5px] border-r-0 border-primary bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-colors"
                 title="Recompile PDF (Cmd/Ctrl+Shift+B)"
                 aria-label="Recompile PDF"
               >
                 <ArrowClockwise className="size-3.5" aria-hidden="true" />
                 <span>Recompile</span>
               </button>
+              <span
+                className="w-px h-4 bg-[var(--primary-text)]/20 self-center shrink-0"
+                aria-hidden="true"
+              />
               <button
                 type="button"
                 ref={compileMenuButton}
@@ -246,7 +252,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                 aria-expanded={compileMenuOpen}
                 aria-controls={compileMenuOpen ? compileMenuId : undefined}
                 aria-label="Compile options"
-                className="h-7 px-1.5 rounded-r-lg border-[1.5px] border-l-0 border-primary bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 inline-flex items-center justify-center transition-colors"
+                className="h-7 w-[28px] px-0 rounded-r-lg border-[1.5px] border-l-0 border-primary bg-primary text-primary-text hover:bg-primary-hover disabled:opacity-40 inline-flex items-center justify-center transition-colors"
               >
                 <CaretDown className="size-3" aria-hidden="true" />
               </button>
@@ -297,9 +303,8 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                         {!isAvailable ? (
                           <span className="text-[10.5px] text-muted">not found</span>
                         ) : isSelected ? (
-                          <CheckCircle
+                          <Check
                             className="size-3.5 shrink-0 text-foreground-strong"
-                            weight="fill"
                             aria-hidden="true"
                           />
                         ) : "hint" in eng && eng.hint ? (
@@ -337,7 +342,7 @@ export const LivePdfPreview = memo(function LivePdfPreview({
                   >
                     <span>Auto-compile</span>
                     <span className="text-[11.5px] text-foreground-strong">
-                      {autoCompile ? "On" : "Off"}
+                      {autoCompile ? `On · ${autoCompileDebounceMs} ms` : "Off"}
                     </span>
                   </button>
                   {onToggleShellEscape && compiler !== "tectonic" && (
@@ -587,16 +592,64 @@ export const LivePdfPreview = memo(function LivePdfPreview({
           </button>
         )}
 
-        {pdfData && compileStatus === "error" && (
-          <div className="absolute inset-x-4 top-3 z-10 rounded-lg border border-border bg-panel px-2.5 py-1.5 text-[12px] text-muted shadow-sm">
-            Showing last good PDF. It updates after the next successful build.
+        {compileStatus === "error" && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center p-6">
+            <div className="pointer-events-auto ox-frame w-full max-w-sm rounded-[12px] border border-[var(--danger-line)] bg-panel p-5 shadow-[var(--shadow-2)] space-y-3">
+              <div className="flex items-start gap-2.5">
+                <WarningCircle
+                  className="size-4 text-error shrink-0 mt-0.5"
+                  weight="fill"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="text-[13.5px] font-semibold text-foreground-strong">
+                    Build failed
+                    {errorDiags.length > 0
+                      ? ` · ${errorDiags.length} ${errorDiags.length === 1 ? "error" : "errors"}`
+                      : ""}
+                  </div>
+                  <p className="text-[12px] font-mono text-error break-words line-clamp-4">
+                    {errorDiags[0]?.message ?? lastResult?.error ?? "Compilation failed."}
+                  </p>
+                  {pdfData && (
+                    <p className="text-[11.5px] text-muted">
+                      Showing last successful PDF behind this message.
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenBuildActivity) {
+                      onOpenBuildActivity("build-log");
+                    } else {
+                      setDrawerOpen(true);
+                      setDrawerTab("log");
+                    }
+                  }}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Open log
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onFixDiagnosticsWithAi(errorDiags)}
+                  className="btn btn-primary btn-sm"
+                >
+                  <Sparkle className="size-3" aria-hidden="true" />
+                  <span>Fix with Claude</span>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
         {pdfData ? (
           <div
             className={`flex-1 min-h-0 ${
-              compileStatus === "error" ? "opacity-55 grayscale-[40%]" : ""
+              compileStatus === "error" ? "opacity-45 grayscale-[40%]" : ""
             }`}
           >
             <PdfViewer
@@ -608,6 +661,8 @@ export const LivePdfPreview = memo(function LivePdfPreview({
               controlRef={pdfControlRef}
             />
           </div>
+        ) : compileStatus === "error" ? (
+          <div className="flex-1 min-h-0" />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
             <FilePdf className="size-10 text-muted-foreground opacity-60" aria-hidden="true" />

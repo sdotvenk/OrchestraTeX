@@ -67,8 +67,8 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
 
   // Display
   fontFamily: "",
-  fontSize: 14,
-  lineHeight: 1.6,
+  fontSize: 12,
+  lineHeight: 1.7,
   wordWrap: "off",
   wordWrapColumn: 80,
 

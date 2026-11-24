@@ -150,9 +150,9 @@ export function HomeWorkspace({
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search ⌘P"
-                  className="w-40 rounded-md border border-border bg-background px-2.5 py-1 text-[12px] placeholder:text-muted focus:outline-none focus:border-border-dark"
+                  className="w-40 rounded-md border border-transparent bg-transparent px-2.5 py-1 text-[12px] placeholder:text-muted focus:outline-none focus:border-[var(--line-strong)] focus:bg-panel transition-colors"
                 />
-                {recentProjects.length > 0 && (
+                {query.trim().length > 0 && recentProjects.length > 0 && (
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm text-[12px] text-muted"
@@ -241,9 +241,16 @@ export function HomeWorkspace({
                 })}
               </ul>
             ) : (
-              <p className="px-4 py-6 text-[13px] text-muted">
-                {normalizedQuery ? "No matching projects" : "No recent projects"}
-              </p>
+              <div className="min-h-[260px] flex-1 flex flex-col items-center justify-center gap-2.5 px-4 py-6 text-center">
+                <p className="text-[13px] text-muted">
+                  {normalizedQuery ? "No matching projects" : "No recent projects"}
+                </p>
+                {!normalizedQuery && (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenFolder}>
+                    Open folder…
+                  </button>
+                )}
+              </div>
             )}
           </section>
         </div>
@@ -342,8 +349,12 @@ export function HomeWorkspace({
                     <ProviderIcon providerId={harness.id} className="size-3.5" />
                   </span>
 
-                  <span className="font-medium text-foreground shrink-0">{harness.name}</span>
-                  <span className="font-mono text-[11.5px] text-muted truncate">{statusLabel}</span>
+                  <div className="flex items-baseline gap-2 min-w-0 flex-1">
+                    <span className="font-medium text-foreground shrink-0">{harness.name}</span>
+                    <span className="font-mono text-[11.5px] text-muted truncate">
+                      {statusLabel}
+                    </span>
+                  </div>
 
                   {installed && authenticated ? (
                     rightMeta && (

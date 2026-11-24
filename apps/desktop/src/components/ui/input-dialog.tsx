@@ -88,11 +88,11 @@ export function InputDialog({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.98, y: 6 }}
           transition={{ duration: 0.12 }}
-          className="relative z-10 w-full max-w-sm border border-foreground bg-background text-foreground shadow-[3px_3px_0_var(--foreground)]"
+          className="relative z-10 w-full max-w-sm ox-frame rounded-[12px] bg-panel border border-border text-foreground shadow-[var(--frame-shadow)]"
         >
           {/* Header */}
           <div className="px-5 py-4 border-b border-border">
-            <h3 id={titleId} className="text-sm font-medium">
+            <h3 id={titleId} className="text-[15px] font-semibold text-foreground-strong">
               {title}
             </h3>
           </div>
@@ -106,17 +106,15 @@ export function InputDialog({
               onChange={handleChange}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              className={`w-full px-3 py-2 text-sm border outline-none transition-colors ${
-                error
-                  ? "border-red-500 focus:border-red-600"
-                  : "border-border focus:border-foreground"
+              className={`w-full px-3 py-2 text-[13px] rounded-[8px] border bg-panel text-foreground outline-none transition-colors ${
+                error ? "border-error focus:border-error" : "border-border-dark focus:border-accent"
               }`}
             />
             {error && (
               <motion.p
                 initial={{ opacity: 0, y: -5 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-2 text-sm text-red-600"
+                className="mt-2 text-[12.5px] text-error"
               >
                 {error}
               </motion.p>

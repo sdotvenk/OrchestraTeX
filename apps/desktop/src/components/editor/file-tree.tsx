@@ -100,27 +100,16 @@ async function copyNormalizedAbsolutePath(path: string): Promise<void> {
 
 import type { FileNode } from "@orchestratex/shared";
 import {
-  ArchiveIcon,
   ArrowClockwiseIcon,
   ArrowSquareOutIcon,
-  BookOpenTextIcon,
-  BracketsCurlyIcon,
+  CaretDownIcon,
+  CaretRightIcon,
   ClipboardTextIcon,
-  CubeIcon,
-  FileCodeIcon,
   FileIcon as FileIconSymbol,
   FilePlusIcon,
-  FileTextIcon,
   FolderIcon,
-  FolderOpenIcon,
   FolderPlusIcon,
-  GearIcon,
-  ImageIcon,
-  MusicNoteIcon,
-  TableIcon,
-  TerminalIcon,
   TerminalWindowIcon,
-  VideoCameraIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import type { AgentProviderId } from "@/lib/agent/types";
@@ -165,6 +154,7 @@ type Props = {
   ) => Promise<void>;
   onSetMainFile?: (node: FileNode) => void;
   onAskAgentOpening?: (node: FileNode) => void;
+  onImportFiles?: (targetDirPath: string) => void;
   mainFile?: string | null;
   gitStatusByPath?: Record<string, string>;
   errorCountByPath?: Record<string, number>;
@@ -199,156 +189,6 @@ interface ConfirmDialogState {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
-}
-
-function getFileExtension(filename: string): string {
-  const lastDot = filename.lastIndexOf(".");
-  return lastDot > 0 ? filename.substring(lastDot).toLowerCase() : "";
-}
-
-// Map file extensions to icons
-type IconType = React.ComponentType<{ className?: string; size?: number }>;
-
-const FILE_ICON_MAP: Record<string, IconType> = {
-  // LaTeX source files
-  ".tex": FileTextIcon,
-  ".ltx": FileTextIcon,
-  // LaTeX bibliography
-  ".bib": BookOpenTextIcon,
-  // LaTeX document class (template)
-  ".cls": CubeIcon,
-  // LaTeX style packages
-  ".sty": CubeIcon,
-  // LaTeX package source
-  ".dtx": CubeIcon,
-  ".ins": CubeIcon,
-  // LaTeX output
-  ".pdf": FileIconSymbol,
-  ".dvi": FileIconSymbol,
-  ".ps": FileIconSymbol,
-  // LaTeX config
-  ".latexmkrc": GearIcon,
-  // Documents
-  ".doc": FileTextIcon,
-  ".docx": FileTextIcon,
-  ".txt": FileTextIcon,
-  ".rtf": FileTextIcon,
-  ".md": FileTextIcon,
-  ".mdx": FileTextIcon,
-  ".rst": FileTextIcon,
-  // Code
-  ".js": FileCodeIcon,
-  ".jsx": FileCodeIcon,
-  ".ts": FileCodeIcon,
-  ".tsx": FileCodeIcon,
-  ".mjs": FileCodeIcon,
-  ".cjs": FileCodeIcon,
-  ".py": FileCodeIcon,
-  ".rb": FileCodeIcon,
-  ".go": FileCodeIcon,
-  ".rs": FileCodeIcon,
-  ".c": FileCodeIcon,
-  ".cpp": FileCodeIcon,
-  ".h": FileCodeIcon,
-  ".hpp": FileCodeIcon,
-  ".java": FileCodeIcon,
-  ".kt": FileCodeIcon,
-  ".swift": FileCodeIcon,
-  ".lua": FileCodeIcon,
-  ".r": FileCodeIcon,
-  ".m": FileCodeIcon,
-  ".html": FileCodeIcon,
-  ".htm": FileCodeIcon,
-  ".css": FileCodeIcon,
-  ".scss": FileCodeIcon,
-  ".sass": FileCodeIcon,
-  ".less": FileCodeIcon,
-  ".vue": FileCodeIcon,
-  ".svelte": FileCodeIcon,
-  // Shell/Scripts
-  ".sh": TerminalIcon,
-  ".bash": TerminalIcon,
-  ".zsh": TerminalIcon,
-  ".fish": TerminalIcon,
-  ".ps1": TerminalIcon,
-  ".bat": TerminalIcon,
-  ".cmd": TerminalIcon,
-  // Config/Data
-  ".json": BracketsCurlyIcon,
-  ".yaml": BracketsCurlyIcon,
-  ".yml": BracketsCurlyIcon,
-  ".toml": BracketsCurlyIcon,
-  ".xml": BracketsCurlyIcon,
-  ".ini": GearIcon,
-  ".cfg": GearIcon,
-  ".conf": GearIcon,
-  ".env": GearIcon,
-  ".gitignore": GearIcon,
-  ".editorconfig": GearIcon,
-  ".prettierrc": GearIcon,
-  ".eslintrc": GearIcon,
-  // Images
-  ".png": ImageIcon,
-  ".jpg": ImageIcon,
-  ".jpeg": ImageIcon,
-  ".gif": ImageIcon,
-  ".svg": ImageIcon,
-  ".webp": ImageIcon,
-  ".ico": ImageIcon,
-  ".bmp": ImageIcon,
-  ".tiff": ImageIcon,
-  ".tif": ImageIcon,
-  ".eps": ImageIcon,
-  ".pgf": ImageIcon,
-  ".tikz": ImageIcon,
-  // Archives
-  ".zip": ArchiveIcon,
-  ".tar": ArchiveIcon,
-  ".gz": ArchiveIcon,
-  ".rar": ArchiveIcon,
-  ".7z": ArchiveIcon,
-  // Video
-  ".mp4": VideoCameraIcon,
-  ".mkv": VideoCameraIcon,
-  ".avi": VideoCameraIcon,
-  ".mov": VideoCameraIcon,
-  ".webm": VideoCameraIcon,
-  // Audio
-  ".mp3": MusicNoteIcon,
-  ".wav": MusicNoteIcon,
-  ".flac": MusicNoteIcon,
-  ".ogg": MusicNoteIcon,
-  ".m4a": MusicNoteIcon,
-  // Spreadsheet/Data
-  ".csv": TableIcon,
-  ".xls": TableIcon,
-  ".xlsx": TableIcon,
-  ".tsv": TableIcon,
-};
-
-function _FileIcon({
-  type,
-  expanded,
-  filename,
-}: {
-  type: "file" | "directory";
-  expanded?: boolean;
-  filename?: string;
-}) {
-  const iconClass = "w-4 h-4 flex-shrink-0";
-
-  if (type === "directory") {
-    return expanded ? (
-      <FolderOpenIcon className={iconClass} size={16} />
-    ) : (
-      <FolderIcon className={iconClass} size={16} />
-    );
-  }
-
-  const ext = filename ? getFileExtension(filename) : "";
-  const IconComponent = FILE_ICON_MAP[ext] || FileIconSymbol;
-
-  return <IconComponent className={iconClass} size={16} />;
 }
 
 // --- react-arborist data types ---
@@ -689,13 +529,19 @@ function NodeRenderer({ node, style }: NodeRendererProps<ArboristFileNode>) {
       } ${isHighlighted && !isSelected ? "animate-highlight" : ""}`}
     >
       <div
-        className="flex-shrink-0 flex items-center justify-center w-3 text-[10px] text-muted"
+        className="flex-shrink-0 flex items-center justify-center w-3 text-muted"
         style={{
           marginLeft: `${node.level * 12}px`,
         }}
         aria-hidden="true"
       >
-        {isDirectory ? (node.isOpen ? "▾" : "▸") : null}
+        {isDirectory ? (
+          node.isOpen ? (
+            <CaretDownIcon className="size-3" aria-hidden="true" />
+          ) : (
+            <CaretRightIcon className="size-3" aria-hidden="true" />
+          )
+        ) : null}
       </div>
       <span className="truncate">{node.data.name}</span>
       <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-1">
@@ -768,6 +614,7 @@ function FileTreeInner({
   onApplyRename,
   onSetMainFile,
   onAskAgentOpening,
+  onImportFiles,
   mainFile,
   gitStatusByPath,
   errorCountByPath,
@@ -820,19 +667,29 @@ function FileTreeInner({
   const [dragState, setDragState] = useState<DragState>(initialDragState);
   const draggedNodeRef = useRef<{ path: string; type: "file" | "directory" } | null>(null);
 
+  const hiddenMainPdfPath = useMemo(() => {
+    if (!mainFile) return null;
+    const normalized = mainFile.replace(/\\/g, "/").replace(/^\.\//, "");
+    if (!normalized.toLowerCase().endsWith(".tex")) return null;
+    return `${normalized.slice(0, -4)}.pdf`.toLowerCase();
+  }, [mainFile]);
+
   const filteredFiles = useMemo(() => {
     const q = searchQuery?.trim().toLowerCase();
-    if (!q) return files;
     function filterNodes(nodes: FileNode[], query: string): FileNode[] {
       const result: FileNode[] = [];
       for (const node of nodes) {
-        const nameMatches = node.name.toLowerCase().includes(query);
+        const normalizedPath = node.path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+        if (node.type === "file" && hiddenMainPdfPath && normalizedPath === hiddenMainPdfPath) {
+          continue;
+        }
+        const nameMatches = !query || node.name.toLowerCase().includes(query);
         if (node.type === "directory" && node.children) {
           const matchingChildren = filterNodes(node.children, query);
-          if (nameMatches || matchingChildren.length > 0) {
+          if (!query || nameMatches || matchingChildren.length > 0) {
             result.push({
               ...node,
-              children: nameMatches ? node.children : matchingChildren,
+              children: query && nameMatches ? filterNodes(node.children, "") : matchingChildren,
             });
           }
         } else if (nameMatches) {
@@ -841,8 +698,8 @@ function FileTreeInner({
       }
       return result;
     }
-    return filterNodes(files, q);
-  }, [files, searchQuery]);
+    return filterNodes(files, q ?? "");
+  }, [files, searchQuery, hiddenMainPdfPath]);
 
   const arboristData = useMemo(() => convertToArboristData(filteredFiles), [filteredFiles]);
   const nodeMap = useMemo(() => buildNodeMap(files), [files]);
@@ -1274,6 +1131,36 @@ function FileTreeInner({
           label: "New folder here",
           onClick: () => setDialog({ type: "create-directory", parentPath: node.path }),
         });
+        items.push({
+          label: `Import files into ${node.name || "folder"}…`,
+          onClick: async () => {
+            if (onImportFiles) {
+              onImportFiles(node.path);
+              return;
+            }
+            if (!projectPath) return;
+            try {
+              const { open } = await import("@tauri-apps/plugin-dialog");
+              const { invoke } = await import("@tauri-apps/api/core");
+              const selected = await open({ multiple: true });
+              if (!selected) return;
+              const paths = Array.isArray(selected) ? selected : [selected];
+              const destDir = pathSync.join(projectPath, node.path);
+              await Promise.all(
+                paths.map((src) => {
+                  const fileName = src.split(/[\\/]/).pop() ?? "file";
+                  return invoke("copy_file_to_path", {
+                    sourcePath: src,
+                    destPath: pathSync.join(destDir, fileName),
+                  });
+                }),
+              );
+              onRefresh?.();
+            } catch (error) {
+              console.error("Failed to import files:", error);
+            }
+          },
+        });
       }
 
       // --- Edit actions ---
@@ -1406,6 +1293,7 @@ function FileTreeInner({
       onApplyRename,
       onSetMainFile,
       onAskAgentOpening,
+      onImportFiles,
       startInlineRename,
       onFileSelect,
       activeProviderId,
@@ -1659,7 +1547,7 @@ function FileTreeInner({
           return 58;
         }
       }
-      return 28;
+      return 26;
     },
     [inlineRename],
   );

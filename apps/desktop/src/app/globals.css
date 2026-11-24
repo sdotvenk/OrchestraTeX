@@ -265,7 +265,6 @@ body {
   color: var(--text);
   background: var(--bg);
   font-family: var(--font-family-sans);
-  font-size: 13px;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
@@ -279,6 +278,7 @@ html {
 body {
   height: 100%;
   min-height: 100%;
+  font-size: 13px;
 }
 
 .font-display {
@@ -478,6 +478,10 @@ kbd {
   box-shadow: 2px 2px 0 var(--primary-offset, transparent);
 }
 
+.btn-primary:disabled {
+  box-shadow: none;
+}
+
 .btn-primary:hover:not(:disabled),
 .btn-solid:hover:not(:disabled) {
   background: var(--primary-bg-hover);
@@ -526,34 +530,6 @@ kbd {
 
 .btn-outline:hover:not(:disabled) {
   background: var(--subtle);
-}
-
-/* Legacy class alias kept smooth */
-.btn-brutalist {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 8px;
-  border: 1px solid var(--primary-bg);
-  background: var(--primary-bg);
-  color: var(--primary-text);
-  font-family: var(--font-family-sans);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 120ms ease;
-}
-
-.btn-brutalist:hover:not(:disabled) {
-  background: var(--primary-bg-hover);
-}
-
-.btn-brutalist:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .tabular-nums {

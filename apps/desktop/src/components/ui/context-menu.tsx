@@ -100,7 +100,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.95 }}
         transition={{ duration: 0.1 }}
-        className="fixed z-50 min-w-[224px] ox-popover p-[5px] text-foreground"
+        className="fixed z-50 min-w-[245px] ox-popover p-[5px] text-foreground"
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,

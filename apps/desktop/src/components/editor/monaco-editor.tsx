@@ -235,6 +235,16 @@ export const MonacoEditor = memo(function MonacoEditor({
     defineEditorThemes(monaco);
     registerLaTeXLanguage(monaco);
 
+    if (pendingGoToLineRef.current <= 0) {
+      editor.setPosition({ lineNumber: 1, column: 1 });
+      editor.setSelection({
+        startLineNumber: 1,
+        startColumn: 1,
+        endLineNumber: 1,
+        endColumn: 1,
+      });
+    }
+
     editor.focus();
 
     editor.addAction({
@@ -772,11 +782,25 @@ export const MonacoEditor = memo(function MonacoEditor({
         onChange={handleChange}
         options={{
           readOnly,
-          fontSize: editorSettings?.fontSize ?? 14,
+          fontSize:
+            editorSettings?.fontSize && editorSettings.fontSize !== 14
+              ? editorSettings.fontSize
+              : 12,
           fontFamily: resolveMonoFontFamily(editorSettings?.fontFamily),
           fontLigatures: false,
           lineNumbers: editorSettings?.lineNumbers ?? "on",
-          lineHeight: editorSettings?.lineHeight ?? 1.6,
+          lineNumbersMinChars: 3,
+          lineDecorationsWidth: 8,
+          glyphMargin: false,
+          lineHeight:
+            editorSettings?.lineHeight && editorSettings.lineHeight !== 1.6
+              ? editorSettings.lineHeight
+              : Math.round(
+                  (editorSettings?.fontSize && editorSettings.fontSize !== 14
+                    ? editorSettings.fontSize
+                    : 12) *
+                    (20 / 12),
+                ),
           letterSpacing: 0,
           renderWhitespace: editorSettings?.renderWhitespace ?? "selection",
           tabSize: editorSettings?.tabSize ?? 2,
@@ -806,10 +830,10 @@ export const MonacoEditor = memo(function MonacoEditor({
           autoClosingQuotes: editorSettings?.autoClosingQuotes ?? "languageDefined",
           renderLineHighlight: "line",
           renderLineHighlightOnlyWhenFocus: false,
+          selectionHighlight: false,
+          occurrencesHighlight: "off",
           selectOnLineNumbers: true,
-          folding: true,
-          foldingStrategy: "auto",
-          showFoldingControls: "mouseover",
+          folding: false,
           matchBrackets: "always",
           bracketPairColorization: {
             enabled: false,
@@ -846,7 +870,7 @@ export const MonacoEditor = memo(function MonacoEditor({
             seedSearchStringFromSelection: "selection",
           },
           padding: {
-            top: 16,
+            top: 8,
             bottom: 16,
           },
           scrollbar: {
