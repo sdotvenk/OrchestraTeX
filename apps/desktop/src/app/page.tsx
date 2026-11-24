@@ -44,7 +44,6 @@ import {
   LaTeXInstallPrompt,
   LaTeXSettingsDialog,
   MainFileSelectionDialog,
-  SynctexInstallDialog,
 } from "@/components/latex";
 import { CommandPalette } from "@/components/ui/command-palette";
 import { InputDialog } from "@/components/ui/input-dialog";
@@ -540,14 +539,6 @@ export default function EditorPage() {
     useState<MainFileDetectionResult | null>(null);
   const [showGitHubPublishDialog, setShowGitHubPublishDialog] = useState(false);
   const [ghPublishError, setGhPublishError] = useState<string | null>(null);
-  const [showSynctexInstallDialog, setShowSynctexInstallDialog] = useState(false);
-  const pendingSynctexRetryRef = useRef<{
-    page: number;
-    x: number;
-    y: number;
-    context: "main" | "split" | "preview";
-  } | null>(null);
-
   const contentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const splitContentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const savingVisualTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1147,13 +1138,7 @@ export default function EditorPage() {
   );
 
   const runInverseSynctex = useCallback(
-    async (
-      pdfPath: string,
-      page: number,
-      x: number,
-      y: number,
-      context: "main" | "split" | "preview",
-    ) => {
+    async (pdfPath: string, page: number, x: number, y: number) => {
       if (!daemon.projectPath) return;
       try {
         const result = await invoke<SynctexResult>("latex_synctex_edit", {
@@ -1170,24 +1155,16 @@ export default function EditorPage() {
             .replace(/\/+/g, "/");
 
         const normalFile = normalize(result.file);
-        const normalProject = normalize(daemon.projectPath);
-
-        let resolvedFile = normalFile;
-        if (resolvedFile.startsWith(normalProject)) {
-          resolvedFile = resolvedFile.slice(normalProject.length).replace(/^\/+/, "");
-        }
+        const projectPrefix = `${normalize(daemon.projectPath).replace(/\/$/, "")}/`;
+        const resolvedFile = normalFile.startsWith(projectPrefix)
+          ? normalFile.slice(projectPrefix.length)
+          : normalFile;
 
         await handleFileSelect(resolvedFile);
         setPendingGoToLine(result.line);
       } catch (err) {
-        const errorStr = String(err);
-        if (errorStr.includes("SYNCTEX_NOT_INSTALLED")) {
-          pendingSynctexRetryRef.current = { page, x, y, context };
-          setShowSynctexInstallDialog(true);
-        } else {
-          console.error("SyncTeX lookup failed:", err);
-          toast("SyncTeX lookup failed. Check that your PDF has a .synctex.gz file.", "error");
-        }
+        console.error("SyncTeX lookup failed:", err);
+        toast("Could not find a source location for this PDF position.", "error");
       }
     },
     [daemon.projectPath, handleFileSelect, toast],
@@ -1197,7 +1174,7 @@ export default function EditorPage() {
     (page: number, x: number, y: number) => {
       if (!daemon.projectPath || !selectedFile) return;
       const pdfPath = pathSync.join(daemon.projectPath, selectedFile);
-      void runInverseSynctex(pdfPath, page, x, y, "main");
+      void runInverseSynctex(pdfPath, page, x, y);
     },
     [daemon.projectPath, runInverseSynctex, selectedFile],
   );
@@ -1206,7 +1183,7 @@ export default function EditorPage() {
     (page: number, x: number, y: number) => {
       if (!daemon.projectPath || !splitPane?.selectedFile) return;
       const pdfPath = pathSync.join(daemon.projectPath, splitPane.selectedFile);
-      void runInverseSynctex(pdfPath, page, x, y, "split");
+      void runInverseSynctex(pdfPath, page, x, y);
     },
     [daemon.projectPath, runInverseSynctex, splitPane?.selectedFile],
   );
@@ -1214,7 +1191,7 @@ export default function EditorPage() {
   const handleLivePreviewSynctexClick = useCallback(
     (page: number, x: number, y: number) => {
       if (!latexCompiler.pdfPath) return;
-      void runInverseSynctex(latexCompiler.pdfPath, page, x, y, "preview");
+      void runInverseSynctex(latexCompiler.pdfPath, page, x, y);
     },
     [latexCompiler.pdfPath, runInverseSynctex],
   );
@@ -1251,12 +1228,8 @@ export default function EditorPage() {
           nonce: Date.now(),
         });
       } catch (err) {
-        const errorStr = String(err);
-        if (errorStr.includes("SYNCTEX_NOT_INSTALLED")) {
-          setShowSynctexInstallDialog(true);
-        } else {
-          toast("Could not resolve PDF location for this source line.", "error");
-        }
+        console.error("SyncTeX lookup failed:", err);
+        toast("Could not resolve PDF location for this source line.", "error");
       }
     },
     [
@@ -1269,23 +1242,6 @@ export default function EditorPage() {
       toast,
     ],
   );
-
-  const handleSynctexInstallComplete = useCallback(() => {
-    setShowSynctexInstallDialog(false);
-    const pending = pendingSynctexRetryRef.current;
-    if (pending) {
-      pendingSynctexRetryRef.current = null;
-      setTimeout(() => {
-        if (pending.context === "main") {
-          handleSynctexClick(pending.page, pending.x, pending.y);
-        } else if (pending.context === "preview") {
-          handleLivePreviewSynctexClick(pending.page, pending.x, pending.y);
-        } else {
-          handleSplitSynctexClick(pending.page, pending.x, pending.y);
-        }
-      }, 500);
-    }
-  }, [handleLivePreviewSynctexClick, handleSplitSynctexClick, handleSynctexClick]);
 
   const historyDiffRequestIdRef = useRef(0);
 
@@ -4679,15 +4635,6 @@ export default function EditorPage() {
           onCancel={handleMainFileDialogCancel}
         />
       )}
-
-      <SynctexInstallDialog
-        open={showSynctexInstallDialog}
-        onClose={() => {
-          setShowSynctexInstallDialog(false);
-          pendingSynctexRetryRef.current = null;
-        }}
-        onInstallComplete={handleSynctexInstallComplete}
-      />
 
       {showGitHubPublishDialog && (
         <GitHubPublishDialog

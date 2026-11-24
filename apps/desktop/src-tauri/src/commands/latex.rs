@@ -10,6 +10,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::Mutex;
 
+mod synctex;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaTeXDistribution {
     pub name: String,
@@ -1068,11 +1070,12 @@ pub async fn latex_synctex_edit(
     x: f64,
     y: f64,
 ) -> Result<SynctexResult, String> {
-    let synctex_info = find_compiler("synctex").await;
-    let synctex_bin = if synctex_info.available {
-        synctex_info.path.unwrap_or_else(|| "synctex".to_string())
-    } else {
-        return Err("SYNCTEX_NOT_INSTALLED: SyncTeX binary was not found. Install a TeX distribution (TeX Live, MiKTeX, or TinyTeX) to enable PDF-to-source navigation.".to_string());
+    let Some(synctex_bin) = find_compiler("synctex").await.path else {
+        return tokio::task::spawn_blocking(move || {
+            synctex::SyncMap::load(Path::new(&pdf_path))?.edit(page, x, y)
+        })
+        .await
+        .map_err(|error| format!("Could not read SyncTeX data: {error}"))?;
     };
 
     let input_spec = format!("{}:{}:{}:{}", page, x, y, pdf_path);
@@ -1122,11 +1125,12 @@ pub async fn latex_synctex_view(
     line: u32,
     column: u32,
 ) -> Result<SynctexViewResult, String> {
-    let synctex_info = find_compiler("synctex").await;
-    let synctex_bin = if synctex_info.available {
-        synctex_info.path.unwrap_or_else(|| "synctex".to_string())
-    } else {
-        return Err("SYNCTEX_NOT_INSTALLED: SyncTeX binary was not found. Install a TeX distribution (TeX Live, MiKTeX, or TinyTeX) to enable source-to-PDF navigation.".to_string());
+    let Some(synctex_bin) = find_compiler("synctex").await.path else {
+        return tokio::task::spawn_blocking(move || {
+            synctex::SyncMap::load(Path::new(&pdf_path))?.view(Path::new(&tex_path), line, column)
+        })
+        .await
+        .map_err(|error| format!("Could not read SyncTeX data: {error}"))?;
     };
 
     let input_spec = format!("{}:{}:{}", line, column.max(1), tex_path);
@@ -1150,33 +1154,6 @@ pub async fn latex_synctex_view(
 
     let stdout = decode_process_bytes(&output.stdout);
     parse_synctex_view_output(&stdout)
-}
-
-/// Quick-install synctex via tlmgr (when a TeX distribution already exists).
-#[tauri::command]
-pub async fn latex_install_synctex() -> Result<bool, String> {
-    let tlmgr_info = find_compiler("tlmgr").await;
-    if !tlmgr_info.available {
-        return Ok(false);
-    }
-
-    let tlmgr_bin = tlmgr_info.path.unwrap_or_else(|| "tlmgr".to_string());
-
-    let mut cmd = command(&tlmgr_bin);
-    cmd.args(["install", "--reinstall", "synctex"])
-        .env("PATH", build_tex_env_path());
-
-    let output = cmd
-        .output()
-        .await
-        .map_err(|e| format!("Failed to run tlmgr: {}", e))?;
-
-    if output.status.success() {
-        Ok(true)
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("tlmgr install synctex failed: {}", stderr))
-    }
 }
 
 /// Get recommended LaTeX distributions for the current platform
