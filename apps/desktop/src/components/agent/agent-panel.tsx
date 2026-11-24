@@ -112,7 +112,6 @@ export const AgentPanel = memo(function AgentPanel({
   }, [anyReadyProvider]);
 
   const handleSelectProvider = async (providerId: AgentProviderId) => {
-    onUpdateAgentSettings({ defaultProvider: providerId });
     const targetProvider = agent.providers.find((p) => p.id === providerId);
     const savedModel = agentSettings.defaultModelByProvider[providerId];
     const defaultModel =
@@ -131,16 +130,17 @@ export const AgentPanel = memo(function AgentPanel({
       : undefined;
 
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         providerId,
         model: defaultModel ?? "",
         reasoningEffort: defaultEffort ?? "",
       });
+      if (!updated) return;
     }
+    onUpdateAgentSettings({ defaultProvider: providerId });
   };
 
   const handleChangeModel = async (modelId: string) => {
-    onSetDefaultModel(currentProviderId, modelId);
     const modelInfo = activeProvider?.models.find((m) => m.id === modelId);
     const savedEffort = agentSettings.defaultEffortByProvider[currentProviderId];
     const supported = modelInfo?.supportedEffortLevels ?? [];
@@ -152,38 +152,43 @@ export const AgentPanel = memo(function AgentPanel({
       ? (validSaved ?? modelInfo.defaultEffort ?? supported[0] ?? "")
       : "";
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         model: modelId,
         reasoningEffort: effort,
       });
+      if (!updated) return;
     }
+    onSetDefaultModel(currentProviderId, modelId);
   };
 
   const handleChangeEffort = async (effort: string) => {
-    onSetDefaultEffort(currentProviderId, effort);
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         reasoningEffort: effort,
       });
+      if (!updated) return;
     }
+    onSetDefaultEffort(currentProviderId, effort);
   };
 
   const handleChangeInteractionMode = async (mode: InteractionMode) => {
-    onUpdateAgentSettings({ defaultInteractionMode: mode });
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         interactionMode: mode,
       });
+      if (!updated) return;
     }
+    onUpdateAgentSettings({ defaultInteractionMode: mode });
   };
 
   const handleChangeRuntimeMode = async (mode: RuntimeMode) => {
-    onUpdateAgentSettings({ defaultRuntimeMode: mode });
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         runtimeMode: mode,
       });
+      if (!updated) return;
     }
+    onUpdateAgentSettings({ defaultRuntimeMode: mode });
   };
 
   const handleSend = useCallback(

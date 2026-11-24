@@ -332,6 +332,21 @@ pub async fn agent_update_thread(
     let claude_startup_change = !provider_changed
         && existing.summary.provider_id == AgentProviderId::Claude
         && (effort_changed || full_access_changed);
+    let acp_runtime_changed = !provider_changed
+        && matches!(
+            existing.summary.provider_id,
+            AgentProviderId::Antigravity | AgentProviderId::CustomAcp
+        )
+        && runtime_mode
+            .map(|rm| rm != existing.summary.runtime_mode)
+            .unwrap_or(false);
+
+    if is_turn_active && (provider_changed || claude_startup_change || acp_runtime_changed) {
+        return Err(
+            "Stop the active turn before changing provider, effort, or access mode on a running thread."
+                .to_string(),
+        );
+    }
 
     let existing_claude_handle = if !provider_changed
         && existing.summary.provider_id == AgentProviderId::Claude
@@ -344,12 +359,6 @@ pub async fn agent_update_thread(
 
     if let Some(handle) = existing_claude_handle {
         if claude_startup_change {
-            if is_turn_active {
-                return Err(
-                    "Stop the active turn before changing effort or Full Access mode on a Claude thread."
-                        .to_string(),
-                );
-            }
             // Idle Claude process cannot apply --effort or --allow-dangerously-skip-permissions live.
             // Terminate it while preserving provider_session_id so the next turn resumes with the new flags.
             let removed = { state.claude_sessions.lock().await.remove(&thread_id) };

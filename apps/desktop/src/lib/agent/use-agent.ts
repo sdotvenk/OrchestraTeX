@@ -415,20 +415,27 @@ export function useAgent({ projectPath, settings, onOpenUsage }: UseAgentOptions
     async (threadId: string, patch: UpdateThreadPatch): Promise<ThreadSummary | null> => {
       const targetProject = projectPathRef.current;
       if (!targetProject) return null;
-      const updated = await invoke<ThreadSummary>("agent_update_thread", {
-        projectPath: targetProject,
-        threadId,
-        ...patch,
-      });
-      setState((prev) => ({
-        ...prev,
-        threads: upsertThreadSummary(prev.threads, updated),
-        activeThread:
-          prev.activeThread?.summary.id === updated.id
-            ? { ...prev.activeThread, summary: updated }
-            : prev.activeThread,
-      }));
-      return updated;
+      try {
+        const updated = await invoke<ThreadSummary>("agent_update_thread", {
+          projectPath: targetProject,
+          threadId,
+          ...patch,
+        });
+        setState((prev) => ({
+          ...prev,
+          threads: upsertThreadSummary(prev.threads, updated),
+          activeThread:
+            prev.activeThread?.summary.id === updated.id
+              ? { ...prev.activeThread, summary: updated }
+              : prev.activeThread,
+          error: null,
+        }));
+        return updated;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setState((prev) => ({ ...prev, error: message }));
+        return null;
+      }
     },
     [],
   );
