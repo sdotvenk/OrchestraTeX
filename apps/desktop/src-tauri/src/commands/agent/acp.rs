@@ -898,32 +898,7 @@ pub async fn probe_acp(
         .await
         {
             let text = String::from_utf8_lossy(&out.stdout);
-            for line in text.lines() {
-                let trimmed = line.trim();
-                if trimmed.is_empty()
-                    || trimmed.starts_with("Fetching")
-                    || trimmed.starts_with("Error:")
-                    || trimmed.starts_with("Available")
-                {
-                    continue;
-                }
-                let id = trimmed
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or(trimmed)
-                    .to_string();
-                models.push(ModelInfo {
-                    id: id.clone(),
-                    name: trimmed.to_string(),
-                    description: None,
-                    supports_effort: false,
-                    supported_effort_levels: Vec::new(),
-                    default_effort: None,
-                    supports_fast_mode: false,
-                    is_default: models.is_empty(),
-                    context_window: None,
-                });
-            }
+            models = parse_agy_models_output(&text);
         }
     }
 
@@ -1360,16 +1335,11 @@ async fn handle_acp_agent_request(
                 .get("rawInput")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let file_path = tool_call
-                .get("locations")
-                .and_then(|l| l.as_array())
-                .and_then(|a| a.first())
-                .and_then(|loc| loc.get("path"))
-                .and_then(|p| p.as_str())
-                .map(|s| s.to_string());
+            let (file_path, diff) = acp_approval_edit_preview(&tool_call, &raw_input, &tool_name);
             let command = raw_input
                 .get("command")
                 .and_then(|v| v.as_str())
+                .or_else(|| raw_input.get("CommandLine").and_then(|v| v.as_str()))
                 .map(|s| s.to_string());
 
             let options: Vec<PermissionOption> = params
@@ -1401,7 +1371,7 @@ async fn handle_acp_agent_request(
                 title,
                 command,
                 file_path,
-                diff: None,
+                diff,
                 reason: None,
                 input: raw_input,
                 options: options.clone(),
@@ -1830,13 +1800,7 @@ pub fn parse_acp_tool_call(update: &Value) -> Option<AgentPart> {
     });
 
     let mut diff: Option<String> = None;
-    let mut file_path = update
-        .get("locations")
-        .and_then(|l| l.as_array())
-        .and_then(|a| a.first())
-        .and_then(|loc| loc.get("path"))
-        .and_then(|p| p.as_str())
-        .map(|s| s.to_string());
+    let mut file_path = acp_tool_location(update);
 
     if let Some(content_arr) = update.get("content").and_then(|c| c.as_array()) {
         for c in content_arr {
@@ -1888,6 +1852,46 @@ pub fn parse_acp_tool_call(update: &Value) -> Option<AgentPart> {
         diff,
         parent_tool_call_id: None,
     })
+}
+
+fn acp_tool_location(tool_call: &Value) -> Option<String> {
+    tool_call
+        .get("locations")
+        .and_then(Value::as_array)?
+        .first()?
+        .get("path")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+fn acp_approval_edit_preview(
+    tool_call: &Value,
+    raw_input: &Value,
+    kind: &str,
+) -> (Option<String>, Option<String>) {
+    let (mut path, mut diff) = match parse_acp_tool_call(tool_call) {
+        Some(AgentPart::Tool {
+            file_path, diff, ..
+        }) => (file_path, diff),
+        _ => (acp_tool_location(tool_call), None),
+    };
+    if kind == "edit" {
+        if path.is_none() {
+            path = raw_input
+                .get("Path")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+        if diff.is_none() {
+            if let (Some(target), Some(replacement)) = (
+                raw_input.get("Target").and_then(Value::as_str),
+                raw_input.get("Replacement").and_then(Value::as_str),
+            ) {
+                diff = Some(format!("--- before\n{target}\n+++ after\n{replacement}"));
+            }
+        }
+    }
+    (path, diff)
 }
 
 pub fn parse_acp_plan(update: &Value) -> Option<Vec<PlanTaskItem>> {
@@ -1959,9 +1963,64 @@ pub fn parse_acp_usage(update: &Value) -> Option<TokenUsageSnapshot> {
     })
 }
 
+fn parse_agy_models_output(text: &str) -> Vec<ModelInfo> {
+    let mut models = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("Fetching")
+            || trimmed.starts_with("Error:")
+            || trimmed.starts_with("Available")
+        {
+            continue;
+        }
+        let (id, name) = match trimmed.split_once(char::is_whitespace) {
+            Some((id, rest)) => {
+                let label = rest.trim();
+                let name = if label.is_empty() { id } else { label };
+                (id, name)
+            }
+            None => (trimmed, trimmed),
+        };
+        models.push(ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: None,
+            supports_effort: false,
+            supported_effort_levels: Vec::new(),
+            default_effort: None,
+            supports_fast_mode: false,
+            is_default: models.is_empty(),
+            context_window: None,
+        });
+    }
+    models
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn previews_agy_replacement_in_edit_approval() {
+        let input = json!({
+            "Path": "/paper/main.tex",
+            "Target": "Original text",
+            "Replacement": "Revised text"
+        });
+        let tool_call = json!({"toolCallId": "edit-1", "kind": "edit"});
+        assert_eq!(
+            acp_approval_edit_preview(&tool_call, &input, "edit"),
+            (
+                Some("/paper/main.tex".into()),
+                Some("--- before\nOriginal text\n+++ after\nRevised text".into())
+            )
+        );
+        assert_eq!(
+            acp_approval_edit_preview(&tool_call, &input, "execute"),
+            (None, None)
+        );
+    }
 
     #[test]
     fn parses_acp_usage_update() {
@@ -2015,5 +2074,32 @@ mod tests {
         let tasks = parse_acp_plan(&pl).unwrap();
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].status, "completed");
+    }
+
+    #[test]
+    fn parses_agy_models_output() {
+        let output = "\
+Fetching models...
+Available models:
+
+gemini-4-hydrogen-low\tGemini 4 Hydrogen (Low)
+gemini-4-hydrogen-high   Gemini 4 Hydrogen (High)
+gemini-4-pro
+Error: something else
+";
+        let models = parse_agy_models_output(output);
+        assert_eq!(models.len(), 3);
+
+        assert_eq!(models[0].id, "gemini-4-hydrogen-low");
+        assert_eq!(models[0].name, "Gemini 4 Hydrogen (Low)");
+        assert!(models[0].is_default);
+
+        assert_eq!(models[1].id, "gemini-4-hydrogen-high");
+        assert_eq!(models[1].name, "Gemini 4 Hydrogen (High)");
+        assert!(!models[1].is_default);
+
+        assert_eq!(models[2].id, "gemini-4-pro");
+        assert_eq!(models[2].name, "gemini-4-pro");
+        assert!(!models[2].is_default);
     }
 }

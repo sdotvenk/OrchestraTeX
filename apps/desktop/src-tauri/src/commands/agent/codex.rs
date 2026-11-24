@@ -1420,7 +1420,7 @@ async fn handle_codex_server_request(
                 .get("itemId")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let interaction = PendingInteraction::Approval {
+            let mut interaction = PendingInteraction::Approval {
                 id: interaction_id.clone(),
                 thread_id: local_tid.clone(),
                 tool_call_id,
@@ -1460,6 +1460,21 @@ async fn handle_codex_server_request(
             );
             let _ = store
                 .mutate_thread(&project_path, &local_tid, |t| {
+                    if let PendingInteraction::Approval {
+                        tool_call_id: Some(item_id), file_path, diff, input, ..
+                    } = &mut interaction {
+                        if let Some(AgentPart::Tool {
+                            file_path: stored_path, diff: stored_diff, input: stored_input, ..
+                        }) = t.messages.iter().rev().flat_map(|m| m.parts.iter().rev()).find(
+                            |part| matches!(part, AgentPart::Tool { call_id, tool, .. } if call_id == item_id && tool == "edit"),
+                        ) {
+                            *file_path = stored_path.clone().or_else(|| file_path.clone());
+                            *diff = stored_diff.clone();
+                            if let Some(changes) = stored_input.get("changes") {
+                                input["changes"] = changes.clone();
+                            }
+                        }
+                    }
                     ThreadStore::set_pending_interaction(t, Some(interaction.clone()));
                     t.summary.status = "waiting_input".to_string();
                 })

@@ -42,7 +42,11 @@ export function ApprovalCard({ interaction, sessionDirectory, onDecide }: Approv
       : null;
 
   const directory = cwd ?? (interaction.command ? sessionDirectory : null);
-  const title = interaction.title === `Allow ${interaction.toolName}` ? null : interaction.title;
+  const title =
+    interaction.title === `Allow ${interaction.toolName}` ||
+    interaction.title === interaction.command
+      ? null
+      : interaction.title;
   const reason = interaction.reason?.trim();
   const showReason = reason && !/^this command requires approval\.?$/i.test(reason);
   const hasCustomOptions = interaction.options && interaction.options.length > 0;
