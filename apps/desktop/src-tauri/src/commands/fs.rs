@@ -309,6 +309,29 @@ pub async fn write_file(
 }
 
 #[tauri::command]
+pub async fn create_latex_project(directory: String) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+
+    let root = fs::canonicalize(&directory)
+        .await
+        .map_err(|e| e.to_string())?;
+    let main_file = root.join("main.tex");
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&main_file)
+        .await
+        .map_err(|e| format!("Could not create main.tex: {e}"))?;
+    let template = b"\\documentclass{article}\n\n\\begin{document}\n\n\\end{document}\n";
+    if let Err(error) = file.write_all(template).await {
+        drop(file);
+        let _ = fs::remove_file(&main_file).await;
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn create_file(path: String, encoding: Option<String>) -> Result<(), String> {
     ensure_utf8_encoding(encoding.as_deref())?;
 
@@ -340,21 +363,188 @@ pub async fn create_directory(path: String) -> Result<(), String> {
     fs::create_dir_all(&path).await.map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub async fn rename_path(old_path: String, new_path: String) -> Result<(), String> {
-    // Check if old path exists
-    if !Path::new(&old_path).exists() {
-        return Err(format!("Path not found: {}", old_path));
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameReferenceUpdate {
+    pub path: String,
+    pub before: String,
+    pub after: String,
+}
+
+struct PreparedReferenceUpdate {
+    target_path: PathBuf,
+    before: String,
+    after: String,
+}
+
+async fn rollback_rename_transaction(
+    old_path: &str,
+    new_path: &str,
+    applied: &[PreparedReferenceUpdate],
+) -> Vec<String> {
+    let mut rollback_errors = Vec::new();
+
+    for update in applied.iter().rev() {
+        let target_str = update.target_path.to_string_lossy().to_string();
+        match fs::read_to_string(&update.target_path).await {
+            Ok(current) if current == update.after => {
+                if let Err(err) = write_utf8_file(&target_str, &update.before).await {
+                    rollback_errors.push(format!("Failed to restore {}: {}", target_str, err));
+                }
+            }
+            Ok(_) => {
+                rollback_errors.push(format!(
+                    "Skipped rollback for {}: file changed after rename",
+                    target_str
+                ));
+            }
+            Err(err) => {
+                rollback_errors.push(format!(
+                    "Failed to read {} during rollback: {}",
+                    target_str, err
+                ));
+            }
+        }
     }
 
-    // Check if new path already exists
-    if Path::new(&new_path).exists() {
-        return Err(format!("Path already exists: {}", new_path));
+    if fs::try_exists(new_path).await.unwrap_or(false) {
+        let old_target = fs::canonicalize(old_path).await;
+        let new_target = fs::canonicalize(new_path).await;
+        if old_target.is_ok() && old_target.ok() != new_target.ok() {
+            rollback_errors.push(format!("Original path was recreated: {old_path}"));
+            return rollback_errors;
+        }
+        if let Err(err) = fs::rename(new_path, old_path).await {
+            rollback_errors.push(format!(
+                "Failed to restore rename {} -> {}: {}",
+                new_path, old_path, err
+            ));
+        }
+    }
+
+    rollback_errors
+}
+
+async fn rename_path_inner(
+    project_path: &str,
+    old_path: String,
+    new_path: String,
+    reference_updates: Option<Vec<RenameReferenceUpdate>>,
+) -> Result<(), String> {
+    validate_path_within_project(&old_path, project_path)?;
+    validate_path_within_project(&new_path, project_path)?;
+
+    let updates = reference_updates.unwrap_or_default();
+    for update in &updates {
+        validate_path_within_project(&update.path, project_path)?;
+    }
+
+    let _write_guard = PROJECT_WRITES.lock().await;
+
+    let old_path_obj = Path::new(&old_path);
+    let old_is_dir = fs::metadata(old_path_obj)
+        .await
+        .map_err(|e| format!("Invalid source path {old_path}: {e}"))?
+        .is_dir();
+    let canonical_old = fs::canonicalize(old_path_obj)
+        .await
+        .map_err(|e| format!("Invalid source path {}: {}", old_path, e))?;
+
+    let new_path_obj = Path::new(&new_path);
+    if fs::symlink_metadata(new_path_obj).await.is_ok() {
+        let is_same_file =
+            fs::canonicalize(new_path_obj).await.ok().as_ref() == Some(&canonical_old);
+        if !is_same_file {
+            return Err(format!("Path already exists: {}", new_path));
+        }
+        if old_path == new_path {
+            return Ok(());
+        }
+    }
+
+    let mut seen_paths = std::collections::HashSet::new();
+    let mut prepared_updates = Vec::with_capacity(updates.len());
+
+    for update in updates {
+        let canonical_update = fs::canonicalize(&update.path)
+            .await
+            .map_err(|e| format!("Invalid reference path {}: {}", update.path, e))?;
+        if !seen_paths.insert(canonical_update.clone()) {
+            return Err(format!("Duplicate reference update path: {}", update.path));
+        }
+
+        let current = fs::read_to_string(&canonical_update)
+            .await
+            .map_err(|e| format!("Failed to read {}: {}", update.path, e))?;
+        if current != update.before {
+            return Err(format!(
+                "Stale reference update for {}: file has changed",
+                update.path
+            ));
+        }
+
+        let target_path = if !old_is_dir && canonical_update == canonical_old {
+            PathBuf::from(&new_path)
+        } else if old_is_dir && canonical_update.starts_with(&canonical_old) {
+            let rel = canonical_update
+                .strip_prefix(&canonical_old)
+                .map_err(|e| format!("Failed to relocate {}: {}", update.path, e))?;
+            Path::new(&new_path).join(rel)
+        } else {
+            PathBuf::from(&update.path)
+        };
+
+        prepared_updates.push(PreparedReferenceUpdate {
+            target_path,
+            before: update.before,
+            after: update.after,
+        });
     }
 
     fs::rename(&old_path, &new_path)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    let mut applied = Vec::with_capacity(prepared_updates.len());
+    for update in prepared_updates {
+        let target_str = update.target_path.to_string_lossy().to_string();
+        if let Err(err) = write_utf8_file(&target_str, &update.after).await {
+            let rollback_errors = rollback_rename_transaction(&old_path, &new_path, &applied).await;
+            if rollback_errors.is_empty() {
+                return Err(format!(
+                    "Failed to update reference {}: {} (rolled back)",
+                    target_str, err
+                ));
+            }
+            return Err(format!(
+                "Failed to update reference {}: {}; rollback errors: {}",
+                target_str,
+                err,
+                rollback_errors.join("; ")
+            ));
+        }
+        applied.push(update);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn rename_path(
+    state: tauri::State<'_, Mutex<ProjectState>>,
+    old_path: String,
+    new_path: String,
+    reference_updates: Option<Vec<RenameReferenceUpdate>>,
+) -> Result<(), String> {
+    let project_path = {
+        let state_guard = state.lock().map_err(|e| e.to_string())?;
+        state_guard
+            .project_path
+            .clone()
+            .ok_or_else(|| "No project open".to_string())?
+    };
+
+    rename_path_inner(&project_path, old_path, new_path, reference_updates).await
 }
 
 #[tauri::command]
@@ -659,9 +849,11 @@ mod tests {
         let new_path = temp_dir.path().join("renamed.tex");
         fs::write(&old_path, "content").unwrap();
 
-        rename_path(
+        rename_path_inner(
+            &temp_dir.path().to_string_lossy(),
             old_path.to_string_lossy().to_string(),
             new_path.to_string_lossy().to_string(),
+            None,
         )
         .await
         .unwrap();
@@ -769,5 +961,187 @@ mod tests {
     async fn test_get_file_tree_returns_error_for_nonexistent_dir() {
         let result = get_file_tree("/nonexistent/directory".to_string()).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_rename_path_directory_relocates_nested_reference_updates() {
+        let temp_dir = TempDir::new().unwrap();
+        let project = temp_dir.path();
+        let old_dir = project.join("sections");
+        let new_dir = project.join("chapters");
+        fs::create_dir(&old_dir).unwrap();
+
+        let nested_file = old_dir.join("intro.tex");
+        let main_file = project.join("main.tex");
+        fs::write(&nested_file, "\\input{sections/sub}\n").unwrap();
+        fs::write(&main_file, "\\input{sections/intro}\n").unwrap();
+
+        rename_path_inner(
+            &project.to_string_lossy(),
+            old_dir.to_string_lossy().to_string(),
+            new_dir.to_string_lossy().to_string(),
+            Some(vec![
+                RenameReferenceUpdate {
+                    path: main_file.to_string_lossy().to_string(),
+                    before: "\\input{sections/intro}\n".to_string(),
+                    after: "\\input{chapters/intro}\n".to_string(),
+                },
+                RenameReferenceUpdate {
+                    path: nested_file.to_string_lossy().to_string(),
+                    before: "\\input{sections/sub}\n".to_string(),
+                    after: "\\input{chapters/sub}\n".to_string(),
+                },
+            ]),
+        )
+        .await
+        .unwrap();
+
+        assert!(!old_dir.exists());
+        assert!(new_dir.exists());
+        assert_eq!(
+            fs::read_to_string(&main_file).unwrap(),
+            "\\input{chapters/intro}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(new_dir.join("intro.tex")).unwrap(),
+            "\\input{chapters/sub}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rename_path_relocates_self_referencing_file_update() {
+        let temp_dir = TempDir::new().unwrap();
+        let project = temp_dir.path();
+        let old_file = project.join("intro.tex");
+        let new_file = project.join("overview.tex");
+        fs::write(&old_file, "\\input{intro}\n").unwrap();
+
+        rename_path_inner(
+            &project.to_string_lossy(),
+            old_file.to_string_lossy().to_string(),
+            new_file.to_string_lossy().to_string(),
+            Some(vec![RenameReferenceUpdate {
+                path: old_file.to_string_lossy().to_string(),
+                before: "\\input{intro}\n".to_string(),
+                after: "\\input{overview}\n".to_string(),
+            }]),
+        )
+        .await
+        .unwrap();
+
+        assert!(!old_file.exists());
+        assert!(new_file.exists());
+        assert_eq!(
+            fs::read_to_string(&new_file).unwrap(),
+            "\\input{overview}\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rename_path_allows_case_only_rename() {
+        let temp_dir = TempDir::new().unwrap();
+        let project = temp_dir.path();
+        let old_file = project.join("case_test.tex");
+        let new_file = project.join("Case_Test.tex");
+        fs::write(&old_file, "hello").unwrap();
+
+        rename_path_inner(
+            &project.to_string_lossy(),
+            old_file.to_string_lossy().to_string(),
+            new_file.to_string_lossy().to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(new_file.exists());
+        assert_eq!(fs::read_to_string(&new_file).unwrap(), "hello");
+    }
+
+    #[tokio::test]
+    async fn test_rename_path_rejects_stale_reference_update() {
+        let temp_dir = TempDir::new().unwrap();
+        let project = temp_dir.path();
+        let old_file = project.join("intro.tex");
+        let new_file = project.join("overview.tex");
+        let main_file = project.join("main.tex");
+        fs::write(&old_file, "intro").unwrap();
+        fs::write(&main_file, "\\input{intro}\n% edited\n").unwrap();
+
+        let result = rename_path_inner(
+            &project.to_string_lossy(),
+            old_file.to_string_lossy().to_string(),
+            new_file.to_string_lossy().to_string(),
+            Some(vec![RenameReferenceUpdate {
+                path: main_file.to_string_lossy().to_string(),
+                before: "\\input{intro}\n".to_string(),
+                after: "\\input{overview}\n".to_string(),
+            }]),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(old_file.exists());
+        assert!(!new_file.exists());
+        assert_eq!(
+            fs::read_to_string(&main_file).unwrap(),
+            "\\input{intro}\n% edited\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_rename_path_rolls_back_on_write_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let project = temp_dir.path();
+        let old_file = project.join("intro.tex");
+        let new_file = project.join("overview.tex");
+        let main_file = project.join("main.tex");
+        let appendix_file = project.join("appendix.tex");
+
+        fs::write(&old_file, "intro").unwrap();
+        fs::write(&main_file, "\\input{intro}\n").unwrap();
+        fs::write(&appendix_file, "\\input{intro}\n").unwrap();
+
+        // Make appendix_file read-only so the second reference write fails after
+        // old_file -> new_file and main_file have already been written.
+        let mut perms = fs::metadata(&appendix_file).unwrap().permissions();
+        perms.set_mode(0o444);
+        fs::set_permissions(&appendix_file, perms).unwrap();
+
+        let result = rename_path_inner(
+            &project.to_string_lossy(),
+            old_file.to_string_lossy().to_string(),
+            new_file.to_string_lossy().to_string(),
+            Some(vec![
+                RenameReferenceUpdate {
+                    path: main_file.to_string_lossy().to_string(),
+                    before: "\\input{intro}\n".to_string(),
+                    after: "\\input{overview}\n".to_string(),
+                },
+                RenameReferenceUpdate {
+                    path: appendix_file.to_string_lossy().to_string(),
+                    before: "\\input{intro}\n".to_string(),
+                    after: "\\input{overview}\n".to_string(),
+                },
+            ]),
+        )
+        .await;
+
+        let mut restore_perms = fs::metadata(&appendix_file).unwrap().permissions();
+        restore_perms.set_mode(0o644);
+        fs::set_permissions(&appendix_file, restore_perms).unwrap();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("rolled back"));
+        assert!(old_file.exists());
+        assert!(!new_file.exists());
+        assert_eq!(fs::read_to_string(&main_file).unwrap(), "\\input{intro}\n");
+        assert_eq!(
+            fs::read_to_string(&appendix_file).unwrap(),
+            "\\input{intro}\n"
+        );
     }
 }

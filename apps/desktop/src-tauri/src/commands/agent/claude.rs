@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{mpsc, Mutex};
@@ -663,7 +663,8 @@ pub async fn spawn_claude_session(
         args.push(thread.summary.id.clone());
     }
 
-    let mut cmd = spawn_cli_command(&bin_path, &args, &thread.summary.project_path).await;
+    let mut cmd =
+        spawn_cli_command(&bin_path, &args, thread.summary.effective_workspace_path()).await;
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1478,6 +1479,13 @@ pub async fn spawn_claude_session(
                     };
 
                     apply_claude_result_usage(&mut last_usage, &val);
+                    if let Some(mgr) = app_out.try_state::<super::AgentManagerState>() {
+                        if let Ok(log) = mgr.get_usage_log(&app_out).await {
+                            let _ = log
+                                .record_claude_result(&project_path, &thread_id, None, &val)
+                                .await;
+                        }
+                    }
 
                     let mut emitted_fallback_part: Option<(String, AgentPart)> = None;
                     if let Some(msg_id) = active_message_id.take() {

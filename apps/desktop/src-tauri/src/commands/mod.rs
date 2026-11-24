@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod checkpoints;
 pub mod fs;
 pub mod git;
 pub mod latex;

@@ -323,6 +323,27 @@ pub struct AgentMessage {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSchedule {
+    pub run_at: i64,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat_interval_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleRunResult {
+    pub thread_id: String,
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSummary {
@@ -342,6 +363,25 @@ pub struct ThreadSummary {
     pub message_count: usize,
     pub last_preview: Option<String>,
     pub status: String, // "idle" | "running" | "waiting_input" | "error"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<ThreadSchedule>,
+}
+
+impl ThreadSummary {
+    /// Returns the effective workspace directory for provider sessions:
+    /// the per-thread Git worktree path if configured, otherwise `project_path`.
+    pub fn effective_workspace_path(&self) -> &str {
+        self.workspace_path
+            .as_deref()
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or(&self.project_path)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -359,6 +399,11 @@ pub struct AgentThread {
 pub enum AgentStreamEvent {
     #[serde(rename_all = "camelCase")]
     ThreadUpdated { thread: ThreadSummary },
+    #[serde(rename_all = "camelCase")]
+    ThreadDeleted {
+        project_path: String,
+        thread_id: String,
+    },
     #[serde(rename_all = "camelCase")]
     MessageAdded {
         thread_id: String,

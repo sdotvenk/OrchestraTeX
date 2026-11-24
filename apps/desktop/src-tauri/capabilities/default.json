@@ -102,6 +102,7 @@
     "fs:default",
     "fs:allow-read",
     "fs:allow-write",
+    "fs:allow-write-text-file",
     "dialog:default",
     "notification:default",
     "os:default",

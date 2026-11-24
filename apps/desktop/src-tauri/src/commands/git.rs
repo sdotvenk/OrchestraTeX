@@ -61,6 +61,153 @@ async fn run_git(cwd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchPullRequest {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub url: String,
+    pub is_draft: bool,
+}
+
+#[tauri::command]
+pub async fn git_branch_pull_request(
+    dir: String,
+    branch: Option<String>,
+) -> Result<Option<GitBranchPullRequest>, String> {
+    run_git(&dir, &["rev-parse", "--show-toplevel"]).await?;
+    let branch = match branch {
+        Some(branch) => branch,
+        None => run_git(&dir, &["branch", "--show-current"])
+            .await?
+            .trim()
+            .to_owned(),
+    };
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err("A valid branch is required".to_string());
+    }
+    run_git(&dir, &["check-ref-format", "--branch", &branch]).await?;
+    let output = match command("gh")
+        .args([
+            "pr",
+            "view",
+            &branch,
+            "--json",
+            "number,title,state,url,isDraft",
+        ])
+        .current_dir(&dir)
+        .output()
+        .await
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        if error.starts_with("no pull requests found for branch ") {
+            return Ok(None);
+        }
+        return Err(if error.is_empty() {
+            "gh pr view failed".to_string()
+        } else {
+            error
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn git_open_branch_pull_request(dir: String) -> Result<String, String> {
+    let branch = run_git(&dir, &["branch", "--show-current"]).await?;
+    let branch = branch.trim();
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err("Check out a branch before opening a pull request".to_string());
+    }
+    let existing = git_branch_pull_request(dir.clone(), Some(branch.to_string())).await?;
+    git_push(dir.clone()).await?;
+    if let Some(pr) = existing {
+        if pr.state == "OPEN" {
+            return Ok(pr.url);
+        }
+    }
+    let output = command("gh")
+        .args(["pr", "create", "--fill", "--head", branch])
+        .current_dir(&dir)
+        .output()
+        .await
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn git_merge_thread_worktree(
+    dir: String,
+    workspace: String,
+    target_branch: String,
+) -> Result<(), String> {
+    let common_dir = |checkout: String| async move {
+        let path = run_git(&checkout, &["rev-parse", "--git-common-dir"]).await?;
+        tokio::fs::canonicalize(std::path::Path::new(&checkout).join(path.trim()))
+            .await
+            .map_err(|error| error.to_string())
+    };
+    let (project_git_dir, worktree_git_dir) =
+        tokio::try_join!(common_dir(dir.clone()), common_dir(workspace.clone()))?;
+    if project_git_dir != worktree_git_dir {
+        return Err("The worktree belongs to a different repository".to_string());
+    }
+    let current_branch = run_git(&dir, &["branch", "--show-current"]).await?;
+    if target_branch.is_empty() || current_branch.trim() != target_branch {
+        return Err(
+            "The project branch changed. Review the target branch before merging".to_string(),
+        );
+    }
+    let branch = run_git(&workspace, &["branch", "--show-current"]).await?;
+    let branch = branch.trim();
+    if !branch.starts_with("orchestratex/") {
+        return Err("Select an OrchestraTeX thread worktree".to_string());
+    }
+    for checkout in [&dir, &workspace] {
+        let status = run_git(checkout, &["status", "--porcelain"]).await?;
+        if !status.trim().is_empty() {
+            return Err(
+                "Commit or review pending changes in both checkouts before merging".to_string(),
+            );
+        }
+    }
+    if run_git(&dir, &["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+        .await
+        .is_ok()
+    {
+        return Err("Finish the current merge first".to_string());
+    }
+    match run_git(&dir, &["merge", "--no-edit", "--", branch]).await {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            if run_git(&dir, &["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+                .await
+                .is_ok()
+            {
+                run_git(&dir, &["merge", "--abort"])
+                    .await
+                    .map_err(|abort_error| {
+                        format!("Merge failed: {error}. Could not abort: {abort_error}")
+                    })?;
+                return Err("The branches have conflicts. The merge was aborted".to_string());
+            }
+            Err(error)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn git_status(dir: String) -> Result<GitStatus, String> {
     let git_dir = std::path::Path::new(&dir).join(".git");
@@ -321,7 +468,7 @@ pub async fn git_unstage(dir: String, files: Vec<String>) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn git_add(dir: String, files: Vec<String>) -> Result<(), String> {
-    let mut args = vec!["add"];
+    let mut args = vec!["add", "--"];
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     args.extend(file_refs);
     run_git(&dir, &args).await?;
@@ -894,6 +1041,75 @@ pub async fn gh_create_repo(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn thread_worktree_merge_aborts_conflicts_and_keeps_the_project_head() {
+        let temp =
+            std::env::temp_dir().join(format!("orchestratex-merge-{}", uuid::Uuid::new_v4()));
+        let project = temp.join("project");
+        let worktree = temp.join("worktree");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let project_path = project.to_string_lossy();
+        let worktree_path = worktree.to_string_lossy();
+        for args in [
+            &["init", "-b", "main"][..],
+            &["config", "user.name", "OrchestraTeX test"],
+            &["config", "user.email", "test@example.com"],
+        ] {
+            run_git(&project_path, args).await.unwrap();
+        }
+        tokio::fs::write(project.join("main.tex"), "base\n")
+            .await
+            .unwrap();
+        run_git(&project_path, &["add", "main.tex"]).await.unwrap();
+        run_git(&project_path, &["commit", "-m", "base"])
+            .await
+            .unwrap();
+        run_git(
+            &project_path,
+            &["worktree", "add", "-b", "orchestratex/test", &worktree_path],
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(project.join("main.tex"), "project version\n")
+            .await
+            .unwrap();
+        tokio::fs::write(worktree.join("main.tex"), "thread version\n")
+            .await
+            .unwrap();
+        run_git(&project_path, &["commit", "-am", "project version"])
+            .await
+            .unwrap();
+        run_git(&worktree_path, &["commit", "-am", "thread version"])
+            .await
+            .unwrap();
+        let head = run_git(&project_path, &["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        let result = git_merge_thread_worktree(
+            project_path.to_string(),
+            worktree_path.to_string(),
+            "main".to_string(),
+        )
+        .await;
+        assert!(result.unwrap_err().contains("merge was aborted"));
+        assert_eq!(
+            run_git(&project_path, &["rev-parse", "HEAD"])
+                .await
+                .unwrap(),
+            head
+        );
+        assert_eq!(
+            run_git(&project_path, &["status", "--porcelain"])
+                .await
+                .unwrap(),
+            ""
+        );
+        run_git(&project_path, &["worktree", "remove", &worktree_path])
+            .await
+            .unwrap();
+        tokio::fs::remove_dir_all(temp).await.unwrap();
+    }
 
     #[test]
     fn gh_auth_login_windows_launch_plan_uses_visible_cmd() {

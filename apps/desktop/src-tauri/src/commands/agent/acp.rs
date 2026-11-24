@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, watch, Mutex};
@@ -61,6 +61,7 @@ struct AcpActiveTurn {
     #[allow(dead_code)]
     local_thread_id: String,
     project_path: String,
+    workspace_path: String,
     message_id: String,
     text_part_id: Option<String>,
     reasoning_part_id: Option<String>,
@@ -73,6 +74,7 @@ impl AcpClient {
         provider_id: AgentProviderId,
         binary_path: &str,
         extra_args: &[String],
+        project_path: &str,
         cwd: &str,
     ) -> Result<Self, String> {
         let mut cmd = spawn_cli_command(binary_path, extra_args, cwd).await;
@@ -150,6 +152,7 @@ impl AcpClient {
         // Stdout JSON-RPC reader
         let app_out = app.clone();
         let store_out = store.clone();
+        let thread_project = project_path.to_string();
         let cwd_root = cwd.to_string();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -211,6 +214,8 @@ impl AcpClient {
                         &store_out,
                         &stdin_tx,
                         &cwd_root,
+                        &thread_project,
+                        &active_turns,
                         &session_to_local,
                         &pending_permissions,
                         &terminals,
@@ -309,7 +314,7 @@ impl AcpClient {
                     "session/load",
                     json!({
                         "sessionId": existing_sid,
-                        "cwd": thread.summary.project_path,
+                        "cwd": thread.summary.effective_workspace_path(),
                         "mcpServers": [],
                     }),
                 )
@@ -324,7 +329,7 @@ impl AcpClient {
             .rpc_call(
                 "session/new",
                 json!({
-                    "cwd": thread.summary.project_path,
+                    "cwd": thread.summary.effective_workspace_path(),
                     "mcpServers": [],
                 }),
             )
@@ -597,6 +602,7 @@ impl AcpClient {
             AcpActiveTurn {
                 local_thread_id: thread.summary.id.clone(),
                 project_path: thread.summary.project_path.clone(),
+                workspace_path: thread.summary.effective_workspace_path().to_string(),
                 message_id: msg_id.clone(),
                 text_part_id: None,
                 reasoning_part_id: None,
@@ -1209,6 +1215,22 @@ async fn handle_acp_session_update(
             }
         }
         "usage_update" => {
+            if let Some(project_path) = get_turn_project(active_turns, session_id).await {
+                if let Some(mgr) = app.try_state::<super::AgentManagerState>() {
+                    if let Ok(log) = mgr.get_usage_log(&app).await {
+                        let model = store.get_thread_model(&project_path, &local_tid).await;
+                        let _ = log
+                            .record_acp_update(
+                                provider_id,
+                                &project_path,
+                                &local_tid,
+                                model.as_deref(),
+                                update,
+                            )
+                            .await;
+                    }
+                }
+            }
             if let Some(usage) = parse_acp_usage(update) {
                 if let Some(project_path) = get_turn_project(active_turns, session_id).await {
                     let _ = store
@@ -1277,6 +1299,8 @@ async fn handle_acp_agent_request(
     store: &ThreadStore,
     stdin_tx: &mpsc::UnboundedSender<String>,
     project_root: &str,
+    thread_project: &str,
+    active_turns: &Arc<Mutex<HashMap<String, AcpActiveTurn>>>,
     session_to_local: &Arc<Mutex<HashMap<String, String>>>,
     pending_permissions: &Arc<Mutex<HashMap<String, PendingAcpPermission>>>,
     terminals: &Arc<Mutex<HashMap<String, AcpTerminalProcess>>>,
@@ -1284,6 +1308,21 @@ async fn handle_acp_agent_request(
     rpc_id: Value,
     params: &Value,
 ) {
+    let session_id_param = params
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let effective_root = if !session_id_param.is_empty() {
+        active_turns
+            .lock()
+            .await
+            .get(session_id_param)
+            .map(|t| t.workspace_path.clone())
+            .unwrap_or_else(|| project_root.to_string())
+    } else {
+        project_root.to_string()
+    };
+    let project_root = effective_root.as_str();
     match method {
         "session/request_permission" => {
             let session_id = params
@@ -1373,13 +1412,13 @@ async fn handle_acp_agent_request(
                 PendingAcpPermission {
                     rpc_id,
                     local_thread_id: local_tid.clone(),
-                    project_path: project_root.to_string(),
+                    project_path: thread_project.to_string(),
                     options,
                 },
             );
 
             let _ = store
-                .mutate_thread(project_root, &local_tid, |t| {
+                .mutate_thread(thread_project, &local_tid, |t| {
                     ThreadStore::set_pending_interaction(t, Some(interaction.clone()));
                     t.summary.status = "waiting_input".to_string();
                 })
