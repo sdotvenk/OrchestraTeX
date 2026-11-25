@@ -1,8 +1,7 @@
 "use client";
 
-import { ArrowClockwiseIcon, WarningIcon } from "@phosphor-icons/react";
 import { AnimatePresence, motion } from "framer-motion";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Spinner } from "@/components/ui/spinner";
 import { useLatexInstaller } from "@/lib/latex";
 
@@ -22,12 +21,24 @@ export function LaTeXInstallPrompt({ onRefreshCompilers }: LaTeXInstallPromptPro
     isInstalling,
   } = useLatexInstaller();
 
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
   useEffect(() => {
     fetchDistributions();
   }, [fetchDistributions]);
 
+  useEffect(() => {
+    if (distributions.length > 0 && !selectedId) {
+      const first = distributions[0];
+      if (first) setSelectedId(first.id);
+    }
+  }, [distributions, selectedId]);
+
+  const selectedDist = distributions.find((d) => d.id === selectedId) ?? distributions[0] ?? null;
+
   const handleInstall = async (distributionId: string) => {
-    await install(distributionId);
+    const outcome = await install(distributionId);
+    if (outcome?.success) onRefreshCompilers?.();
   };
 
   const handleOpenDownload = (url: string) => {
@@ -40,169 +51,149 @@ export function LaTeXInstallPrompt({ onRefreshCompilers }: LaTeXInstallPromptPro
   }, [onRefreshCompilers, reset]);
 
   return (
-    <div className="bg-amber-50 border-2 border-amber-400 p-4">
-      <div className="flex items-start gap-3">
-        {/* Warning Icon */}
-        <WarningIcon className="size-6 text-amber-600 flex-shrink-0 mt-0.5" />
+    <div className="flex flex-col gap-2.5">
+      <div className="flex items-center gap-2.5 min-h-[30px] text-[12.5px]">
+        <span
+          className="size-4 rounded-full bg-error-bg text-error text-[10px] font-bold flex items-center justify-center shrink-0"
+          aria-hidden="true"
+        >
+          ✕
+        </span>
+        <span className="text-foreground">No TeX distribution found on PATH</span>
+      </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="font-bold text-amber-800">LaTeX Not Detected</h3>
-              <p className="text-sm text-amber-700 mt-1">
-                No LaTeX compiler was found on your system. Install a LaTeX distribution to compile
-                documents.
-              </p>
+      <AnimatePresence mode="wait">
+        {isInstalling && progress && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="rounded-[10px] border border-border bg-background p-3"
+          >
+            <div className="flex items-center gap-2">
+              <Spinner className="size-4" />
+              <span className="text-[12.5px] font-medium">{progress.stage}</span>
             </div>
-            {!isInstalling && !result && (
+            <p className="text-[12px] text-muted mt-1 break-words">{progress.message}</p>
+            {progress.progress !== null && (
+              <div className="mt-2 h-1.5 bg-sunken rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ width: `${progress.progress * 100}%` }}
+                />
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {result && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className={`rounded-[10px] border p-3 ${
+              result.success
+                ? "bg-success-bg border-[var(--ok-line)]"
+                : "bg-error-bg border-[var(--danger-line)]"
+            }`}
+          >
+            <p
+              className={`text-[12.5px] whitespace-pre-wrap ${
+                result.success ? "text-success" : "text-error"
+              }`}
+            >
+              {result.message}
+            </p>
+            {result.success ? (
+              <div className="mt-2.5 flex items-center gap-3">
+                <button type="button" onClick={handleRefresh} className="btn btn-primary btn-sm">
+                  Detect again
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
-                onClick={handleRefresh}
-                className="flex-shrink-0 p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-100 transition-colors"
-                title="Refresh compiler detection"
+                onClick={reset}
+                className="mt-2 text-[12px] text-foreground underline underline-offset-2"
               >
-                <ArrowClockwiseIcon className="size-4" />
+                Try again
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {!isInstalling && !result && distributions.length > 0 && (
+        <>
+          <div className="flex flex-col gap-2">
+            {distributions.map((dist) => {
+              const isSelected = selectedDist?.id === dist.id;
+              return (
+                <label
+                  key={dist.id}
+                  className={`flex items-start gap-3 rounded-[10px] border p-3 bg-background cursor-pointer transition-colors ${
+                    isSelected
+                      ? "border-[1.5px] border-foreground shadow-[2px_2px_0_var(--popover-border)]"
+                      : "border-border hover:border-border-dark"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="latex-dist"
+                    checked={isSelected}
+                    onChange={() => setSelectedId(dist.id)}
+                    className="mt-0.5 accent-primary"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 font-semibold text-[12.5px]">
+                      <span>{dist.name}</span>
+                      {dist.install_command && (
+                        <span className="font-mono font-normal text-[11.5px] text-muted truncate">
+                          {dist.install_command}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[12px] text-muted mt-0.5">{dist.description}</p>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            {selectedDist?.install_command && (
+              <button
+                type="button"
+                onClick={() => handleInstall(selectedDist.id)}
+                className="btn btn-primary btn-sm"
+              >
+                Install {selectedDist.name}
+              </button>
+            )}
+            <button type="button" onClick={handleRefresh} className="btn btn-secondary btn-sm">
+              Detect again
+            </button>
+            {selectedDist?.download_url && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedDist.download_url) handleOpenDownload(selectedDist.download_url);
+                }}
+                className="btn btn-ghost btn-sm underline underline-offset-3"
+              >
+                Download page
               </button>
             )}
           </div>
+        </>
+      )}
 
-          {/* Installation Progress */}
-          <AnimatePresence mode="wait">
-            {isInstalling && progress && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="mt-3 p-3 bg-background border border-amber-300"
-              >
-                <div className="flex items-center gap-2">
-                  <Spinner className="size-4" />
-                  <span className="text-sm font-medium">{progress.stage}</span>
-                </div>
-                <p className="text-sm text-muted mt-1 break-words">{progress.message}</p>
-                {progress.progress !== null && (
-                  <div className="mt-2 h-1.5 bg-amber-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500 transition-all duration-300"
-                      style={{ width: `${progress.progress * 100}%` }}
-                    />
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {result && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className={`mt-3 p-3 border ${
-                  result.success ? "bg-green-50 border-green-300" : "bg-background border-amber-300"
-                }`}
-              >
-                <p
-                  className={`text-sm whitespace-pre-wrap ${
-                    result.success ? "text-green-700" : "text-foreground-secondary"
-                  }`}
-                >
-                  {result.message}
-                </p>
-                {result.success && (
-                  <div className="mt-3 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleRefresh}
-                      className="btn btn-sm border-2 border-green-600 bg-green-600 text-white hover:bg-green-700 transition-colors"
-                    >
-                      Refresh Compilers
-                    </button>
-                    <span className="text-xs text-green-600">
-                      Click to detect the newly installed compiler
-                    </span>
-                  </div>
-                )}
-                {!result.success && (
-                  <button
-                    type="button"
-                    onClick={reset}
-                    className="mt-2 text-sm text-amber-700 hover:text-amber-900 underline"
-                  >
-                    Try again
-                  </button>
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Distribution Options */}
-          {!isInstalling && !result && distributions.length > 0 && (
-            <div className="mt-4 space-y-2">
-              {distributions.map((dist, index) => {
-                const downloadUrl = dist.download_url;
-
-                return (
-                  <div
-                    key={dist.id}
-                    className={`flex items-center justify-between gap-3 p-3 bg-background border transition-colors ${
-                      index === 0
-                        ? "border-green-400 hover:border-green-500"
-                        : "border-amber-200 hover:border-amber-400"
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="font-medium text-sm flex items-center gap-2">
-                        {dist.name}
-                        {index === 0 && (
-                          <span className="text-xs px-1.5 py-0.5 bg-green-100 text-green-700 font-normal">
-                            Recommended
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted mt-0.5">{dist.description}</p>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {dist.install_command && (
-                        <button
-                          type="button"
-                          onClick={() => handleInstall(dist.id)}
-                          className={`btn btn-sm border-2 transition-all ${
-                            index === 0
-                              ? "border-green-600 bg-green-600 text-white shadow-[2px_2px_0_0_#22c55e] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px]"
-                              : "border-foreground bg-foreground text-background shadow-[2px_2px_0_0_#fbbf24] hover:shadow-none hover:translate-x-[2px] hover:translate-y-[2px]"
-                          }`}
-                        >
-                          Install
-                        </button>
-                      )}
-                      {downloadUrl && (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDownload(downloadUrl)}
-                          className={`btn btn-sm border-2 transition-colors ${
-                            index === 0 && !dist.install_command
-                              ? "border-green-600 bg-green-600 text-white hover:bg-green-700"
-                              : "border-amber-600 bg-background text-amber-700 hover:bg-amber-50"
-                          }`}
-                        >
-                          Download
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Loading state */}
-          {!isInstalling && !result && distributions.length === 0 && (
-            <div className="mt-4 flex items-center gap-2 text-sm text-amber-600">
-              <Spinner className="size-4" />
-              Loading available distributions...
-            </div>
-          )}
+      {!isInstalling && !result && distributions.length === 0 && (
+        <div className="flex items-center gap-2 text-[12.5px] text-muted py-1">
+          <Spinner className="size-3.5" />
+          <span>Loading available distributions…</span>
         </div>
-      </div>
+      )}
     </div>
   );
 }

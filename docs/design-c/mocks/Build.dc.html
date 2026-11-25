@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Files, build errors and fixes</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;family=Instrument+Serif:ital@0;1&amp;family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.ui{font-family:'Geist',system-ui,sans-serif;font-size:13px;color:#1B1F33;-webkit-font-smoothing:antialiased}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+.ico{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ib{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;border-radius:7px;color:#4A4F63;padding:0}
+.row{display:flex;align-items:center;gap:7px;height:26px;padding:0 8px;border-radius:6px;white-space:nowrap}
+.ln{display:flex;height:20px;line-height:20px;font-family:'Geist Mono',monospace;font-size:12.5px;white-space:pre;position:relative}
+.ln .n{width:46px;text-align:right;padding-right:16px;color:#707383;flex:none;box-sizing:border-box}
+.c{color:#2B4C7E}.a{color:#7A5B1E}
+.sec{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#5A5E70}
+.tab{display:flex;align-items:center;gap:7px;height:36px;padding:0 14px;font-family:'Geist Mono',monospace;font-size:12px;color:#5A5E70;border-right:1px solid #E6DFD1;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.mi{display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:6px;font-size:12.5px;white-space:nowrap}
+.mk{margin-left:auto;font-family:'Geist Mono',monospace;font-size:11px;color:#707383}
+.pr{display:flex;align-items:center;gap:10px;height:34px;padding:0 12px;border-bottom:1px solid #F0EADF;font-size:12.5px;white-space:nowrap}
+</style>
+</helmet>
+<div class="ui" style="width:1440px;height:900px;background:#ECE7DC;display:flex;flex-direction:column;overflow:hidden;position:relative">
+
+  <header style="height:40px;display:flex;align-items:center;gap:14px;padding:0 12px 0 14px;border-bottom:1px solid #DCD4C4;flex:none">
+    <div style="display:flex;gap:8px" aria-hidden="true"><span style="width:12px;height:12px;border-radius:50%;background:#EE6A5F"></span><span style="width:12px;height:12px;border-radius:50%;background:#F5BF4F"></span><span style="width:12px;height:12px;border-radius:50%;background:#62C655"></span></div>
+    <div style="display:flex;align-items:center;gap:7px;margin-left:10px">
+      <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true"><g stroke="#1B1F33" stroke-width="1.3"><line x1="0" y1="3" x2="20" y2="3"></line><line x1="0" y1="6.5" x2="20" y2="6.5"></line><line x1="0" y1="10" x2="20" y2="10"></line><line x1="0" y1="13.5" x2="20" y2="13.5"></line></g><line x1="6" y1="1" x2="14" y2="15" stroke="#E2622A" stroke-width="2.4" stroke-linecap="round"></line></svg>
+      <span style="font-family:'Instrument Serif',serif;font-size:19px">OrchestraTeX</span>
+    </div>
+    <span style="width:1px;height:18px;background:#D3CABA"></span>
+    <span style="font-weight:500">membrane-atlas</span>
+    <span class="mono" style="font-size:11.5px;color:#4A4F63;border:1px solid #D3CABA;border-radius:999px;padding:2px 8px">⑂ main ↑1</span>
+    <nav aria-label="Workspace" style="margin-left:auto;margin-right:auto;display:flex;background:#E2DCCF;border-radius:9px;padding:3px;gap:2px">
+      <button style="border:0;font:inherit;font-weight:500;padding:4px 14px;border-radius:7px;background:#FCFAF5;box-shadow:0 1px 0 rgba(27,31,51,.12),0 0 0 1px rgba(27,31,51,.08)">Write</button>
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63">Agents</button>
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63">History</button>
+    </nav>
+    <span style="font-size:12px;color:#4A4F63">No agents running</span>
+    <button style="font:inherit;font-weight:500;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:8px;padding:4px 11px">Export</button>
+  </header>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <aside style="width:260px;flex:none;display:flex;flex-direction:column;padding:10px 8px 8px 10px;box-sizing:border-box;gap:4px">
+      <div style="display:flex;align-items:center;height:28px;padding:0 4px 0 8px">
+        <span class="sec">Files</span>
+        <span style="margin-left:auto;display:flex">
+          <button class="ib" aria-label="New file"><svg class="ico" viewBox="0 0 16 16"><path d="M9 2H4.5A1.5 1.5 0 0 0 3 3.5v9A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V6z"></path><path d="M8 8v4M6 10h4"></path></svg></button>
+          <button class="ib" aria-label="New folder"><svg class="ico" viewBox="0 0 16 16"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H6l1.5 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"></path></svg></button>
+          <button class="ib" aria-label="Upload"><svg class="ico" viewBox="0 0 16 16"><path d="M8 11V3M5 6l3-3 3 3M3 13h10"></path></svg></button>
+        </span>
+      </div>
+      <div style="display:flex;align-items:center;gap:7px;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:7px;padding:4px 8px;color:#707383;font-size:12px;margin:0 2px 4px"><svg class="ico" style="width:12px" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5L14 14"></path></svg>Find in project  <span class="mono" style="margin-left:auto;font-size:10.5px">⇧⌘F</span></div>
+      <div class="mono" style="font-size:12px;display:flex;flex-direction:column">
+        <div class="row" style="color:#4A4F63">▾ sections</div>
+        <div class="row" style="padding-left:28px">introduction.tex</div>
+        <div class="row" style="padding-left:28px">wave-field.tex</div>
+        <div class="row" style="padding-left:24px"><span style="flex:1;border:1.5px solid #1B1F33;border-radius:5px;background:#FFFFFF;padding:2px 5px;box-shadow:2px 2px 0 rgba(27,31,51,.15)">discussion<span style="background:#CFDAF5">.tex</span></span></div>
+        <div style="margin:2px 6px 4px 24px;display:flex;align-items:center;gap:6px;font-family:Geist,sans-serif;font-size:11.5px;color:#3A3E52;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:6px;padding:3px 4px 3px 8px">1 <span class="mono">\input</span> to update<button style="margin-left:auto;font:inherit;font-size:11.5px;font-weight:600;border:0;background:#1B1F33;color:#FCFAF5;border-radius:5px;padding:1px 7px">Update</button><button style="font:inherit;font-size:11.5px;border:0;background:transparent;padding:1px 4px">Skip</button></div>
+        <div class="row" style="padding-left:28px;background:#E2DCCF">results.tex<span style="margin-left:auto;color:#2F7D4F">A</span></div>
+        <div class="row" style="color:#4A4F63">▾ figures</div>
+        <div class="row" style="padding-left:28px">modes.pdf</div>
+        <div class="row" style="padding-left:28px;border:1.5px dashed #8A8C99;background:rgba(255,255,255,.4)">apparatus.png<span style="margin-left:auto;font-family:'Geist';font-size:10.5px;color:#4A4F63">drop to move</span></div>
+        <div class="row" style="color:#4A4F63">▸ data</div>
+        <div class="row" style="font-weight:500">main.tex<span style="margin-left:auto;display:flex;align-items:center;gap:6px"><span style="font-family:'Geist';font-size:10px;font-weight:600;color:#7A1F14;background:#F6DAD5;border-radius:4px;padding:0 5px">1 ERR</span></span></div>
+        <div class="row">references.bib</div>
+        <div class="row">journal.cls</div>
+      </div>
+
+    </aside>
+
+    <!-- Context menu -->
+    <div role="menu" aria-label="File actions" style="position:absolute;left:220px;top:256px;z-index:5;width:236px;background:#FCFAF5;border:1.5px solid #1B1F33;border-radius:10px;box-shadow:3px 3px 0 rgba(27,31,51,.9);padding:5px">
+      <div class="mi"><span>New file here</span><span class="mk">⌘N</span></div>
+      <div class="mi"><span>New folder here</span></div>
+      <div class="mi"><span>Import files into sections/</span></div>
+      <div style="height:1px;background:#E6DFD1;margin:4px 6px"></div>
+      <div class="mi" style="background:#1B1F33;color:#FCFAF5"><span>Rename</span><span class="mk" style="color:#B9BCCB">↵</span></div>
+      <div class="mi"><span>Duplicate</span></div>
+      <div class="mi"><span>Copy absolute path</span></div>
+      <div class="mi"><span>Set as main document</span></div>
+      <div style="height:1px;background:#E6DFD1;margin:4px 6px"></div>
+      <div class="mi"><span>Copy path</span><span class="mk">⌥⌘C</span></div>
+      <div class="mi"><span>Reveal in Finder</span></div>
+      <div class="mi"><span>Open terminal here</span></div>
+      <div class="mi"><span style="display:flex;align-items:center;gap:6px"><span class="dot" style="background:#D9541A"></span>Ask an agent about this file</span></div>
+      <div style="height:1px;background:#E6DFD1;margin:4px 6px"></div>
+      <div class="mi" style="color:#A12C1F"><span>Move to Trash</span><span class="mk">⌘⌫</span></div>
+    </div>
+
+    <main style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;padding:8px 8px 8px 0;box-sizing:border-box">
+      <div style="height:520px;display:flex;gap:8px;flex:none">
+        <section aria-label="Source editor" style="flex:1;min-width:0;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;box-shadow:0 1px 2px rgba(27,31,51,.06);display:flex;flex-direction:column;overflow:hidden">
+          <div style="display:flex;height:36px;border-bottom:1px solid #E6DFD1;flex:none;background:#F6F2EA">
+            <div class="tab" style="background:#FCFAF5;color:#1B1F33;box-shadow:inset 0 -2px 0 #1B1F33">main.tex<span style="width:6px;height:6px;border-radius:50%;background:#B4352A"></span></div>
+            <div class="tab">wave-field.tex</div>
+            <div class="tab">results.tex</div>
+          </div>
+          <div style="flex:1;padding-top:8px;position:relative;overflow:hidden">
+            <div class="ln"><span class="n">1</span><span class="c">\documentclass</span>[preprint]<span class="a">{journal}</span></div>
+            <div class="ln"><span class="n">2</span><span class="c">\usepackage</span><span class="a">{graphicx,amsmath}</span></div>
+            <div class="ln"><span class="n">3</span><span class="c">\usepackage</span>[numbers]<span class="a">{natbib}</span></div>
+            <div class="ln"><span class="n">4</span></div>
+            <div class="ln"><span class="n">5</span><span class="c">\title</span>{Membrane atlas: field notes}</div>
+            <div class="ln"><span class="n">6</span><span class="c">\author</span>{R. Okafor \and M. Lindqvist}</div>
+            <div class="ln"><span class="n">7</span></div>
+            <div class="ln"><span class="n">8</span><span class="c">\begin</span><span class="a">{document}</span></div>
+            <div class="ln"><span class="n">9</span><span class="c">\maketitle</span></div>
+            <div class="ln"><span class="n">10</span><span class="c">\input</span><span class="a">{sections/introduction}</span></div>
+            <div class="ln"><span class="n">11</span><span class="c">\input</span><span class="a">{sections/wave-field}</span></div>
+            <div class="ln"><span class="n">12</span><span class="c">\input</span><span class="a">{sections/results}</span></div>
+            <div class="ln" style="background:#FBEAE6"><span class="n" style="color:#A12C1F;box-shadow:inset -3px 0 0 #B4352A">13</span><span class="c">\input</span><span class="a" style="text-decoration:underline wavy #B4352A;text-underline-offset:4px">{sections/discusion}</span></div>
+            <div class="ln"><span class="n">14</span></div>
+            <div class="ln"><span class="n">15</span><span class="c">\bibliographystyle</span><span class="a">{unsrtnat}</span></div>
+            <div class="ln"><span class="n">16</span><span class="c">\bibliography</span><span class="a">{references}</span></div>
+            <div class="ln"><span class="n">17</span><span class="c">\end</span><span class="a">{document}</span></div>
+
+            <div style="position:absolute;left:290px;top:274px;width:360px;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:9px;box-shadow:0 6px 18px rgba(27,31,51,.14);padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:#7A1F14"><span style="font-size:10px;background:#F6DAD5;border:1px solid #E3A398;border-radius:4px;padding:0 5px">ERROR</span>File <span class="mono" style="font-weight:500">sections/discusion.tex</span> not found</div>
+              <div style="font-size:12px;color:#3A3E52">Did you mean <span class="mono">sections/discussion</span>? It was renamed 2 min ago.</div>
+              <div style="display:flex;gap:6px">
+                <button style="font:inherit;font-size:12px;font-weight:600;border:0;background:#1B1F33;color:#FCFAF5;border-radius:6px;padding:3px 10px">Use discussion</button>
+                <button style="font:inherit;font-size:12px;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:6px;padding:3px 10px;display:flex;align-items:center;gap:5px"><span class="dot" style="background:#D9541A"></span>Fix with Claude</button>
+                <button style="font:inherit;font-size:12px;border:0;background:transparent;padding:3px 6px">Open log</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section aria-label="PDF preview" style="width:470px;flex:none;background:#E3DDD0;border:1px solid #D3CABA;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;position:relative">
+          <div style="height:44px;display:flex;align-items:center;gap:6px;padding:0 8px 0 10px;border-bottom:1px solid #D3CABA;flex:none;background:#ECE7DC">
+            <div style="display:flex">
+              <button style="font:inherit;font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:7px;border:1.5px solid #1B1F33;background:#1B1F33;color:#FCFAF5;border-radius:8px 0 0 8px;padding:5px 11px;box-shadow:2px 2px 0 #E2622A">Recompile</button>
+              <button aria-label="Compile options" style="border:1.5px solid #1B1F33;border-left-color:#4A4F63;background:#2F3450;color:#FCFAF5;border-radius:0 8px 8px 0;padding:0 6px;box-shadow:2px 2px 0 #E2622A"><svg class="ico" style="width:11px" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"></path></svg></button>
+            </div>
+            <span style="margin-left:8px;font-size:11.5px;color:#7A1F14;background:#F6DAD5;border:1px solid #E3A398;border-radius:999px;padding:1px 8px">Build failed · 1 error</span>
+          </div>
+          <div style="flex:1;padding:14px 16px 0;overflow:hidden">
+            <div style="background:#FFFFFF;height:600px;box-shadow:0 1px 3px rgba(27,31,51,.14);padding:40px 40px 0;box-sizing:border-box;font-family:'Source Serif 4',serif;font-size:11px;line-height:1.5;color:#1A1A1A;opacity:.55;filter:grayscale(.4)">
+              <div style="text-align:center;font-size:18px;font-weight:600">Membrane atlas: field notes</div>
+              <div style="text-align:center;margin:4px 0 16px">R. Okafor and M. Lindqvist</div>
+              <div style="font-size:13px;font-weight:600;margin-bottom:6px">1&#8195;Introduction</div>
+              <p style="margin:0 0 8px">Thin membranes under tension are a classical model for wave mechanics and remain a convenient test bed for imaging methods.</p>
+              <p style="margin:0">We report measurements over three drive frequencies and compare them with the ideal square-membrane spectrum.</p>
+            </div>
+          </div>
+          <div style="position:absolute;left:24px;right:24px;top:62px;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:8px;padding:7px 10px;font-size:12px;color:#3A3E52;box-shadow:0 2px 6px rgba(27,31,51,.08)">Showing last good PDF from 06:58. It updates after the next successful build.</div>
+
+          <div role="menu" aria-label="Compile options" style="position:absolute;left:10px;top:44px;z-index:4;width:270px;background:#FCFAF5;border:1.5px solid #1B1F33;border-radius:10px;box-shadow:3px 3px 0 rgba(27,31,51,.9);padding:5px;font-size:12.5px">
+            <div class="sec" style="padding:6px 10px 4px">Engine</div>
+            <div class="mi" style="background:#EEE8DC">pdfLaTeX<span class="mk">✓</span></div>
+            <div class="mi">XeLaTeX</div>
+            <div class="mi">LuaLaTeX</div>
+            <div class="mi">latexmk<span class="mk">auto</span></div>
+            <div class="mi">Tectonic</div>
+            <div style="height:1px;background:#E6DFD1;margin:4px 6px"></div>
+            <div class="mi">Main document<span class="mk" style="color:#1B1F33">main.tex ▸</span></div>
+            <div class="mi">Auto-compile<span class="mk" style="color:#1B1F33">On · 800 ms</span></div>
+            <div class="mi">Shell escape<span class="mk" style="color:#1B1F33">Off</span></div>
+            <div style="height:1px;background:#E6DFD1;margin:4px 6px"></div>
+            <div class="mi">Clean auxiliary files</div>
+            <div class="mi">Stop compilation<span class="mk">⌘.</span></div>
+          </div>
+        </section>
+      </div>
+
+      <section aria-label="Problems" style="flex:1;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;box-shadow:0 1px 2px rgba(27,31,51,.06);display:flex;flex-direction:column;overflow:hidden">
+        <div style="display:flex;align-items:center;height:32px;padding:0 6px 0 4px;border-bottom:1px solid #EEE8DC;flex:none">
+          <button style="font:inherit;font-size:12px;border:0;background:transparent;padding:0 10px;height:31px;color:#4A4F63">Score</button>
+          <button style="font:inherit;font-size:12px;font-weight:500;border:0;background:transparent;padding:0 10px;height:31px;box-shadow:inset 0 -2px 0 #1B1F33;display:flex;align-items:center;gap:5px">Problems<span style="font-size:10.5px;background:#F6DAD5;color:#7A1F14;border-radius:999px;padding:0 5px;line-height:15px">1</span><span style="font-size:10.5px;background:#F8E3A6;color:#6B4A00;border-radius:999px;padding:0 5px;line-height:15px">2</span></button>
+          <button style="font:inherit;font-size:12px;border:0;background:transparent;padding:0 10px;height:31px;color:#4A4F63">Build log</button>
+          <button style="font:inherit;font-size:12px;border:0;background:transparent;padding:0 10px;height:31px;color:#4A4F63">Terminal</button>
+          <span style="margin-left:auto;font-size:11.5px;color:#4A4F63;padding-right:6px">pdfLaTeX · failed after 412 ms</span>
+        </div>
+        <div style="flex:1">
+          <div class="pr" style="background:#FBF2EF"><span style="font-size:10px;font-weight:600;color:#7A1F14;background:#F6DAD5;border:1px solid #E3A398;border-radius:4px;padding:0 5px;width:44px;text-align:center">ERROR</span><span class="mono" style="color:#1B1F33">main.tex:13</span><span>File <span class="mono">sections/discusion.tex</span> not found</span><span style="margin-left:auto;display:flex;gap:6px"><button style="font:inherit;font-size:12px;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:6px;padding:2px 9px">Go to line</button><button style="font:inherit;font-size:12px;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:6px;padding:2px 9px;display:flex;align-items:center;gap:5px"><span class="dot" style="background:#D9541A"></span>Fix with Claude ▾</button></span></div>
+          <div class="pr"><span style="font-size:10px;font-weight:600;color:#6B4A00;background:#F8E3A6;border:1px solid #E0B847;border-radius:4px;padding:0 5px;width:44px;text-align:center">WARN</span><span class="mono" style="color:#1B1F33">results.tex:22</span><span>Citation <span class="mono">okafor2025</span> undefined</span><span style="margin-left:auto;display:flex;gap:6px"><button style="font:inherit;font-size:12px;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:6px;padding:2px 9px">Search references.bib</button></span></div>
+          <div class="pr"><span style="font-size:10px;font-weight:600;color:#6B4A00;background:#F8E3A6;border:1px solid #E0B847;border-radius:4px;padding:0 5px;width:44px;text-align:center">WARN</span><span class="mono" style="color:#1B1F33">wave-field.tex:42</span><span>Overfull \hbox (4.2pt too wide)</span><span style="margin-left:auto;font-size:11.5px;color:#5A5E70">paragraph ends line 43</span></div>
+          <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;font-size:12px;color:#4A4F63"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12" stroke="#4A4F63" stroke-width="1.6" fill="none"></path></svg>Send all problems to a new thread<span style="margin-left:auto" class="mono">raw log: main.log · 1,284 lines</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer style="height:24px;flex:none;display:flex;align-items:center;gap:16px;padding:0 14px;font-size:11.5px;color:#4A4F63;border-top:1px solid #DCD4C4">
+    <span class="mono">⑂ main ↑1</span>
+    <span style="display:flex;align-items:center;gap:5px"><svg width="8" height="8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="#B4352A"></circle></svg>Build failed · 1 error, 2 warnings</span>
+    <span style="margin-left:auto" class="mono">Ln 13, Col 18</span><span>UTF-8</span><span>LaTeX</span>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -117,7 +117,8 @@ export interface GitInfo {
 
 export interface GitFileChange {
   path: string;
-  status: "modified" | "added" | "deleted" | "renamed" | "untracked";
+  originalPath?: string;
+  status: "modified" | "added" | "deleted" | "renamed" | "untracked" | "conflict";
   staged: boolean;
 }
 

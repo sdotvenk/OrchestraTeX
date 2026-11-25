@@ -43,7 +43,7 @@ interface CommandPaletteProps {
   onToggleAgent: () => void;
   onToggleTerminal: () => void;
   onOpenSettings: () => void;
-  onCyclePalette: () => void;
+  onOpenThemePicker: () => void;
 }
 
 export function CommandPalette({
@@ -60,7 +60,7 @@ export function CommandPalette({
   onToggleAgent,
   onToggleTerminal,
   onOpenSettings,
-  onCyclePalette,
+  onOpenThemePicker,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -159,8 +159,8 @@ export function CommandPalette({
       {
         id: "act:palette",
         group: "Actions",
-        title: "Switch Color Theme (Atelier / Conductor / Monograph)",
-        onSelect: onCyclePalette,
+        title: "Choose theme",
+        onSelect: onOpenThemePicker,
       },
       {
         id: "act:settings",
@@ -177,7 +177,7 @@ export function CommandPalette({
     files,
     labels,
     onCompile,
-    onCyclePalette,
+    onOpenThemePicker,
     onOpenFile,
     onOpenSettings,
     onToggleAgent,

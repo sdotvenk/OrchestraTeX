@@ -67,10 +67,10 @@ export function ConfirmDialog({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.98, y: 6 }}
           transition={{ duration: 0.12 }}
-          className="relative z-10 w-full max-w-sm border border-foreground bg-background text-foreground shadow-[3px_3px_0_var(--foreground)]"
+          className="relative z-10 w-full max-w-sm ox-frame rounded-[12px] bg-panel border border-border text-foreground shadow-[var(--frame-shadow)]"
         >
           <div className="px-5 py-4 border-b border-border">
-            <h3 id={titleId} className="text-sm font-medium">
+            <h3 id={titleId} className="text-[15px] font-semibold text-foreground-strong">
               {title}
             </h3>
           </div>

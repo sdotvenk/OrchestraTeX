@@ -1,19 +1,6 @@
 "use client";
 
-import {
-  CaretDown,
-  CaretRight,
-  Check,
-  Clock,
-  FileText,
-  Globe,
-  MagnifyingGlass,
-  PencilSimple,
-  SpinnerGap,
-  Terminal,
-  Wrench,
-  X,
-} from "@phosphor-icons/react";
+import { SpinnerGap } from "@phosphor-icons/react";
 import { memo, useState } from "react";
 import type { AgentPart } from "@/lib/agent/types";
 import { toRelativeProjectPath } from "./utils";
@@ -26,33 +13,6 @@ interface ToolDisplayProps {
   projectPath?: string | null;
   onFileClick?: (path: string) => void;
   depth?: number;
-}
-
-function getToolIcon(toolName: string) {
-  const name = toolName.toLowerCase();
-  if (name === "bash" || name === "command" || name === "execute" || name === "terminal") {
-    return Terminal;
-  }
-  if (name === "read" || name === "view" || name.includes("read_file")) {
-    return FileText;
-  }
-  if (
-    name === "edit" ||
-    name === "write" ||
-    name === "multiedit" ||
-    name === "filechange" ||
-    name.includes("write_file") ||
-    name.includes("edit_file")
-  ) {
-    return PencilSimple;
-  }
-  if (name === "grep" || name === "glob" || name === "search" || name.includes("search")) {
-    return MagnifyingGlass;
-  }
-  if (name.includes("web") || name.includes("fetch")) {
-    return Globe;
-  }
-  return Wrench;
 }
 
 function getToolSummaryLabel(part: ToolPart, projectPath?: string | null): string {
@@ -120,10 +80,8 @@ export const ToolDisplay = memo(function ToolDisplay({
   );
   const [showFullOutput, setShowFullOutput] = useState(false);
 
-  const Icon = getToolIcon(part.tool);
   const summary = getToolSummaryLabel(part, projectPath);
   const isRunning = part.status === "running";
-  const isPending = part.status === "pending";
   const isError = part.status === "error" || Boolean(part.error);
 
   const relFile = part.filePath ? toRelativeProjectPath(part.filePath, projectPath) : null;
@@ -132,39 +90,63 @@ export const ToolDisplay = memo(function ToolDisplay({
   const displayedOutput =
     isLongOutput && !showFullOutput ? `${outputText.slice(0, 2000)}\n...` : outputText;
 
+  const isReadOrSearch = (() => {
+    const name = part.tool.toLowerCase();
+    return (
+      name === "read" ||
+      name === "view" ||
+      name.includes("read_file") ||
+      name === "grep" ||
+      name === "glob" ||
+      name === "search" ||
+      name.includes("search")
+    );
+  })();
+
   return (
     <div className={depth > 0 ? "ml-3 border-l border-border pl-2.5" : ""}>
-      <div className="rounded-xl border border-border/80 bg-subtle/45 overflow-hidden my-1">
-        <div className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+      <div
+        className={
+          expanded
+            ? "rounded-lg border border-border/80 bg-subtle/35 overflow-hidden my-1"
+            : "my-0.5"
+        }
+      >
+        <div className="flex items-center justify-between gap-2 h-[22px] px-0.5 text-[12px] text-muted">
           <button
             type="button"
             onClick={() => setExpanded((prev) => !prev)}
-            className="flex items-center gap-2 min-w-0 flex-1 text-left"
+            className="flex items-center gap-2 min-w-0 flex-1 text-left hover:text-foreground transition-colors"
           >
-            {expanded ? (
-              <CaretDown className="size-3 text-muted shrink-0" aria-hidden="true" />
-            ) : (
-              <CaretRight className="size-3 text-muted shrink-0" aria-hidden="true" />
-            )}
-
             {isRunning ? (
               <SpinnerGap
-                className="size-3.5 text-accent animate-spin shrink-0"
+                className="size-2.5 text-accent animate-spin shrink-0"
                 aria-hidden="true"
               />
-            ) : isError ? (
-              <X className="size-3.5 text-error shrink-0" weight="bold" aria-hidden="true" />
-            ) : isPending ? (
-              <Clock className="size-3.5 text-muted shrink-0" aria-hidden="true" />
+            ) : isReadOrSearch ? (
+              <svg width="9" height="9" viewBox="0 0 9 9" className="shrink-0" aria-hidden="true">
+                <rect
+                  x="1"
+                  y="1"
+                  width="7"
+                  height="7"
+                  fill="none"
+                  stroke={isError ? "var(--error)" : "var(--accent)"}
+                  strokeWidth="1.4"
+                />
+              </svg>
             ) : (
-              <Check className="size-3.5 text-success shrink-0" weight="bold" aria-hidden="true" />
+              <svg width="9" height="9" viewBox="0 0 9 9" className="shrink-0" aria-hidden="true">
+                <circle
+                  cx="4.5"
+                  cy="4.5"
+                  r="3.5"
+                  fill={isError ? "var(--error)" : "var(--accent)"}
+                />
+              </svg>
             )}
 
-            <Icon className="size-3.5 text-muted shrink-0" aria-hidden="true" />
-
-            <span className="text-[12px] font-mono font-medium text-foreground-strong shrink-0">
-              {part.tool}
-            </span>
+            <span className="font-medium text-foreground truncate shrink-0">{part.tool}</span>
 
             {summary && !relFile && (
               <span className="text-[11.5px] font-mono text-muted truncate">{summary}</span>

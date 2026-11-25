@@ -1,33 +1,6 @@
 // Editor theme options - auto-follows app light/dark mode
 export type EditorTheme = "one-light" | "one-dark";
 export type TerminalShellMode = "auto" | "custom";
-export type UiPalette = "atelier" | "conductor" | "monograph";
-
-export const UI_PALETTES: readonly {
-  id: UiPalette;
-  label: string;
-  description: string;
-  swatches: readonly [string, string, string];
-}[] = [
-  {
-    id: "atelier",
-    label: "Atelier",
-    description: "Warm cotton paper, Prussian ink, vermilion CTA",
-    swatches: ["#F6F5F0", "#2C4F7C", "#D14E2A"],
-  },
-  {
-    id: "conductor",
-    label: "Conductor",
-    description: "Cool alabaster, cobalt slate, warm brass CTA",
-    swatches: ["#F3F5F8", "#3652B8", "#C48B28"],
-  },
-  {
-    id: "monograph",
-    label: "Monograph",
-    description: "Warm linen, oxblood plum, deep teal CTA",
-    swatches: ["#F7F4F0", "#6E3450", "#256B60"],
-  },
-] as const;
 
 // Minimap configuration matching Monaco Editor API
 export interface MinimapSettings {
@@ -40,9 +13,6 @@ export interface MinimapSettings {
 }
 
 export interface EditorSettings {
-  // Appearance
-  uiPalette: UiPalette;
-
   // Keybindings
   vimMode: boolean;
 
@@ -93,13 +63,12 @@ export const DEFAULT_MINIMAP_SETTINGS: MinimapSettings = {
 };
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  uiPalette: "atelier",
   vimMode: false,
 
   // Display
   fontFamily: "",
-  fontSize: 14,
-  lineHeight: 1.6,
+  fontSize: 12,
+  lineHeight: 1.7,
   wordWrap: "off",
   wordWrapColumn: 80,
 

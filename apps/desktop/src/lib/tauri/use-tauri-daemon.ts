@@ -3,6 +3,7 @@
 import type { FileNode, GitInfo, GitLogEntry, GitStatus } from "@orchestratex/shared";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FileChangeEvent } from "@/lib/editor/file-change";
 import { pathSync } from "@/lib/path";
 
 function debounce<T extends (...args: Parameters<T>) => void>(
@@ -27,6 +28,12 @@ interface ProjectInfo {
 interface GitInitResult {
   success: boolean;
   error?: string;
+}
+
+export interface RenameReferenceUpdate {
+  path: string;
+  before: string;
+  after: string;
 }
 
 export interface GhStatus {
@@ -81,11 +88,6 @@ interface OperationState {
   isOpeningProject: boolean;
   isStaging: boolean;
   lastError: { message: string; operation: string } | null;
-}
-
-interface FileChangeEvent {
-  path: string;
-  kind: "create" | "modify" | "remove" | "rename" | "access" | "other" | "unknown";
 }
 
 function stripWrappingQuotes(value: string): string {
@@ -251,11 +253,11 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
     }
   }, []);
 
+  const openingProjectRef = useRef(false);
   const setProject = useCallback(
     async (path: string) => {
-      let isMounted = true;
-
-      setProjectState((s) => ({ ...s, projectPath: path }));
+      if (openingProjectRef.current) throw new Error("A project is already opening");
+      openingProjectRef.current = true;
       setOperationState((s) => ({
         ...s,
         isOpeningProject: true,
@@ -263,38 +265,29 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       }));
 
       try {
-        await invoke("set_project_path", { path });
-        if (!isMounted) return;
-
         const rawFiles = await invoke<unknown[]>("get_file_tree", {
           dir: path,
         });
-        if (!isMounted) return;
-
         const files = rawFiles.map((f) =>
           convertFileNode(f as Parameters<typeof convertFileNode>[0]),
         );
+        await invoke("set_project_path", { path });
 
         setProjectState((s) => ({
           ...s,
+          projectPath: path,
           files,
           projectInfo: { path },
         }));
 
-        refreshGitStatusInternal(path);
+        void refreshGitStatusInternal(path);
       } catch (error) {
-        if (!isMounted) return;
-        console.error("Failed to set project:", error);
         setError(String(error), "open project");
+        throw error;
       } finally {
-        if (isMounted) {
-          setOperationState((s) => ({ ...s, isOpeningProject: false }));
-        }
+        openingProjectRef.current = false;
+        setOperationState((s) => ({ ...s, isOpeningProject: false }));
       }
-
-      return () => {
-        isMounted = false;
-      };
     },
     [setError, refreshGitStatusInternal],
   );
@@ -322,7 +315,7 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
 
   const writeFile = useCallback(
     async (relativePath: string, content: string) => {
-      if (!projectState.projectPath) return;
+      if (!projectState.projectPath) return false;
 
       try {
         const fullPath = resolvePathWithinProject(projectState.projectPath, relativePath);
@@ -331,25 +324,40 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
           content,
           encoding: "utf-8",
         });
+        return true;
       } catch (error) {
         console.error("Failed to write file:", error);
         setError(String(error), "save file");
+        return false;
       }
     },
     [projectState.projectPath, setError],
   );
 
+  const writeFileIfUnchanged = useCallback(
+    async (relativePath: string, expectedContent: string, content: string) => {
+      if (!projectState.projectPath) throw new Error("No project open");
+      await invoke("write_file", {
+        path: resolvePathWithinProject(projectState.projectPath, relativePath),
+        content,
+        expectedContent,
+      });
+    },
+    [projectState.projectPath],
+  );
+
   const refreshFiles = useCallback(async () => {
-    if (!projectState.projectPath) return;
+    const projectPath = projectState.projectPath;
+    if (!projectPath) return;
 
     try {
       const rawFiles = await invoke<unknown[]>("get_file_tree", {
-        dir: projectState.projectPath,
+        dir: projectPath,
       });
       const files = rawFiles.map((f) =>
         convertFileNode(f as Parameters<typeof convertFileNode>[0]),
       );
-      setProjectState((s) => ({ ...s, files }));
+      setProjectState((s) => (s.projectPath === projectPath ? { ...s, files } : s));
     } catch (error) {
       console.error("Failed to refresh files:", error);
     }
@@ -393,15 +401,27 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
   );
 
   const renamePath = useCallback(
-    async (oldRelativePath: string, newRelativePath: string) => {
+    async (
+      oldRelativePath: string,
+      newRelativePath: string,
+      referenceUpdates?: RenameReferenceUpdate[],
+    ) => {
       if (!projectState.projectPath) return;
 
       try {
         const oldFullPath = resolvePathWithinProject(projectState.projectPath, oldRelativePath);
         const newFullPath = resolvePathWithinProject(projectState.projectPath, newRelativePath);
+        const resolvedUpdates = referenceUpdates?.map((update) => ({
+          path: resolvePathWithinProject(projectState.projectPath as string, update.path),
+          before: update.before,
+          after: update.after,
+        }));
         await invoke("rename_path", {
           oldPath: oldFullPath,
           newPath: newFullPath,
+          ...(resolvedUpdates && resolvedUpdates.length > 0
+            ? { referenceUpdates: resolvedUpdates }
+            : {}),
         });
         await refreshFiles();
       } catch (error) {
@@ -428,6 +448,18 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       }
     },
     [projectState.projectPath, refreshFiles, setError],
+  );
+
+  const duplicateFile = useCallback(
+    async (relativePath: string) => {
+      const projectPath = projectState.projectPath;
+      if (!projectPath) throw new Error("No project open");
+      const path = resolvePathWithinProject(projectPath, relativePath);
+      const duplicate = await invoke<string>("duplicate_file", { path });
+      await refreshFiles();
+      return projectPathRef.current === projectPath ? duplicate : null;
+    },
+    [projectState.projectPath, refreshFiles],
   );
 
   const refreshGitStatus = useCallback(
@@ -921,10 +953,12 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       refreshFiles,
       readFile,
       writeFile,
+      writeFileIfUnchanged,
       createFile,
       createDirectory,
       renamePath,
       deletePath,
+      duplicateFile,
       gitAdd,
       gitUnstage,
       gitCommit,
@@ -951,10 +985,12 @@ export function useTauriDaemon(options?: TauriDaemonOptions) {
       refreshFiles,
       readFile,
       writeFile,
+      writeFileIfUnchanged,
       createFile,
       createDirectory,
       renamePath,
       deletePath,
+      duplicateFile,
       gitAdd,
       gitUnstage,
       gitCommit,

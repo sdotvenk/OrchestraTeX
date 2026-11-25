@@ -67,18 +67,18 @@ export function MainFileSelectionDialog({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.98, y: 6 }}
           transition={{ duration: 0.12 }}
-          className="relative z-10 w-full max-w-md border border-foreground bg-background text-foreground shadow-[3px_3px_0_var(--foreground)]"
+          className="relative z-10 w-full max-w-md ox-frame rounded-[12px] bg-panel border border-border text-foreground shadow-[var(--frame-shadow)]"
         >
           {/* Header */}
           <div className="px-5 py-4 border-b border-border">
-            <h3 className="text-sm font-medium">Select Main File</h3>
-            <p className="mt-1 text-sm text-muted">{detectionResult.message}</p>
+            <h3 className="text-[15px] font-semibold text-foreground-strong">Select main file</h3>
+            <p className="mt-1 text-[13px] text-muted">{detectionResult.message}</p>
           </div>
 
           {/* Content */}
           <div className="px-5 py-4 max-h-64 overflow-y-auto">
             {detectionResult.tex_files.length === 0 ? (
-              <p className="text-sm text-muted py-4 text-center">
+              <p className="text-[13px] text-muted py-4 text-center">
                 No .tex files found in the project.
               </p>
             ) : (
@@ -93,23 +93,25 @@ export function MainFileSelectionDialog({
                       type="button"
                       key={file}
                       onClick={() => setSelected(file)}
-                      className={`w-full text-left px-3 py-2 text-sm transition-colors flex items-center justify-between group ${
-                        isSelected ? "bg-foreground text-background" : "hover:bg-surface-secondary"
+                      className={`w-full text-left px-3 py-2 rounded-[8px] text-[13px] transition-colors flex items-center justify-between group ${
+                        isSelected
+                          ? "bg-primary text-primary-text"
+                          : "hover:bg-subtle text-foreground"
                       }`}
                     >
                       <div className="flex items-center gap-2 min-w-0">
                         <FileTextIcon
-                          className={`size-4 flex-shrink-0 ${isSelected ? "text-background" : "text-muted-foreground"}`}
+                          className={`size-4 flex-shrink-0 ${isSelected ? "text-primary-text" : "text-muted-foreground"}`}
                         />
                         <span className="truncate font-medium">{fileName}</span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         {isRecommended && (
                           <span
-                            className={`text-xs px-1.5 py-0.5 ${
+                            className={`text-[11px] rounded-full px-2 py-0.5 font-medium ${
                               isSelected
-                                ? "bg-background/20 text-background"
-                                : "bg-green-100 text-green-700"
+                                ? "bg-primary-text/20 text-primary-text"
+                                : "bg-success-bg text-success"
                             }`}
                           >
                             Recommended

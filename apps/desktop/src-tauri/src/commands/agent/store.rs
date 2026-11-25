@@ -1,6 +1,7 @@
 use super::types::{
     now_millis, AgentMessage, AgentPart, AgentProviderId, AgentThread, InteractionMode,
-    PendingInteraction, PlanTaskItem, RuntimeMode, ThreadSummary, TokenUsageSnapshot,
+    PendingInteraction, PlanTaskItem, RuntimeMode, ThreadSchedule, ThreadSummary,
+    TokenUsageSnapshot,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,6 +27,12 @@ impl ThreadStore {
     fn project_file(&self, project_path: &str) -> PathBuf {
         self.root_dir
             .join(format!("{}.json", project_storage_key(project_path)))
+    }
+
+    pub fn worktrees_dir(&self, project_path: &str) -> PathBuf {
+        self.root_dir
+            .join("worktrees")
+            .join(project_storage_key(project_path))
     }
 
     async fn read_all_from_disk(&self, project_path: &str) -> Result<Vec<AgentThread>, String> {
@@ -97,6 +104,51 @@ impl ThreadStore {
         Ok(summaries)
     }
 
+    /// Lists persisted projects as well as current in-memory updates.
+    pub async fn list_all_threads(&self) -> Result<Vec<ThreadSummary>, String> {
+        let cache = self.cache.lock().await;
+        let _guard = self.io_lock.lock().await;
+        let mut summaries: Vec<ThreadSummary> = cache
+            .values()
+            .flat_map(|threads| threads.iter().map(|thread| thread.summary.clone()))
+            .collect();
+        if tokio::fs::try_exists(&self.root_dir)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            let mut entries = tokio::fs::read_dir(&self.root_dir)
+                .await
+                .map_err(|e| e.to_string())?;
+            while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                    continue;
+                }
+                let Some(key) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                    continue;
+                };
+                if cache.contains_key(key) {
+                    continue;
+                }
+                let raw = tokio::fs::read(&path)
+                    .await
+                    .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+                if raw.iter().all(u8::is_ascii_whitespace) {
+                    continue;
+                }
+                let threads: Vec<AgentThread> = serde_json::from_slice(&raw)
+                    .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
+                summaries.extend(threads.into_iter().map(|thread| thread.summary));
+            }
+        }
+        summaries.sort_by(|a, b| {
+            b.pinned
+                .cmp(&a.pinned)
+                .then_with(|| b.updated_at.cmp(&a.updated_at))
+        });
+        Ok(summaries)
+    }
+
     pub async fn get_thread(
         &self,
         project_path: &str,
@@ -109,6 +161,21 @@ impl ThreadStore {
         Ok(cache
             .get(&key)
             .and_then(|threads| threads.iter().find(|t| t.summary.id == thread_id).cloned()))
+    }
+
+    pub async fn get_thread_model(&self, project_path: &str, thread_id: &str) -> Option<String> {
+        let mut cache = self.cache.lock().await;
+        let key = self
+            .ensure_loaded_in_cache(project_path, &mut cache)
+            .await
+            .ok()?;
+        cache
+            .get(&key)?
+            .iter()
+            .find(|thread| thread.summary.id == thread_id)?
+            .summary
+            .model
+            .clone()
     }
 
     #[allow(dead_code)]
@@ -148,6 +215,7 @@ impl ThreadStore {
     }
 
     pub async fn save_thread(&self, thread: AgentThread) -> Result<(), String> {
+        let _guard = self.io_lock.lock().await;
         let project_path = thread.summary.project_path.clone();
         let snapshot = {
             let mut cache = self.cache.lock().await;
@@ -165,7 +233,6 @@ impl ThreadStore {
             }
             threads.clone()
         };
-        let _guard = self.io_lock.lock().await;
         self.write_all_locked(&project_path, &snapshot).await
     }
 
@@ -198,13 +265,13 @@ impl ThreadStore {
     /// Flushes a project's cached threads to disk atomically.
     #[allow(dead_code)]
     pub async fn flush_project(&self, project_path: &str) -> Result<(), String> {
+        let _guard = self.io_lock.lock().await;
         let snapshot = {
             let cache = self.cache.lock().await;
             let key = project_storage_key(project_path);
             cache.get(&key).cloned()
         };
         if let Some(threads) = snapshot {
-            let _guard = self.io_lock.lock().await;
             self.write_all_locked(project_path, &threads).await?;
         }
         Ok(())
@@ -219,7 +286,8 @@ impl ThreadStore {
     where
         F: FnOnce(&mut AgentThread),
     {
-        let (cloned, snapshot) = {
+        let _guard = self.io_lock.lock().await;
+        let (cloned, snapshot, completed_turn_id) = {
             let mut cache = self.cache.lock().await;
             let key = self
                 .ensure_loaded_in_cache(project_path, &mut cache)
@@ -230,17 +298,32 @@ impl ThreadStore {
             let Some(target) = threads.iter_mut().find(|t| t.summary.id == thread_id) else {
                 return Ok(None);
             };
+            let was_active = matches!(target.summary.status.as_str(), "running" | "waiting_input");
             mutator(target);
             target.summary.updated_at = now_millis();
             target.summary.message_count = target.messages.len();
-            (target.clone(), threads.clone())
+            let is_terminal = matches!(target.summary.status.as_str(), "idle" | "error");
+            let completed_turn_id = (was_active && is_terminal)
+                .then(|| {
+                    target
+                        .messages
+                        .iter()
+                        .rev()
+                        .find(|message| message.role == "user")
+                })
+                .flatten()
+                .map(|message| message.id.clone());
+            (target.clone(), threads.clone(), completed_turn_id)
         };
-        let _guard = self.io_lock.lock().await;
         self.write_all_locked(project_path, &snapshot).await?;
+        if let Some(id) = completed_turn_id {
+            super::capture_turn_checkpoint(&cloned.summary, &id, "after").await;
+        }
         Ok(Some(cloned))
     }
 
     pub async fn delete_thread(&self, project_path: &str, thread_id: &str) -> Result<(), String> {
+        let _guard = self.io_lock.lock().await;
         let snapshot = {
             let mut cache = self.cache.lock().await;
             let key = self
@@ -250,7 +333,6 @@ impl ThreadStore {
             threads.retain(|t| t.summary.id != thread_id);
             threads.clone()
         };
-        let _guard = self.io_lock.lock().await;
         self.write_all_locked(project_path, &snapshot).await
     }
 
@@ -264,6 +346,31 @@ impl ThreadStore {
         interaction_mode: InteractionMode,
         runtime_mode: RuntimeMode,
         title: Option<String>,
+    ) -> Result<AgentThread, String> {
+        self.create_thread_with_parent(
+            project_path,
+            provider_id,
+            model,
+            reasoning_effort,
+            interaction_mode,
+            runtime_mode,
+            title,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_thread_with_parent(
+        &self,
+        project_path: String,
+        provider_id: AgentProviderId,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
+        interaction_mode: InteractionMode,
+        runtime_mode: RuntimeMode,
+        title: Option<String>,
+        parent_thread_id: Option<String>,
     ) -> Result<AgentThread, String> {
         let now = now_millis();
         let thread = AgentThread {
@@ -284,6 +391,10 @@ impl ThreadStore {
                 message_count: 0,
                 last_preview: None,
                 status: "idle".to_string(),
+                workspace_path: None,
+                workspace_branch: None,
+                parent_thread_id,
+                schedule: None,
             },
             messages: Vec::new(),
             usage: None,
@@ -292,6 +403,57 @@ impl ThreadStore {
         };
         self.save_thread(thread.clone()).await?;
         Ok(thread)
+    }
+
+    /// Atomically claims all due, non-overlapping schedules for `project_path`.
+    /// Repeating schedules advance `run_at` to `now_ms + interval`; one-shot schedules are cleared.
+    pub async fn claim_due_schedules(
+        &self,
+        project_path: &str,
+        now_ms: i64,
+    ) -> Result<Vec<(String, ThreadSchedule)>, String> {
+        let _guard = self.io_lock.lock().await;
+        let (claimed, snapshot) = {
+            let mut cache = self.cache.lock().await;
+            let key = self
+                .ensure_loaded_in_cache(project_path, &mut cache)
+                .await?;
+            let threads = cache.entry(key).or_default();
+            let mut claimed = Vec::new();
+            for t in threads.iter_mut() {
+                if t.summary.archived
+                    || t.summary.status == "running"
+                    || t.summary.status == "waiting_input"
+                {
+                    continue;
+                }
+                let Some(sched) = t.summary.schedule.as_mut() else {
+                    continue;
+                };
+                if sched.run_at > now_ms {
+                    continue;
+                }
+                let claimed_sched = sched.clone();
+                if let Some(interval) = sched.repeat_interval_ms.filter(|&ms| ms > 0) {
+                    sched.run_at = now_ms.saturating_add(interval);
+                    sched.last_run_at = Some(now_ms);
+                } else {
+                    t.summary.schedule = None;
+                }
+                t.summary.updated_at = now_ms;
+                claimed.push((t.summary.id.clone(), claimed_sched));
+            }
+            let snapshot = if claimed.is_empty() {
+                None
+            } else {
+                Some(threads.clone())
+            };
+            (claimed, snapshot)
+        };
+        if let Some(snapshot) = snapshot {
+            self.write_all_locked(project_path, &snapshot).await?;
+        }
+        Ok(claimed)
     }
 
     pub fn append_message_to_thread(thread: &mut AgentThread, message: AgentMessage) {
@@ -537,5 +699,261 @@ mod tests {
             AgentPart::Text { text, .. } => assert_eq!(text, "Hello LaTeX"),
             _ => panic!("expected text part after reload"),
         }
+    }
+
+    #[tokio::test]
+    async fn child_thread_and_schedule_edge_cases() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ThreadStore::new(dir.path().to_path_buf());
+        let project = "/tmp/orch-schedule-test";
+
+        let parent = store
+            .create_thread(
+                project.to_string(),
+                AgentProviderId::Claude,
+                None,
+                None,
+                InteractionMode::Default,
+                RuntimeMode::AutoAcceptEdits,
+                Some("Parent".to_string()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(parent.summary.parent_thread_id, None);
+        assert_eq!(parent.summary.schedule, None);
+
+        let child = store
+            .create_thread_with_parent(
+                project.to_string(),
+                AgentProviderId::Codex,
+                None,
+                None,
+                InteractionMode::Default,
+                RuntimeMode::ApprovalRequired,
+                Some("Child".to_string()),
+                Some(parent.summary.id.clone()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            child.summary.parent_thread_id.as_deref(),
+            Some(parent.summary.id.as_str())
+        );
+
+        let running = store
+            .create_thread(
+                project.to_string(),
+                AgentProviderId::Claude,
+                None,
+                None,
+                InteractionMode::Default,
+                RuntimeMode::AutoAcceptEdits,
+                Some("Running".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let future = store
+            .create_thread(
+                project.to_string(),
+                AgentProviderId::Claude,
+                None,
+                None,
+                InteractionMode::Default,
+                RuntimeMode::AutoAcceptEdits,
+                Some("Future".to_string()),
+            )
+            .await
+            .unwrap();
+
+        let now = 1_000_000i64;
+        // One-shot due on parent
+        store
+            .mutate_thread(project, &parent.summary.id, |t| {
+                t.summary.schedule = Some(ThreadSchedule {
+                    run_at: now - 100,
+                    prompt: "one-shot".to_string(),
+                    repeat_interval_ms: None,
+                    last_result: None,
+                    last_run_at: None,
+                });
+            })
+            .await
+            .unwrap();
+
+        // Repeating due on child
+        store
+            .mutate_thread(project, &child.summary.id, |t| {
+                t.summary.schedule = Some(ThreadSchedule {
+                    run_at: now,
+                    prompt: "repeat".to_string(),
+                    repeat_interval_ms: Some(5000),
+                    last_result: None,
+                    last_run_at: None,
+                });
+            })
+            .await
+            .unwrap();
+
+        // Due but running -> must not overlap
+        store
+            .mutate_thread(project, &running.summary.id, |t| {
+                t.summary.status = "running".to_string();
+                t.summary.schedule = Some(ThreadSchedule {
+                    run_at: now - 50,
+                    prompt: "overlap".to_string(),
+                    repeat_interval_ms: None,
+                    last_result: None,
+                    last_run_at: None,
+                });
+            })
+            .await
+            .unwrap();
+
+        // Future -> must not claim
+        store
+            .mutate_thread(project, &future.summary.id, |t| {
+                t.summary.schedule = Some(ThreadSchedule {
+                    run_at: now + 1000,
+                    prompt: "later".to_string(),
+                    repeat_interval_ms: None,
+                    last_result: None,
+                    last_run_at: None,
+                });
+            })
+            .await
+            .unwrap();
+
+        let claimed = store.claim_due_schedules(project, now).await.unwrap();
+        assert_eq!(claimed.len(), 2);
+
+        // Second claim at same timestamp must be empty (atomic claim)
+        let second = store.claim_due_schedules(project, now).await.unwrap();
+        assert!(second.is_empty());
+
+        // One-shot cleared, repeating advanced
+        let p_after = store
+            .get_thread(project, &parent.summary.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(p_after.summary.schedule.is_none());
+
+        let c_after = store
+            .get_thread(project, &child.summary.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let c_sched = c_after.summary.schedule.unwrap();
+        assert_eq!(c_sched.run_at, now + 5000);
+        assert_eq!(c_sched.last_run_at, Some(now));
+    }
+
+    #[tokio::test]
+    async fn turn_checkpoint_lifecycle_captures_before_and_after_and_dedupes() {
+        let base = std::env::temp_dir().join(format!(
+            "orchestratex-turn-cp-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let repo_dir = base.join("repo");
+        let non_git_dir = base.join("plain");
+        let store_dir = base.join("store");
+        std::fs::create_dir_all(&repo_dir).unwrap();
+        std::fs::create_dir_all(&non_git_dir).unwrap();
+
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo_dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {:?} failed", args);
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::write(repo_dir.join("main.tex"), "\\documentclass{article}\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-m", "init"]);
+
+        let store = ThreadStore::new(store_dir);
+        let project = repo_dir.to_str().unwrap();
+        let created = store
+            .create_thread(
+                project.to_string(),
+                AgentProviderId::Claude,
+                Some("Turn CP Test".to_string()),
+                None,
+                InteractionMode::Default,
+                RuntimeMode::AutoAcceptEdits,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let user_msg = AgentMessage {
+            id: "u1".to_string(),
+            role: "user".to_string(),
+            created_at: 1,
+            completed_at: Some(1),
+            provider_id: None,
+            model: None,
+            parts: vec![],
+            changed_files: vec![],
+            error: None,
+        };
+
+        let running = store
+            .mutate_thread(project, &created.summary.id, |t| {
+                ThreadStore::append_message_to_thread(t, user_msg);
+                t.summary.status = "running".to_string();
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        super::super::capture_turn_checkpoint(&running.summary, "u1", "before").await;
+        // Modify working tree during turn
+        std::fs::write(
+            repo_dir.join("main.tex"),
+            "\\documentclass{article}\n% edited\n",
+        )
+        .unwrap();
+
+        // Transition running -> idle triggers post-turn checkpoint
+        store
+            .mutate_thread(project, &created.summary.id, |t| {
+                t.summary.status = "idle".to_string();
+            })
+            .await
+            .unwrap();
+
+        // Dedupe: calling before again must not fail or overwrite
+        super::super::capture_turn_checkpoint(&running.summary, "u1", "before").await;
+
+        let cps = crate::commands::checkpoints::checkpoint_list(project.to_string())
+            .await
+            .unwrap();
+        assert_eq!(cps.len(), 2);
+        let before = cps.iter().find(|c| c.id == "turn-u1-before").unwrap();
+        let after = cps.iter().find(|c| c.id == "turn-u1-after").unwrap();
+        assert_ne!(before.tree_oid, after.tree_oid);
+
+        let before_meta: serde_json::Value = serde_json::from_str(&before.message).unwrap();
+        assert_eq!(before_meta["type"], "agentTurn");
+        assert_eq!(before_meta["threadId"], created.summary.id);
+        assert_eq!(before_meta["title"], created.summary.title);
+        assert_eq!(before_meta["providerId"], "claude");
+        assert_eq!(before_meta["phase"], "before");
+
+        let after_meta: serde_json::Value = serde_json::from_str(&after.message).unwrap();
+        assert_eq!(after_meta["phase"], "after");
+
+        // Non-Git directory must silently no-op
+        let mut plain_summary = running.summary.clone();
+        plain_summary.project_path = non_git_dir.to_str().unwrap().to_string();
+        super::super::capture_turn_checkpoint(&plain_summary, "u2", "before").await;
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

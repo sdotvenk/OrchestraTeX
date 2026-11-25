@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agents workspace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;family=Instrument+Serif:ital@0;1&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.ui{font-family:'Geist',system-ui,sans-serif;font-size:13px;color:#1B1F33;-webkit-font-smoothing:antialiased}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+.ico{width:15px;height:15px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ib{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;border-radius:7px;color:#4A4F63;padding:0}
+.sec{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#5A5E70}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;display:inline-block}
+.th{display:flex;gap:9px;padding:6px 9px;border-radius:8px}
+.th .bar{width:3px;border-radius:2px;flex:none}
+.tt{display:flex;align-items:center;font-weight:500;gap:6px;white-space:nowrap}
+.ts{font-size:11.5px;color:#5A5E70;margin-top:2px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.wt{font-family:'Geist Mono',monospace;font-size:10.5px;border:1px solid #D3CABA;border-radius:4px;padding:0 4px;color:#4A4F63}
+.tr{display:flex;align-items:center;gap:8px;height:23px;font-size:12.5px;color:#4A4F63;white-space:nowrap}
+.say{font-size:14px;line-height:1.65;color:#23273A;margin:0 0 12px}
+.ir{display:flex;align-items:center;gap:8px;height:28px;font-size:12.5px;white-space:nowrap}
+.ibox{background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;box-shadow:0 1px 2px rgba(27,31,51,.06);padding:12px 14px}
+.po{display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;border-radius:6px;font-size:12.5px;white-space:nowrap}
+.seg{display:flex;background:#EEE8DC;border-radius:7px;padding:2px;gap:2px}
+.seg span{padding:2px 9px;border-radius:5px;font-size:12px;color:#4A4F63}
+.seg .on{background:#FCFAF5;color:#1B1F33;font-weight:500;box-shadow:0 0 0 1px #DCD4C4}
+</style>
+</helmet>
+<div class="ui" style="width:1440px;height:900px;background:#ECE7DC;display:flex;flex-direction:column;overflow:hidden">
+
+  <header style="height:40px;display:flex;align-items:center;gap:14px;padding:0 12px 0 14px;border-bottom:1px solid #DCD4C4;flex:none">
+    <div style="display:flex;gap:8px" aria-hidden="true"><span style="width:12px;height:12px;border-radius:50%;background:#EE6A5F"></span><span style="width:12px;height:12px;border-radius:50%;background:#F5BF4F"></span><span style="width:12px;height:12px;border-radius:50%;background:#62C655"></span></div>
+    <div style="display:flex;align-items:center;gap:7px;margin-left:10px">
+      <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true"><g stroke="#1B1F33" stroke-width="1.3"><line x1="0" y1="3" x2="20" y2="3"></line><line x1="0" y1="6.5" x2="20" y2="6.5"></line><line x1="0" y1="10" x2="20" y2="10"></line><line x1="0" y1="13.5" x2="20" y2="13.5"></line></g><line x1="6" y1="1" x2="14" y2="15" stroke="#E2622A" stroke-width="2.4" stroke-linecap="round"></line></svg>
+      <span style="font-family:'Instrument Serif',serif;font-size:19px">OrchestraTeX</span>
+    </div>
+    <span style="width:1px;height:18px;background:#D3CABA"></span>
+    <span style="font-weight:500">membrane-atlas</span>
+    <span class="mono" style="font-size:11.5px;color:#4A4F63;border:1px solid #D3CABA;border-radius:999px;padding:2px 8px">⑂ main ↑1</span>
+    <nav aria-label="Workspace" style="margin-left:auto;margin-right:auto;display:flex;background:#E2DCCF;border-radius:9px;padding:3px;gap:2px">
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63">Write</button>
+      <button style="border:0;font:inherit;font-weight:500;padding:4px 14px;border-radius:7px;background:#FCFAF5;box-shadow:0 1px 0 rgba(27,31,51,.12),0 0 0 1px rgba(27,31,51,.08);display:flex;align-items:center;gap:6px">Agents<span style="font-size:10.5px;font-weight:600;background:#F2C14E;border-radius:999px;padding:0 6px;line-height:16px">1</span></button>
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63">History</button>
+    </nav>
+    <span style="font-size:12px;color:#4A4F63">3 running · 1 waiting</span>
+    <button style="font:inherit;font-weight:500;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:8px;padding:4px 11px">Export</button>
+  </header>
+
+  <div style="flex:1;display:flex;min-height:0">
+
+    <!-- Orchestration plane: threads across projects -->
+    <aside style="width:284px;flex:none;display:flex;flex-direction:column;padding:10px 8px 8px 10px;box-sizing:border-box;gap:5px">
+      <div style="display:flex;gap:6px">
+        <div style="flex:1;display:flex;align-items:center;gap:7px;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:8px;padding:5px 9px;color:#707383;font-size:12.5px"><svg class="ico" style="width:13px" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5L14 14"></path></svg>Search threads<span class="mono" style="margin-left:auto;font-size:10.5px">⌘K</span></div>
+        <button style="font:inherit;font-weight:600;font-size:12.5px;border:1.5px solid #1B1F33;background:#FCFAF5;color:#1B1F33;border-radius:8px;padding:0 10px;box-shadow:2px 2px 0 rgba(27,31,51,.85)">+ New</button>
+      </div>
+      <div style="display:flex;gap:4px;font-size:12px;padding:2px 0 2px">
+        <span style="background:#1B1F33;color:#FCFAF5;border-radius:999px;padding:2px 9px">All</span>
+        <span style="border:1px solid #C9BFAD;border-radius:999px;padding:1px 9px;color:#3A3E52">Running 3</span>
+        <span style="border:1px solid #E0B847;background:#F8E3A6;border-radius:999px;padding:1px 9px;color:#4D3500">Needs you 1</span>
+      </div>
+
+      <div style="display:flex;align-items:center;height:22px;padding:0 6px;margin-top:4px"><span class="sec">Pinned</span></div>
+      <div class="th"><span class="bar" style="background:#1B1F33;opacity:.35"></span><div style="flex:1;min-width:0"><div class="tt" style="font-size:12.5px">Submission checklist<span style="margin-left:auto;font-size:11px;color:#5A5E70;font-weight:400">idle</span></div></div></div>
+
+      <div style="display:flex;align-items:center;height:22px;padding:0 6px;margin-top:4px"><span class="sec">membrane-atlas</span><span style="margin-left:auto;font-size:11px;color:#5A5E70">4</span></div>
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <div class="th" style="background:#FCFAF5;box-shadow:0 0 0 1px #DCD4C4,0 1px 2px rgba(27,31,51,.06)"><span class="bar" style="background:#D9541A"></span><div style="flex:1;min-width:0"><div class="tt">Tighten §2 prose<span style="margin-left:auto;font-size:11px;color:#B8460F;font-weight:400">streaming</span></div><div class="ts">Claude Code<span class="wt">main</span></div></div></div>
+        <div class="th" style="margin-left:16px;position:relative"><span style="position:absolute;left:-8px;top:-3px;width:8px;height:18px;border-left:1px solid #C9BFAD;border-bottom:1px solid #C9BFAD;border-bottom-left-radius:6px"></span><span class="bar" style="background:#2F5BD3"></span><div style="flex:1;min-width:0"><div class="tt" style="font-size:12.5px">Check notation consistency<span style="margin-left:auto;font-size:11px;color:#2448B0;font-weight:400">running</span></div><div class="ts">Codex · delegated<span class="wt">read-only</span></div></div></div>
+        <div class="th"><span class="bar" style="background:#2F5BD3"></span><div style="flex:1;min-width:0"><div class="tt">Repair figure paths<span style="margin-left:auto;font-size:10.5px;font-weight:600;color:#6B4A00;background:#F8E3A6;border:1px solid #E0B847;border-radius:999px;padding:0 6px;line-height:16px">Approve</span></div><div class="ts">Codex<span class="wt">wt/figure-paths</span></div></div></div>
+        <div class="th"><span class="bar" style="background:#0E8597;opacity:.45"></span><div style="flex:1;min-width:0"><div class="tt" style="color:#2F3347">Audit bibliography<span style="margin-left:auto;font-size:11px;color:#5A5E70;font-weight:400">done</span></div><div class="ts">Antigravity<span class="wt">main</span><span style="color:#2F7D4F">PR #14 ✓</span></div></div></div>
+        <div style="display:flex;align-items:center;height:24px;padding:0 9px;font-size:12px;color:#5A5E70">▸ Settled<span style="margin-left:auto">8</span></div>
+      </div>
+
+      <div style="display:flex;align-items:center;height:22px;padding:0 6px;margin-top:4px"><span class="sec">thesis-ch3</span><span style="margin-left:auto;font-size:11px;color:#5A5E70">1</span></div>
+      <div class="th"><span class="bar" style="background:#8E4CC4"></span><div style="flex:1;min-width:0"><div class="tt">Regenerate tables from CSV<span style="margin-left:auto;font-size:11px;color:#6E3A99;font-weight:400">running</span></div><div class="ts">Custom ACP<span class="wt">draft/results</span></div></div></div>
+
+      <div style="display:flex;align-items:center;height:22px;padding:0 6px;margin-top:4px"><span class="sec">Scheduled</span></div>
+      <div class="th"><span class="bar" style="background:#D9541A;opacity:.3"></span><div style="flex:1;min-width:0"><div class="tt" style="font-size:12.5px;color:#2F3347">Nightly build + lint<span style="margin-left:auto;font-size:11px;color:#5A5E70;font-weight:400">02:00</span></div></div></div>
+
+      <div style="margin-top:auto;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;font-size:12px;color:#3A3E52">
+        <svg class="ico" style="width:14px" viewBox="0 0 16 16"><path d="M3 13V8M7 13V4M11 13V7M15 13H1"></path></svg>Usage &amp; limits
+        <span style="margin-left:auto;display:flex;gap:2px;width:70px" aria-hidden="true"><span style="flex:58;height:4px;border-radius:2px;background:#D9541A"></span><span style="flex:31;height:4px;border-radius:2px;background:#2F5BD3"></span><span style="flex:11;height:4px;border-radius:2px;background:#DCD4C4"></span></span>
+      </div>
+    </aside>
+
+    <main style="flex:1;min-width:0;display:flex;gap:8px;padding:8px 8px 8px 0;box-sizing:border-box">
+      <section aria-label="Thread transcript" style="flex:1;min-width:0;background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;box-shadow:0 1px 2px rgba(27,31,51,.06);display:flex;flex-direction:column;overflow:hidden;position:relative">
+        <!-- slim header -->
+        <div style="display:flex;align-items:center;gap:9px;height:40px;padding:0 10px 0 16px;border-bottom:1px solid #EEE8DC;flex:none">
+          <span class="dot" style="background:#D9541A"></span>
+          <span style="font-weight:600">Tighten §2 prose</span>
+          <span class="wt">main</span>
+          <span style="margin-left:auto;display:flex;align-items:center;gap:2px">
+            <button class="ib" aria-label="Dock beside editor"><svg class="ico" viewBox="0 0 16 16"><rect x="2" y="2.5" width="12" height="11" rx="2"></rect><path d="M10 2.5v11"></path></svg></button>
+            <button class="ib" aria-label="Fork thread"><svg class="ico" viewBox="0 0 16 16"><circle cx="4" cy="3.5" r="1.5"></circle><circle cx="12" cy="3.5" r="1.5"></circle><circle cx="8" cy="12.5" r="1.5"></circle><path d="M4 5c0 3 4 3 4 6M12 5c0 3-4 3-4 6"></path></svg></button>
+            <button class="ib" aria-label="More"><svg class="ico" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".8"></circle><circle cx="8" cy="8" r=".8"></circle><circle cx="12.5" cy="8" r=".8"></circle></svg></button>
+          </span>
+        </div>
+
+        <div style="flex:1;overflow:hidden;display:flex;justify-content:center">
+          <div style="width:660px;padding:24px 0 0">
+            <div style="margin-bottom:20px">
+              <div style="font-size:11.5px;font-weight:600;margin-bottom:4px">You</div>
+              <p class="say" style="margin:0">§2 reads stiff. Tighten the prose without touching equations or labels, and add one sentence on why the (2,2) mode is weak at the centre. Have someone check notation across sections.</p>
+            </div>
+
+            <div style="display:flex;gap:16px">
+              <div style="width:2px;background:#D9541A;border-radius:2px;flex:none"></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:11.5px;font-weight:600;color:#B8460F;margin-bottom:4px">Claude</div>
+                <div class="tr" style="color:#5A5E70"><span style="font-style:italic">Thought for 9s</span><span>·</span><svg width="9" height="9" aria-hidden="true"><rect x="1" y="1" width="7" height="7" fill="none" stroke="#D9541A" stroke-width="1.4"></rect></svg>Read 2 files<span>·</span><svg width="9" height="9" aria-hidden="true"><circle cx="4.5" cy="4.5" r="3.5" fill="#D9541A"></circle></svg>Edited <span class="mono" style="font-size:12px;color:#1B1F33">wave-field.tex:21–23</span><span class="mono" style="font-size:11.5px"><span style="color:#2F7D4F">+3</span> <span style="color:#B4352A">−3</span></span></div>
+                <div class="tr"><svg width="10" height="10" aria-hidden="true"><path d="M1 5h7M5 1.5L8.5 5 5 8.5" fill="none" stroke="#2F5BD3" stroke-width="1.6"></path></svg>Delegated to <span class="dot" style="background:#2F5BD3;width:6px;height:6px"></span><b style="font-weight:500;color:#1B1F33">Codex</b> · Check notation consistency<span style="margin-left:auto;font-size:11.5px;color:#2448B0">running · open ↗</span></div>
+                <p class="say" style="margin-top:8px">Trimmed the opening and replaced two passive constructions; equations and labels are untouched. Codex is checking symbols across all sections in read-only mode.</p>
+                <div class="tr"><svg width="9" height="9" aria-hidden="true"><circle cx="4.5" cy="4.5" r="3.5" fill="#D9541A"></circle></svg>Editing <span class="mono" style="font-size:12px;color:#1B1F33">wave-field.tex:37</span><span style="display:inline-flex;gap:3px;margin-left:4px" aria-label="in progress"><span class="dot" style="background:#D9541A;width:4px;height:4px"></span><span class="dot" style="background:#D9541A;width:4px;height:4px;opacity:.6"></span><span class="dot" style="background:#D9541A;width:4px;height:4px;opacity:.3"></span></span></div>
+                <p class="say" style="color:#3A3E52">Higher modes split the plate into a checkerboard, so the<span style="display:inline-block;width:7px;height:15px;background:#D9541A;vertical-align:-2px;margin-left:3px;border-radius:1px"></span></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compact T3-style composer -->
+        <div style="padding:8px 16px 14px;display:flex;justify-content:center;flex:none;position:relative">
+          <div style="width:680px;position:relative">
+
+            <!-- Settings pop-open -->
+            <div role="dialog" aria-label="Thread settings" style="position:absolute;left:0;bottom:84px;width:330px;background:#FCFAF5;border:1.5px solid #1B1F33;border-radius:12px;box-shadow:3px 3px 0 rgba(27,31,51,.9);padding:6px;z-index:3">
+              <div class="sec" style="padding:6px 10px 4px">Harness</div>
+              <div class="po" style="background:#EEE8DC"><span class="dot" style="background:#D9541A"></span>Claude Code<span style="margin-left:auto" class="mono">✓</span></div>
+              <div class="po"><span class="dot" style="background:#2F5BD3"></span>Codex</div>
+              <div class="po"><span class="dot" style="background:#0E8597"></span>Antigravity<span style="margin-left:auto;font-size:11px;color:#5A5E70">sign in</span></div>
+              <div style="height:1px;background:#E6DFD1;margin:4px 6px"></div>
+              <div class="po">Model<span style="margin-left:auto;color:#1B1F33">Opus 5.5 ▸</span></div>
+              <div class="po">Effort<span style="margin-left:auto" class="seg"><span>Low</span><span>Med</span><span class="on">High</span><span>Max</span></span></div>
+              <div class="po">Mode<span style="margin-left:auto" class="seg"><span class="on">Build</span><span>Plan</span></span></div>
+              <div class="po">Access<span style="margin-left:auto;color:#1B1F33">Ask before commands ▸</span></div>
+              <div class="po">Workspace<span style="margin-left:auto;color:#1B1F33">Local · main ▸</span></div>
+              <div style="height:1px;background:#E6DFD1;margin:4px 6px"></div>
+              <div class="po">Compact context<span style="margin-left:auto;font-size:11.5px;color:#5A5E70" class="mono">82k → ~20k</span></div>
+            </div>
+
+            <div style="background:#FFFFFF;border:1.5px solid #1B1F33;border-radius:12px;box-shadow:0 2px 0 rgba(27,31,51,.9);padding:9px 10px 7px 12px">
+              <div style="font-size:13.5px;color:#707383;height:22px">Steer Claude — messages queue until the turn ends</div>
+              <div style="display:flex;align-items:center;gap:4px;font-size:12px;color:#3A3E52;margin-top:4px">
+                <button style="font:inherit;font-size:12px;border:0;background:#EEE8DC;border-radius:7px;padding:3px 9px;display:flex;align-items:center;gap:6px;box-shadow:0 0 0 1.5px #1B1F33"><span class="dot" style="background:#D9541A"></span>Opus 5.5<span style="color:#5A5E70">·</span>High<svg class="ico" style="width:11px" viewBox="0 0 16 16"><path d="M4 10l4-4 4 4"></path></svg></button>
+                <button class="ib" aria-label="Attach" style="width:26px;height:26px"><svg class="ico" style="width:14px" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"></path></svg></button>
+                <span style="margin-left:auto;display:flex;align-items:center;gap:5px" class="mono" title="Context 41% · 82k tokens"><svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="#DCD4C4" stroke-width="2.5"></circle><path d="M8 2a6 6 0 0 1 3.5 10.9" fill="none" stroke="#D9541A" stroke-width="2.5"></path></svg>41%</span>
+                <button class="ib" aria-label="Stop" style="width:30px;height:30px;margin-left:6px;border:1px solid #C9BFAD;background:#FCFAF5"><svg width="10" height="10" aria-hidden="true"><rect width="10" height="10" rx="2" fill="#1B1F33"></rect></svg></button>
+                <button aria-label="Queue message" style="width:30px;height:30px;border:1.5px solid #1B1F33;background:#1B1F33;color:#FCFAF5;border-radius:8px;box-shadow:2px 2px 0 #E2622A;display:flex;align-items:center;justify-content:center;padding:0"><svg class="ico" style="width:14px" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4"></path></svg></button>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:center;gap:14px;font-size:11px;color:#5A5E70;margin-top:6px"><span>@ file</span><span>/ command</span><span>⇧↵ newline</span><span>⌘. stop</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Inspector -->
+      <aside aria-label="Project inspector" style="width:308px;flex:none;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;background:#E2DCCF;border-radius:9px;padding:3px;gap:2px;font-size:12.5px">
+          <button style="flex:1;border:0;font:inherit;font-weight:500;padding:4px 0;border-radius:7px;background:#FCFAF5;box-shadow:0 0 0 1px rgba(27,31,51,.08)">Project</button>
+          <button style="flex:1;border:0;font:inherit;padding:4px 0;border-radius:7px;background:transparent;color:#4A4F63">Diff</button>
+          <button style="flex:1;border:0;font:inherit;padding:4px 0;border-radius:7px;background:transparent;color:#4A4F63">PDF</button>
+          <button style="flex:1;border:0;font:inherit;padding:4px 0;border-radius:7px;background:transparent;color:#4A4F63">Terminal</button>
+        </div>
+
+        <div class="ibox">
+          <div class="ir" style="height:22px"><span style="font-weight:500">Checkout</span><span style="margin-left:auto;font-size:11.5px;color:#5A5E70">Reveal</span></div>
+          <div class="mono" style="font-size:11.5px;color:#4A4F63;margin-top:2px">~/papers/membrane-atlas</div>
+          <div class="ir" style="margin-top:4px"><span class="mono" style="font-weight:500">main</span><span class="mono" style="font-size:11.5px;color:#5A5E70">→ origin ↑1</span><span style="margin-left:auto;font-size:11.5px;color:#5A5E70">Pull · Push</span></div>
+          <div class="ir" style="height:24px;font-size:12px;color:#4A4F63"><span class="wt">wt/figure-paths</span>Codex worktree<span style="margin-left:auto">Merge…</span></div>
+        </div>
+
+        <div class="ibox" style="padding-bottom:10px">
+          <div class="ir" style="height:22px"><span style="font-weight:500">Working changes</span><span class="mono" style="margin-left:auto;font-size:11.5px"><span style="color:#2F7D4F">+14</span> <span style="color:#B4352A">−9</span></span></div>
+          <div style="display:flex;flex-direction:column;margin-top:4px">
+            <div class="ir mono" style="font-size:12px;height:26px"><span class="dot" style="background:#D9541A"></span>sections/wave-field.tex<span style="margin-left:auto;color:#5A5E70;font-size:11px">+5 −4</span></div>
+            <div class="ir mono" style="font-size:12px;height:26px"><span class="dot" style="background:#0E8597"></span>references.bib<span style="margin-left:auto;color:#5A5E70;font-size:11px">+9 −5</span></div>
+          </div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button style="flex:1;font:inherit;font-size:12px;font-weight:500;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:7px;padding:4px 0">Review</button>
+            <button style="flex:1;font:inherit;font-size:12px;font-weight:500;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:7px;padding:4px 0">Commit &amp; PR…</button>
+          </div>
+        </div>
+
+        <div class="ibox" style="display:flex;gap:12px">
+          <div style="width:52px;height:68px;background:#FFFFFF;box-shadow:0 1px 3px rgba(27,31,51,.18);flex:none;padding:7px 6px;box-sizing:border-box;display:flex;flex-direction:column;gap:3px" aria-hidden="true">
+            <span style="height:4px;width:70%;background:#3A3A3A"></span><span style="height:2px;background:#BBB"></span><span style="height:2px;background:#BBB"></span><span style="height:13px;margin-top:3px;background:linear-gradient(90deg,#C77B62,#EFE6DC,#5D84AC)"></span><span style="height:2px;background:#BBB"></span>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div class="ir" style="height:20px"><span style="font-weight:500">Last build</span><span style="margin-left:auto;font-size:11px;color:#1F5233;background:#DCEBDD;border:1px solid #A9CBAE;border-radius:999px;padding:0 6px;line-height:16px">✓ 06:58</span></div>
+            <div class="mono" style="font-size:11.5px;color:#4A4F63;margin-top:4px">main.tex · 8 pp · 684 ms</div>
+            <div style="font-size:11.5px;color:#B8460F;margin-top:5px;display:flex;align-items:center;gap:5px"><span class="dot" style="background:#D9541A"></span>2 agent edits since</div>
+          </div>
+        </div>
+
+        <div class="ibox">
+          <div class="ir" style="height:22px"><span style="font-weight:500">Orchestration</span><span style="margin-left:auto;font-size:11.5px;color:#5A5E70">this thread</span></div>
+          <div style="display:flex;flex-direction:column;margin-top:4px;font-size:12px;color:#3A3E52">
+            <div class="ir" style="height:24px"><span class="dot" style="background:#0E8597;opacity:.5"></span>Audit bibliography<span style="margin-left:auto;color:#5A5E70;font-size:11px">handed off</span></div>
+            <div class="ir" style="height:24px;padding-left:12px"><span class="dot" style="background:#D9541A"></span><b style="font-weight:500">Tighten §2 prose</b><span style="margin-left:auto;color:#5A5E70;font-size:11px">this</span></div>
+            <div class="ir" style="height:24px;padding-left:24px"><span class="dot" style="background:#2F5BD3"></span>Check notation<span style="margin-left:auto;color:#2448B0;font-size:11px">Codex · running</span></div>
+          </div>
+          <button style="margin-top:6px;width:100%;font:inherit;font-size:12px;border:1px dashed #C9BFAD;background:transparent;border-radius:7px;padding:4px 0;color:#3A3E52">Delegate a task…</button>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <footer style="height:24px;flex:none;display:flex;align-items:center;gap:16px;padding:0 14px;font-size:11.5px;color:#4A4F63;border-top:1px solid #DCD4C4">
+    <span class="mono">⑂ main ↑1</span><span>5 threads · 3 running · 1 waiting · 1 scheduled</span>
+    <span style="margin-left:auto">Cache 72% of input today</span>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

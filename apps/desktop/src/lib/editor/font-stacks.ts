@@ -22,7 +22,6 @@ const APPLE_GOOGLE_MONO_FONTS = [
   '"SF Pro Mono"',
   '"Google Sans Code"',
   '"Roboto Mono"',
-  "var(--font-geist-mono)",
   "ui-monospace",
   "Menlo",
   "Consolas",
@@ -44,6 +43,7 @@ const TERMINAL_NERD_MONO_FONTS = [
 ];
 
 export const EDITOR_MONO_FONT_FAMILY = [
+  "var(--font-geist-mono)",
   ...APPLE_GOOGLE_MONO_FONTS,
   ...CJK_MONO_FONTS,
   ...CJK_SANS_FALLBACK_FONTS,

@@ -5,8 +5,10 @@ import "@/lib/monaco/config";
 import Editor, { type Monaco, type OnChange, type OnMount } from "@monaco-editor/react";
 import type { editor, IDisposable, Position } from "monaco-editor";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { AttributedEdit } from "@/lib/agent/edit-attribution";
 import { resolveMonoFontFamily } from "@/lib/editor/font-stacks";
 import type { EditorSettings, EditorTheme } from "@/lib/editor/types";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import type { BibEntry, LabelEntry } from "@/lib/latex/bib-parser";
 import type { LatexDiagnostic } from "@/lib/latex/types";
 import { registerLaTeXLanguage } from "@/lib/monaco/latex";
@@ -32,8 +34,31 @@ type Props = {
     startLine: number,
     endLine: number,
   ) => void;
+  onNewThreadFromSelection?: (
+    selectionText: string,
+    filePath: string,
+    startLine: number,
+    endLine: number,
+  ) => void;
+  onExplainSelection?: (
+    selectionText: string,
+    filePath: string,
+    startLine: number,
+    endLine: number,
+  ) => void;
+  activeProviderId?: keyof typeof VOICE_COLORS;
+  activeProviderName?: string;
   onCursorChange?: (pos: { line: number; column: number }) => void;
   goToLine?: number;
+  attributedEdits?: AttributedEdit[];
+  onKeepEdit?: (edit: AttributedEdit) => void;
+  onUndoEdit?: (edit: AttributedEdit) => void;
+  pendingSnippet?: {
+    id: number;
+    before: string;
+    after: string;
+    placeholder?: string;
+  } | null;
 };
 
 type VimModeController = {
@@ -126,8 +151,16 @@ export const MonacoEditor = memo(function MonacoEditor({
   onCompileShortcut,
   onForwardSync,
   onAskAgent,
+  onNewThreadFromSelection,
+  onExplainSelection,
+  activeProviderId = "claude",
+  activeProviderName = "Claude",
   onCursorChange,
   goToLine,
+  attributedEdits,
+  onKeepEdit,
+  onUndoEdit,
+  pendingSnippet,
 }: Props) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -143,6 +176,16 @@ export const MonacoEditor = memo(function MonacoEditor({
   const onAskAgentRef = useRef(onAskAgent);
   const onCursorChangeRef = useRef(onCursorChange);
   const cursorListenerRef = useRef<IDisposable | null>(null);
+  const selectionListenerRef = useRef<IDisposable | null>(null);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+  const [selectionPopover, setSelectionPopover] = useState<{
+    text: string;
+    startLine: number;
+    endLine: number;
+    top: number;
+    left: number;
+  } | null>(null);
 
   sharedBibEntries = bibEntries;
   sharedTexLabels = texLabels;
@@ -162,6 +205,7 @@ export const MonacoEditor = memo(function MonacoEditor({
     editorRef.current = editor;
     monacoRef.current = monaco;
     setEditorReady(true);
+    void document.fonts.ready.then(() => monaco.editor.remeasureFonts());
 
     // Apply any pending goToLine that arrived before the editor was ready
     if (pendingGoToLineRef.current > 0) {
@@ -190,6 +234,16 @@ export const MonacoEditor = memo(function MonacoEditor({
 
     defineEditorThemes(monaco);
     registerLaTeXLanguage(monaco);
+
+    if (pendingGoToLineRef.current <= 0) {
+      editor.setPosition({ lineNumber: 1, column: 1 });
+      editor.setSelection({
+        startLineNumber: 1,
+        startColumn: 1,
+        endLineNumber: 1,
+        endColumn: 1,
+      });
+    }
 
     editor.focus();
 
@@ -322,6 +376,43 @@ export const MonacoEditor = memo(function MonacoEditor({
       onCursorChangeRef.current?.({
         line: ev.position.lineNumber,
         column: ev.position.column,
+      });
+    });
+
+    selectionListenerRef.current?.dispose();
+    selectionListenerRef.current = editor.onDidChangeCursorSelection((ev) => {
+      if (readOnlyRef.current) {
+        setSelectionPopover(null);
+        return;
+      }
+      const sel = ev.selection;
+      const model = editor.getModel();
+      if (!model || sel.isEmpty()) {
+        setSelectionPopover(null);
+        return;
+      }
+      const selectedText = model.getValueInRange(sel);
+      if (!selectedText.trim()) {
+        setSelectionPopover(null);
+        return;
+      }
+      const startLine = Math.min(sel.startLineNumber, sel.endLineNumber);
+      const endLine = Math.max(sel.startLineNumber, sel.endLineNumber);
+      const endPos = { lineNumber: startLine, column: Math.max(sel.startColumn, sel.endColumn) };
+      const coords = editor.getScrolledVisiblePosition(endPos);
+      if (!coords) {
+        setSelectionPopover(null);
+        return;
+      }
+      const layout = editor.getLayoutInfo();
+      const top = Math.max(8, coords.top - 36);
+      const left = Math.min(Math.max(12, coords.left), Math.max(12, layout.width - 280));
+      setSelectionPopover({
+        text: selectedText,
+        startLine,
+        endLine,
+        top,
+        left,
       });
     });
 
@@ -465,8 +556,216 @@ export const MonacoEditor = memo(function MonacoEditor({
     };
   }, []);
 
+  const decorationIdsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    const ed = editorRef.current;
+    if (!ed || !editorReady) return;
+    const model = ed.getModel();
+    if (!model) return;
+
+    const lineCount = model.getLineCount();
+    const nextDecorations: editor.IModelDeltaDecoration[] = (attributedEdits ?? []).map((edit) => {
+      const provider = edit.thread.providerId;
+      const startLine = Math.max(1, Math.min(edit.startLine, lineCount));
+      const endLine = Math.max(startLine, Math.min(edit.endLine, lineCount));
+      return {
+        range: {
+          startLineNumber: startLine,
+          startColumn: 1,
+          endLineNumber: endLine,
+          endColumn: model.getLineMaxColumn(endLine),
+        },
+        options: {
+          isWholeLine: true,
+          className: edit.status === "pending" ? `ox-voice-range--${provider}` : undefined,
+          linesDecorationsClassName: `ox-voice-gutter--${provider}`,
+          hoverMessage: {
+            value: `${provider} · ${edit.thread.title}`,
+          },
+        },
+      };
+    });
+
+    decorationIdsRef.current = ed.deltaDecorations(decorationIdsRef.current, nextDecorations);
+    return () => {
+      if (decorationIdsRef.current.length > 0 && editorRef.current) {
+        decorationIdsRef.current = editorRef.current.deltaDecorations(decorationIdsRef.current, []);
+      }
+    };
+  }, [attributedEdits, editorReady]);
+
+  const jumpToAttributedEdit = useCallback((edit: AttributedEdit) => {
+    const ed = editorRef.current;
+    if (!ed) return;
+    ed.revealLineInCenter(edit.startLine);
+    ed.setPosition({ lineNumber: edit.startLine, column: 1 });
+    ed.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!pendingSnippet) return;
+    const ed = editorRef.current;
+    if (!ed) return;
+    const model = ed.getModel();
+    const selection = ed.getSelection();
+    if (!model || !selection) return;
+    const selectedText = model.getValueInRange(selection);
+    const inner = selectedText || pendingSnippet.placeholder || "";
+    const text = `${pendingSnippet.before}${inner}${pendingSnippet.after}`;
+    ed.executeEdits("latex-toolbar", [{ range: selection, text, forceMoveMarkers: true }]);
+    if (!selectedText && pendingSnippet.placeholder) {
+      const startOffset =
+        model.getOffsetAt({
+          lineNumber: selection.startLineNumber,
+          column: selection.startColumn,
+        }) + pendingSnippet.before.length;
+      const startPos = model.getPositionAt(startOffset);
+      const endPos = model.getPositionAt(startOffset + pendingSnippet.placeholder.length);
+      ed.setSelection({
+        startLineNumber: startPos.lineNumber,
+        startColumn: startPos.column,
+        endLineNumber: endPos.lineNumber,
+        endColumn: endPos.column,
+      });
+    }
+    ed.focus();
+  }, [pendingSnippet]);
+
+  const pendingEdits = attributedEdits?.filter((edit) => edit.status === "pending");
+
   return (
     <div className={`relative flex flex-col ${className}`}>
+      {pendingEdits && pendingEdits.length > 0 && (
+        <section
+          className="absolute top-2 right-3.5 z-10 flex flex-col items-end gap-1.5 max-w-[340px] pointer-events-auto"
+          aria-label="Attributed agent edits"
+        >
+          {pendingEdits.map((edit) => {
+            const voice = VOICE_COLORS[edit.thread.providerId] ?? VOICE_COLORS["custom-acp"];
+            const providerName =
+              edit.thread.providerId === "claude"
+                ? "Claude"
+                : edit.thread.providerId === "codex"
+                  ? "Codex"
+                  : edit.thread.providerId === "antigravity"
+                    ? "Antigravity"
+                    : "Agent";
+            const lineCount = Math.max(1, edit.endLine - edit.startLine + 1);
+            const changeSummary =
+              edit.endLine > edit.startLine ? `+${lineCount} lines` : "1 change";
+            const label = `${providerName} · ${changeSummary}`;
+            const isRunning = edit.thread.status === "running";
+            return (
+              <div key={edit.id} className="flex flex-col items-end gap-1">
+                {isRunning && (
+                  <div
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium text-white rounded-[5px_5px_5px_0] shadow-xs"
+                    style={{ backgroundColor: voice.ink }}
+                  >
+                    <span>{providerName} · writing</span>
+                  </div>
+                )}
+                <div
+                  className="flex items-center gap-1.5 pl-2.5 pr-1 py-0.5 rounded-[8px] border bg-panel/95 backdrop-blur-sm shadow-sm text-[11.5px] text-muted"
+                  style={{ borderColor: voice.tint }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => jumpToAttributedEdit(edit)}
+                    className="inline-flex items-center gap-1.5 min-w-0 flex-1 text-left hover:underline"
+                    title={`Jump to ${providerName} · ${edit.thread.title} (L${edit.startLine})`}
+                    aria-label={`Jump to ${label} at line ${edit.startLine}`}
+                  >
+                    <span
+                      className="inline-block w-[7px] h-[7px] rounded-full flex-shrink-0"
+                      style={{ backgroundColor: voice.ink }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate font-medium text-foreground">{label}</span>
+                  </button>
+                  {onKeepEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onKeepEdit(edit)}
+                      className="px-1.5 py-0.5 rounded-[5px] text-[11.5px] text-foreground-strong hover:bg-subtle transition-colors"
+                      aria-label={`Keep edit from ${providerName}`}
+                    >
+                      Keep
+                    </button>
+                  )}
+                  {onUndoEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onUndoEdit(edit)}
+                      className="px-1.5 py-0.5 rounded-[5px] text-[11.5px] text-foreground-strong hover:bg-subtle transition-colors"
+                      aria-label={`Undo edit from ${providerName}`}
+                    >
+                      Undo
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      )}
+      {selectionPopover && !readOnly && (
+        <div
+          role="toolbar"
+          aria-label="Selection actions"
+          style={{ top: selectionPopover.top, left: selectionPopover.left }}
+          className="absolute z-20 flex items-center gap-0.5 rounded-[8px] bg-primary p-[3px] text-[12px] text-primary-text shadow-md"
+        >
+          <span className="px-1.5 font-mono text-[11px] opacity-75">
+            {selectionPopover.startLine === selectionPopover.endLine
+              ? `L${selectionPopover.startLine}`
+              : `L${selectionPopover.startLine}–${selectionPopover.endLine}`}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const pop = selectionPopover;
+              setSelectionPopover(null);
+              onAskAgent?.(pop.text, filePath ?? "", pop.startLine, pop.endLine);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-[5px] bg-primary-hover px-2 py-0.5 text-primary-text hover:opacity-95"
+          >
+            <span
+              className="size-2 rounded-full shrink-0"
+              style={{ backgroundColor: VOICE_COLORS[activeProviderId].ink }}
+              aria-hidden="true"
+            />
+            Ask {activeProviderName}
+          </button>
+          {onNewThreadFromSelection && (
+            <button
+              type="button"
+              onClick={() => {
+                const pop = selectionPopover;
+                setSelectionPopover(null);
+                onNewThreadFromSelection(pop.text, filePath ?? "", pop.startLine, pop.endLine);
+              }}
+              className="rounded-[5px] px-2 py-0.5 text-primary-text hover:bg-primary-hover/80"
+            >
+              New thread…
+            </button>
+          )}
+          {onExplainSelection && (
+            <button
+              type="button"
+              onClick={() => {
+                const pop = selectionPopover;
+                setSelectionPopover(null);
+                onExplainSelection(pop.text, filePath ?? "", pop.startLine, pop.endLine);
+              }}
+              className="rounded-[5px] px-2 py-0.5 text-primary-text hover:bg-primary-hover/80"
+            >
+              Explain
+            </button>
+          )}
+        </div>
+      )}
       {editorSettings?.vimMode && !readOnly && (
         <div
           ref={vimStatusRef}
@@ -483,11 +782,25 @@ export const MonacoEditor = memo(function MonacoEditor({
         onChange={handleChange}
         options={{
           readOnly,
-          fontSize: editorSettings?.fontSize ?? 14,
+          fontSize:
+            editorSettings?.fontSize && editorSettings.fontSize !== 14
+              ? editorSettings.fontSize
+              : 12,
           fontFamily: resolveMonoFontFamily(editorSettings?.fontFamily),
           fontLigatures: false,
           lineNumbers: editorSettings?.lineNumbers ?? "on",
-          lineHeight: editorSettings?.lineHeight ?? 1.6,
+          lineNumbersMinChars: 3,
+          lineDecorationsWidth: 8,
+          glyphMargin: false,
+          lineHeight:
+            editorSettings?.lineHeight && editorSettings.lineHeight !== 1.6
+              ? editorSettings.lineHeight
+              : Math.round(
+                  (editorSettings?.fontSize && editorSettings.fontSize !== 14
+                    ? editorSettings.fontSize
+                    : 12) *
+                    (20 / 12),
+                ),
           letterSpacing: 0,
           renderWhitespace: editorSettings?.renderWhitespace ?? "selection",
           tabSize: editorSettings?.tabSize ?? 2,
@@ -517,10 +830,10 @@ export const MonacoEditor = memo(function MonacoEditor({
           autoClosingQuotes: editorSettings?.autoClosingQuotes ?? "languageDefined",
           renderLineHighlight: "line",
           renderLineHighlightOnlyWhenFocus: false,
+          selectionHighlight: false,
+          occurrencesHighlight: "off",
           selectOnLineNumbers: true,
-          folding: true,
-          foldingStrategy: "auto",
-          showFoldingControls: "mouseover",
+          folding: false,
           matchBrackets: "always",
           bracketPairColorization: {
             enabled: false,
@@ -557,7 +870,7 @@ export const MonacoEditor = memo(function MonacoEditor({
             seedSearchStringFromSelection: "selection",
           },
           padding: {
-            top: 16,
+            top: 8,
             bottom: 16,
           },
           scrollbar: {

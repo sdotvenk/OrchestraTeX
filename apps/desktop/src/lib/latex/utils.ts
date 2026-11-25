@@ -9,7 +9,7 @@ export function findTexFiles(files: FileNode[]): string[] {
 
   function traverse(nodes: FileNode[]) {
     for (const node of nodes) {
-      if (node.type === "file" && node.name.endsWith(".tex")) {
+      if (node.type === "file" && /\.tex$/i.test(node.name)) {
         texFiles.push(node.path);
       } else if (node.type === "directory" && node.children) {
         traverse(node.children);

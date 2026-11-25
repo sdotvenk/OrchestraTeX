@@ -50,6 +50,7 @@ type TerminalPanelProps = {
   fontSize: number;
   lineHeight: number;
   prefersReducedMotion: boolean;
+  embedded?: boolean;
   onClose: () => void;
   pendingCommand?: { id: number; command: string } | null;
   onPendingCommandSent?: () => void;
@@ -101,6 +102,7 @@ export function TerminalPanel({
   fontSize,
   lineHeight,
   prefersReducedMotion,
+  embedded = false,
   onClose,
   pendingCommand,
   onPendingCommandSent,
@@ -240,6 +242,24 @@ export function TerminalPanel({
     [commitHeight],
   );
 
+  const terminal = projectPath ? (
+    <EditorTerminal
+      projectPath={projectPath}
+      shellMode={shellMode}
+      customShell={customShell}
+      fontFamily={fontFamily}
+      fontSize={fontSize}
+      lineHeight={lineHeight}
+      className="flex-1 min-h-0"
+      pendingCommand={pendingCommand}
+      onPendingCommandSent={onPendingCommandSent}
+    />
+  ) : null;
+
+  if (embedded) {
+    return open ? <div className="flex h-full min-h-0 flex-col">{terminal}</div> : null;
+  }
+
   return (
     <AnimatePresence>
       {open && projectPath && (
@@ -317,17 +337,7 @@ export function TerminalPanel({
             </div>
           </div>
 
-          <EditorTerminal
-            projectPath={projectPath}
-            shellMode={shellMode}
-            customShell={customShell}
-            fontFamily={fontFamily}
-            fontSize={fontSize}
-            lineHeight={lineHeight}
-            className="flex-1 min-h-0"
-            pendingCommand={pendingCommand}
-            onPendingCommandSent={onPendingCommandSent}
-          />
+          {terminal}
         </motion.div>
       )}
     </AnimatePresence>

@@ -1,5 +1,6 @@
 import { useTheme } from "next-themes";
 import { useCallback, useEffect, useState } from "react";
+import { APPEARANCE_STORAGE_KEY, isNocturneAppearance } from "./appearance";
 import {
   DEFAULT_EDITOR_SETTINGS,
   DEFAULT_MINIMAP_SETTINGS,
@@ -29,10 +30,9 @@ function sanitizeString(value: unknown, fallback = ""): string {
 function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
   const settings = { ...DEFAULT_EDITOR_SETTINGS, ...parsed };
 
-  // Remove legacy theme field (now auto-follows app mode)
-  if ("theme" in settings) {
-    delete (settings as Record<string, unknown>).theme;
-  }
+  // Remove retired appearance settings. The app theme is stored by next-themes.
+  delete (settings as Record<string, unknown>).theme;
+  delete (settings as Record<string, unknown>).uiPalette;
 
   // Migrate old boolean minimap format to new object format
   if (typeof parsed.minimap === "boolean") {
@@ -51,20 +51,16 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
     );
   }
 
-  if (
-    settings.uiPalette !== "atelier" &&
-    settings.uiPalette !== "conductor" &&
-    settings.uiPalette !== "monograph"
-  ) {
-    settings.uiPalette = DEFAULT_EDITOR_SETTINGS.uiPalette;
-  }
-
   settings.fontFamily = sanitizeString(settings.fontFamily);
   settings.fontSize = clampInteger(settings.fontSize, DEFAULT_EDITOR_SETTINGS.fontSize, 8, 32);
+  const rawLineHeight =
+    typeof settings.lineHeight === "number" && Number.isFinite(settings.lineHeight)
+      ? settings.lineHeight > 3
+        ? settings.lineHeight / settings.fontSize
+        : settings.lineHeight
+      : DEFAULT_EDITOR_SETTINGS.lineHeight;
   settings.lineHeight =
-    Math.round(
-      clampNumber(settings.lineHeight, DEFAULT_EDITOR_SETTINGS.lineHeight, 1.0, 3.0) * 10,
-    ) / 10;
+    Math.round(clampNumber(rawLineHeight, DEFAULT_EDITOR_SETTINGS.lineHeight, 1.0, 3.0) * 10) / 10;
 
   if (settings.terminalShellMode !== "auto" && settings.terminalShellMode !== "custom") {
     settings.terminalShellMode = DEFAULT_EDITOR_SETTINGS.terminalShellMode;
@@ -95,42 +91,47 @@ function migrateSettings(parsed: Record<string, unknown>): EditorSettings {
 }
 
 export function useEditorSettings() {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, setTheme } = useTheme();
 
-  const [settings, setSettings] = useState<EditorSettings>(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_EDITOR_SETTINGS;
-    }
+  const [settings, setSettings] = useState(DEFAULT_EDITOR_SETTINGS);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (settingsLoaded) return;
+
     try {
+      const appearance = localStorage.getItem(APPEARANCE_STORAGE_KEY);
+      if (appearance === "light" || appearance === "dark") {
+        setTheme(appearance === "light" ? "lux" : "nocturne");
+      }
+
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        return migrateSettings(parsed);
+        const parsed: Record<string, unknown> = JSON.parse(saved);
+        // Legacy palettes defaulted to the light appearance.
+        if (typeof parsed.uiPalette === "string" && appearance === null) {
+          setTheme("lux");
+        }
+        setSettings(migrateSettings(parsed));
       }
     } catch {
       // Ignore parse errors
     }
-    return DEFAULT_EDITOR_SETTINGS;
-  });
+    setSettingsLoaded(true);
+  }, [settingsLoaded, setTheme]);
 
   // Derive editor theme from app theme
-  const editorTheme: EditorTheme = resolvedTheme === "dark" ? "one-dark" : "one-light";
-
-  // Apply UI color palette attribute to <html>
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    document.documentElement.dataset.palette = settings.uiPalette;
-  }, [settings.uiPalette]);
+  const editorTheme: EditorTheme = isNocturneAppearance(resolvedTheme) ? "one-dark" : "one-light";
 
   // Persist settings to localStorage
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!settingsLoaded) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     } catch {
       // Ignore storage errors
     }
-  }, [settings]);
+  }, [settings, settingsLoaded]);
 
   const updateSettings = useCallback((updates: Partial<EditorSettings>) => {
     setSettings((prev) => ({ ...prev, ...updates }));

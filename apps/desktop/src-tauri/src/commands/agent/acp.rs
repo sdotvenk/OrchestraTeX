@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, watch, Mutex};
@@ -61,6 +61,7 @@ struct AcpActiveTurn {
     #[allow(dead_code)]
     local_thread_id: String,
     project_path: String,
+    workspace_path: String,
     message_id: String,
     text_part_id: Option<String>,
     reasoning_part_id: Option<String>,
@@ -73,6 +74,7 @@ impl AcpClient {
         provider_id: AgentProviderId,
         binary_path: &str,
         extra_args: &[String],
+        project_path: &str,
         cwd: &str,
     ) -> Result<Self, String> {
         let mut cmd = spawn_cli_command(binary_path, extra_args, cwd).await;
@@ -150,6 +152,7 @@ impl AcpClient {
         // Stdout JSON-RPC reader
         let app_out = app.clone();
         let store_out = store.clone();
+        let thread_project = project_path.to_string();
         let cwd_root = cwd.to_string();
         tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -211,6 +214,8 @@ impl AcpClient {
                         &store_out,
                         &stdin_tx,
                         &cwd_root,
+                        &thread_project,
+                        &active_turns,
                         &session_to_local,
                         &pending_permissions,
                         &terminals,
@@ -309,7 +314,7 @@ impl AcpClient {
                     "session/load",
                     json!({
                         "sessionId": existing_sid,
-                        "cwd": thread.summary.project_path,
+                        "cwd": thread.summary.effective_workspace_path(),
                         "mcpServers": [],
                     }),
                 )
@@ -324,7 +329,7 @@ impl AcpClient {
             .rpc_call(
                 "session/new",
                 json!({
-                    "cwd": thread.summary.project_path,
+                    "cwd": thread.summary.effective_workspace_path(),
                     "mcpServers": [],
                 }),
             )
@@ -597,6 +602,7 @@ impl AcpClient {
             AcpActiveTurn {
                 local_thread_id: thread.summary.id.clone(),
                 project_path: thread.summary.project_path.clone(),
+                workspace_path: thread.summary.effective_workspace_path().to_string(),
                 message_id: msg_id.clone(),
                 text_part_id: None,
                 reasoning_part_id: None,
@@ -892,32 +898,7 @@ pub async fn probe_acp(
         .await
         {
             let text = String::from_utf8_lossy(&out.stdout);
-            for line in text.lines() {
-                let trimmed = line.trim();
-                if trimmed.is_empty()
-                    || trimmed.starts_with("Fetching")
-                    || trimmed.starts_with("Error:")
-                    || trimmed.starts_with("Available")
-                {
-                    continue;
-                }
-                let id = trimmed
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or(trimmed)
-                    .to_string();
-                models.push(ModelInfo {
-                    id: id.clone(),
-                    name: trimmed.to_string(),
-                    description: None,
-                    supports_effort: false,
-                    supported_effort_levels: Vec::new(),
-                    default_effort: None,
-                    supports_fast_mode: false,
-                    is_default: models.is_empty(),
-                    context_window: None,
-                });
-            }
+            models = parse_agy_models_output(&text);
         }
     }
 
@@ -928,7 +909,7 @@ pub async fn probe_acp(
             plan_type: None,
             windows: Vec::new(),
             credits_balance: None,
-            note: Some("Antigravity ACP reports session context usage (`usage_update`), not account quota windows.".to_string()),
+            note: Some("Session context usage only".to_string()),
         })
     } else {
         None
@@ -1209,6 +1190,22 @@ async fn handle_acp_session_update(
             }
         }
         "usage_update" => {
+            if let Some(project_path) = get_turn_project(active_turns, session_id).await {
+                if let Some(mgr) = app.try_state::<super::AgentManagerState>() {
+                    if let Ok(log) = mgr.get_usage_log(&app).await {
+                        let model = store.get_thread_model(&project_path, &local_tid).await;
+                        let _ = log
+                            .record_acp_update(
+                                provider_id,
+                                &project_path,
+                                &local_tid,
+                                model.as_deref(),
+                                update,
+                            )
+                            .await;
+                    }
+                }
+            }
             if let Some(usage) = parse_acp_usage(update) {
                 if let Some(project_path) = get_turn_project(active_turns, session_id).await {
                     let _ = store
@@ -1277,6 +1274,8 @@ async fn handle_acp_agent_request(
     store: &ThreadStore,
     stdin_tx: &mpsc::UnboundedSender<String>,
     project_root: &str,
+    thread_project: &str,
+    active_turns: &Arc<Mutex<HashMap<String, AcpActiveTurn>>>,
     session_to_local: &Arc<Mutex<HashMap<String, String>>>,
     pending_permissions: &Arc<Mutex<HashMap<String, PendingAcpPermission>>>,
     terminals: &Arc<Mutex<HashMap<String, AcpTerminalProcess>>>,
@@ -1284,6 +1283,21 @@ async fn handle_acp_agent_request(
     rpc_id: Value,
     params: &Value,
 ) {
+    let session_id_param = params
+        .get("sessionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let effective_root = if !session_id_param.is_empty() {
+        active_turns
+            .lock()
+            .await
+            .get(session_id_param)
+            .map(|t| t.workspace_path.clone())
+            .unwrap_or_else(|| project_root.to_string())
+    } else {
+        project_root.to_string()
+    };
+    let project_root = effective_root.as_str();
     match method {
         "session/request_permission" => {
             let session_id = params
@@ -1321,16 +1335,11 @@ async fn handle_acp_agent_request(
                 .get("rawInput")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            let file_path = tool_call
-                .get("locations")
-                .and_then(|l| l.as_array())
-                .and_then(|a| a.first())
-                .and_then(|loc| loc.get("path"))
-                .and_then(|p| p.as_str())
-                .map(|s| s.to_string());
+            let (file_path, diff) = acp_approval_edit_preview(&tool_call, &raw_input, &tool_name);
             let command = raw_input
                 .get("command")
                 .and_then(|v| v.as_str())
+                .or_else(|| raw_input.get("CommandLine").and_then(|v| v.as_str()))
                 .map(|s| s.to_string());
 
             let options: Vec<PermissionOption> = params
@@ -1362,7 +1371,7 @@ async fn handle_acp_agent_request(
                 title,
                 command,
                 file_path,
-                diff: None,
+                diff,
                 reason: None,
                 input: raw_input,
                 options: options.clone(),
@@ -1373,13 +1382,13 @@ async fn handle_acp_agent_request(
                 PendingAcpPermission {
                     rpc_id,
                     local_thread_id: local_tid.clone(),
-                    project_path: project_root.to_string(),
+                    project_path: thread_project.to_string(),
                     options,
                 },
             );
 
             let _ = store
-                .mutate_thread(project_root, &local_tid, |t| {
+                .mutate_thread(thread_project, &local_tid, |t| {
                     ThreadStore::set_pending_interaction(t, Some(interaction.clone()));
                     t.summary.status = "waiting_input".to_string();
                 })
@@ -1791,13 +1800,7 @@ pub fn parse_acp_tool_call(update: &Value) -> Option<AgentPart> {
     });
 
     let mut diff: Option<String> = None;
-    let mut file_path = update
-        .get("locations")
-        .and_then(|l| l.as_array())
-        .and_then(|a| a.first())
-        .and_then(|loc| loc.get("path"))
-        .and_then(|p| p.as_str())
-        .map(|s| s.to_string());
+    let mut file_path = acp_tool_location(update);
 
     if let Some(content_arr) = update.get("content").and_then(|c| c.as_array()) {
         for c in content_arr {
@@ -1849,6 +1852,46 @@ pub fn parse_acp_tool_call(update: &Value) -> Option<AgentPart> {
         diff,
         parent_tool_call_id: None,
     })
+}
+
+fn acp_tool_location(tool_call: &Value) -> Option<String> {
+    tool_call
+        .get("locations")
+        .and_then(Value::as_array)?
+        .first()?
+        .get("path")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+fn acp_approval_edit_preview(
+    tool_call: &Value,
+    raw_input: &Value,
+    kind: &str,
+) -> (Option<String>, Option<String>) {
+    let (mut path, mut diff) = match parse_acp_tool_call(tool_call) {
+        Some(AgentPart::Tool {
+            file_path, diff, ..
+        }) => (file_path, diff),
+        _ => (acp_tool_location(tool_call), None),
+    };
+    if kind == "edit" {
+        if path.is_none() {
+            path = raw_input
+                .get("Path")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+        if diff.is_none() {
+            if let (Some(target), Some(replacement)) = (
+                raw_input.get("Target").and_then(Value::as_str),
+                raw_input.get("Replacement").and_then(Value::as_str),
+            ) {
+                diff = Some(format!("--- before\n{target}\n+++ after\n{replacement}"));
+            }
+        }
+    }
+    (path, diff)
 }
 
 pub fn parse_acp_plan(update: &Value) -> Option<Vec<PlanTaskItem>> {
@@ -1920,9 +1963,64 @@ pub fn parse_acp_usage(update: &Value) -> Option<TokenUsageSnapshot> {
     })
 }
 
+fn parse_agy_models_output(text: &str) -> Vec<ModelInfo> {
+    let mut models = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("Fetching")
+            || trimmed.starts_with("Error:")
+            || trimmed.starts_with("Available")
+        {
+            continue;
+        }
+        let (id, name) = match trimmed.split_once(char::is_whitespace) {
+            Some((id, rest)) => {
+                let label = rest.trim();
+                let name = if label.is_empty() { id } else { label };
+                (id, name)
+            }
+            None => (trimmed, trimmed),
+        };
+        models.push(ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: None,
+            supports_effort: false,
+            supported_effort_levels: Vec::new(),
+            default_effort: None,
+            supports_fast_mode: false,
+            is_default: models.is_empty(),
+            context_window: None,
+        });
+    }
+    models
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn previews_agy_replacement_in_edit_approval() {
+        let input = json!({
+            "Path": "/paper/main.tex",
+            "Target": "Original text",
+            "Replacement": "Revised text"
+        });
+        let tool_call = json!({"toolCallId": "edit-1", "kind": "edit"});
+        assert_eq!(
+            acp_approval_edit_preview(&tool_call, &input, "edit"),
+            (
+                Some("/paper/main.tex".into()),
+                Some("--- before\nOriginal text\n+++ after\nRevised text".into())
+            )
+        );
+        assert_eq!(
+            acp_approval_edit_preview(&tool_call, &input, "execute"),
+            (None, None)
+        );
+    }
 
     #[test]
     fn parses_acp_usage_update() {
@@ -1976,5 +2074,32 @@ mod tests {
         let tasks = parse_acp_plan(&pl).unwrap();
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].status, "completed");
+    }
+
+    #[test]
+    fn parses_agy_models_output() {
+        let output = "\
+Fetching models...
+Available models:
+
+gemini-4-hydrogen-low\tGemini 4 Hydrogen (Low)
+gemini-4-hydrogen-high   Gemini 4 Hydrogen (High)
+gemini-4-pro
+Error: something else
+";
+        let models = parse_agy_models_output(output);
+        assert_eq!(models.len(), 3);
+
+        assert_eq!(models[0].id, "gemini-4-hydrogen-low");
+        assert_eq!(models[0].name, "Gemini 4 Hydrogen (Low)");
+        assert!(models[0].is_default);
+
+        assert_eq!(models[1].id, "gemini-4-hydrogen-high");
+        assert_eq!(models[1].name, "Gemini 4 Hydrogen (High)");
+        assert!(!models[1].is_default);
+
+        assert_eq!(models[2].id, "gemini-4-pro");
+        assert_eq!(models[2].name, "gemini-4-pro");
+        assert!(!models[2].is_default);
     }
 }

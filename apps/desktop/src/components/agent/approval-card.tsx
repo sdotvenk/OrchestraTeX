@@ -1,13 +1,15 @@
 "use client";
 
-import { Check, ShieldWarning, Terminal, X } from "@phosphor-icons/react";
-import { useState } from "react";
+import { LockKey } from "@phosphor-icons/react";
+import { useCallback, useEffect, useState } from "react";
 import type { PendingInteraction } from "@/lib/agent/types";
 
 type ApprovalInteraction = Extract<PendingInteraction, { kind: "approval" }>;
 
 interface ApprovalCardProps {
   interaction: ApprovalInteraction;
+  sessionDirectory: string | null;
+  providerLabel?: string;
   onDecide: (params: {
     decision: "allow_once" | "allow_session" | "deny";
     optionId?: string;
@@ -15,120 +17,189 @@ interface ApprovalCardProps {
   }) => Promise<void> | void;
 }
 
-export function ApprovalCard({ interaction, onDecide }: ApprovalCardProps) {
+export function ApprovalCard({
+  interaction,
+  sessionDirectory,
+  providerLabel,
+  onDecide,
+}: ApprovalCardProps) {
   const [submitting, setSubmitting] = useState(false);
 
-  const handleDecision = async (
-    decision: "allow_once" | "allow_session" | "deny",
-    optionId?: string,
-  ) => {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await onDecide({ decision, optionId });
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const handleDecision = useCallback(
+    async (decision: "allow_once" | "allow_session" | "deny", optionId?: string) => {
+      if (submitting) return;
+      setSubmitting(true);
+      try {
+        await onDecide({ decision, optionId });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [onDecide, submitting],
+  );
 
-  const hasCustomAcpOptions = interaction.options && interaction.options.length > 0;
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === "y") {
+        event.preventDefault();
+        void handleDecision("allow_once");
+      } else if (key === "n") {
+        event.preventDefault();
+        void handleDecision("deny");
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleDecision]);
+
+  const cwd =
+    interaction.input &&
+    typeof interaction.input === "object" &&
+    "cwd" in interaction.input &&
+    typeof interaction.input.cwd === "string" &&
+    interaction.input.cwd.trim()
+      ? interaction.input.cwd
+      : null;
+
+  const directory = cwd ?? (interaction.command ? sessionDirectory : null);
+  const reason = interaction.reason?.trim();
+  const showReason = reason && !/^this command requires approval\.?$/i.test(reason);
+  const hasCustomOptions = interaction.options && interaction.options.length > 0;
+
+  const shortDir = directory
+    ? directory === sessionDirectory
+      ? "./"
+      : directory.split("/").slice(-2).join("/")
+    : null;
+  const actionPhrase = interaction.command
+    ? "run a command"
+    : interaction.filePath
+      ? "edit a file"
+      : `use ${interaction.toolName}`;
+  const headerPhrase = `${providerLabel ?? "Agent"} wants to ${actionPhrase}`;
+  const rawTitle = interaction.title?.trim() ?? "";
+  const isDuplicateTitle =
+    !rawTitle ||
+    rawTitle === `Allow ${interaction.toolName}` ||
+    rawTitle === interaction.command ||
+    rawTitle.toLowerCase() === headerPhrase.toLowerCase() ||
+    rawTitle.toLowerCase() === `wants to ${actionPhrase}`.toLowerCase() ||
+    rawTitle.toLowerCase().includes(headerPhrase.toLowerCase());
+  const title = isDuplicateTitle ? null : rawTitle;
 
   return (
-    <div className="border-2 border-accent bg-surface-secondary p-3 my-2 space-y-2.5">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <ShieldWarning className="size-4 text-accent shrink-0" weight="fill" aria-hidden="true" />
-          <span className="text-[11px] font-mono uppercase tracking-wider text-accent font-semibold">
-            Permission Required
+    <div className="@container my-2 flex flex-col gap-2 rounded-[10px] border-[1.5px] border-[var(--decision-border)] bg-[var(--decision-bg)] p-3 shadow-[var(--decision-shadow)]">
+      <div className="flex items-center gap-2 min-w-0">
+        <LockKey className="size-3.5 shrink-0 text-warn" weight="bold" aria-hidden="true" />
+        <span className="text-[12.5px] font-semibold text-foreground-strong truncate">
+          {providerLabel ?? "Agent"} wants to {actionPhrase}
+        </span>
+        {shortDir && (
+          <span className="ml-auto font-mono text-[11.5px] text-[var(--decision-muted)] shrink-0">
+            in {shortDir}
           </span>
-          <span className="text-xs font-mono text-foreground font-medium truncate">
-            {interaction.toolName}
-          </span>
-        </div>
+        )}
       </div>
 
-      <div className="text-xs text-foreground font-medium">{interaction.title}</div>
+      {title && <div className="text-xs font-medium text-foreground">{title}</div>}
 
-      {interaction.reason && <div className="text-xs text-muted">{interaction.reason}</div>}
+      {showReason && <div className="text-xs text-foreground">{reason}</div>}
 
       {interaction.command && (
-        <div className="border border-border bg-background p-2 flex items-start gap-2">
-          <Terminal className="size-3.5 text-muted shrink-0 mt-0.5" aria-hidden="true" />
-          <pre className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-all flex-1">
-            {interaction.command}
-          </pre>
-        </div>
+        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[11.5px] text-foreground overflow-x-auto whitespace-pre">
+          {interaction.command}
+        </pre>
       )}
 
       {interaction.filePath && (
-        <div className="text-[11px] font-mono text-foreground-secondary border border-border bg-background px-2 py-1">
-          File: {interaction.filePath}
+        <div className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[12px] text-foreground overflow-x-auto">
+          {interaction.filePath}
         </div>
       )}
 
       {interaction.diff && (
-        <pre className="border border-border bg-background p-2 text-[11px] font-mono overflow-x-auto max-h-40 whitespace-pre-wrap text-foreground-secondary">
+        <pre className="rounded-[6px] border border-[var(--decision-code-border)] bg-[var(--decision-code-bg)] px-2.5 py-1.5 font-mono text-[11.5px] text-foreground overflow-x-auto max-h-40 whitespace-pre-wrap">
           {interaction.diff}
         </pre>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-1.5 pt-1 border-t border-border/60">
-        {hasCustomAcpOptions ? (
-          interaction.options.map((opt) => {
-            const isReject = opt.kind.includes("reject");
-            const decision: "allow_once" | "allow_session" | "deny" = isReject
-              ? "deny"
-              : opt.kind.includes("always")
-                ? "allow_session"
-                : "allow_once";
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                disabled={submitting}
-                onClick={() => void handleDecision(decision, opt.id)}
-                className={
-                  isReject
-                    ? "btn btn-outline btn-sm text-error border-error/40 hover:bg-error/10"
-                    : decision === "allow_once"
-                      ? "btn btn-primary btn-sm"
-                      : "btn btn-secondary btn-sm"
+      <div className="flex items-center gap-1.5 pt-0.5 min-w-0">
+        {hasCustomOptions ? (
+          (() => {
+            let primaryUsed = false;
+            return interaction.options.map((opt) => {
+              let decision: "allow_once" | "allow_session" | "deny" = "allow_once";
+              for (const field of [opt.kind ?? "", opt.id, opt.label]) {
+                if (/reject|deny|cancel|decline/i.test(field)) {
+                  decision = "deny";
+                  break;
                 }
-              >
-                {opt.label}
-              </button>
-            );
-          })
+                if (/always|session|allow_always/i.test(field)) {
+                  decision = "allow_session";
+                  break;
+                }
+              }
+              const isPrimary = decision === "allow_once" && !primaryUsed;
+              if (isPrimary) primaryUsed = true;
+              const btnClass =
+                decision === "deny"
+                  ? "btn-ghost h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center text-foreground hover:bg-error-bg/40 disabled:opacity-50"
+                  : isPrimary
+                    ? "btn-primary h-[23px] rounded-[6px] px-2.5 text-[12px] font-semibold whitespace-nowrap shrink-0 inline-flex items-center justify-center disabled:opacity-50 disabled:shadow-none"
+                    : "h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center bg-panel border border-[var(--decision-border)] text-foreground-strong hover:bg-subtle disabled:opacity-50";
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void handleDecision(decision, opt.id)}
+                  className={btnClass}
+                >
+                  {opt.label}
+                </button>
+              );
+            });
+          })()
         ) : (
           <>
             <button
               type="button"
               disabled={submitting}
-              onClick={() => void handleDecision("deny")}
-              className="btn btn-outline btn-sm inline-flex items-center gap-1 text-error hover:bg-error/10"
+              onClick={() => void handleDecision("allow_once")}
+              className="btn-primary h-[23px] rounded-[6px] px-2.5 text-[12px] font-semibold whitespace-nowrap shrink-0 inline-flex items-center justify-center disabled:opacity-50 disabled:shadow-none"
             >
-              <X className="size-3" aria-hidden="true" />
-              <span>Deny</span>
+              Allow once
             </button>
             <button
               type="button"
               disabled={submitting}
               onClick={() => void handleDecision("allow_session")}
-              className="btn btn-outline btn-sm"
+              className="h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center bg-panel border border-[var(--decision-border)] text-foreground-strong hover:bg-subtle disabled:opacity-50"
             >
-              Allow Session
+              Always allow {interaction.toolName}
             </button>
             <button
               type="button"
               disabled={submitting}
-              onClick={() => void handleDecision("allow_once")}
-              className="btn btn-primary btn-sm inline-flex items-center gap-1"
+              onClick={() => void handleDecision("deny")}
+              className="btn-ghost h-[23px] rounded-[6px] px-2.5 text-[12px] whitespace-nowrap shrink-0 inline-flex items-center justify-center text-foreground hover:bg-error-bg/40 disabled:opacity-50"
             >
-              <Check className="size-3" aria-hidden="true" />
-              <span>Allow Once</span>
+              Deny
             </button>
           </>
         )}
+        <span className="ml-auto hidden @[300px]:inline font-mono text-[11px] text-[var(--decision-muted)] shrink-0 whitespace-nowrap">
+          ⌘Y · ⌘N
+        </span>
       </div>
     </div>
   );

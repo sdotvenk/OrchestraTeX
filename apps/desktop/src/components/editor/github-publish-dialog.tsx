@@ -59,11 +59,11 @@ export function GitHubPublishDialog({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.98, y: 6 }}
           transition={{ duration: 0.12 }}
-          className="relative z-10 w-full max-w-sm border border-foreground bg-background text-foreground shadow-[3px_3px_0_var(--foreground)]"
+          className="relative z-10 w-full max-w-sm ox-frame rounded-[12px] bg-panel border border-border text-foreground shadow-[var(--frame-shadow)]"
         >
           {/* Header */}
           <div className="px-5 py-4 border-b border-border">
-            <h3 id={titleId} className="text-sm font-medium">
+            <h3 id={titleId} className="text-[15px] font-semibold text-foreground-strong">
               Publish to GitHub
             </h3>
           </div>
@@ -86,7 +86,7 @@ export function GitHubPublishDialog({
                 onChange={(e) => setRepoName(e.target.value)}
                 placeholder="my-project"
                 disabled={isCreating}
-                className="w-full px-3 py-2 text-sm border border-border outline-none focus:border-foreground transition-colors disabled:opacity-50"
+                className="w-full px-3 py-2 text-[13px] rounded-[8px] border border-border-dark bg-panel text-foreground outline-none focus:border-accent transition-colors disabled:opacity-50"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -103,15 +103,15 @@ export function GitHubPublishDialog({
             {/* Visibility toggle */}
             <div>
               <span className="block text-xs font-mono text-muted mb-1.5">Visibility</span>
-              <div className="flex border border-border">
+              <div className="flex rounded-[8px] border border-border-dark overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setIsPrivate(false)}
                   disabled={isCreating}
-                  className={`flex-1 text-xs font-mono py-2 transition-colors ${
+                  className={`flex-1 text-xs font-medium py-2 transition-colors ${
                     !isPrivate
-                      ? "bg-foreground text-background"
-                      : "bg-background text-foreground hover:bg-accent-hover"
+                      ? "bg-primary text-primary-text"
+                      : "bg-panel text-foreground hover:bg-subtle"
                   } disabled:opacity-50`}
                 >
                   Public
@@ -120,10 +120,10 @@ export function GitHubPublishDialog({
                   type="button"
                   onClick={() => setIsPrivate(true)}
                   disabled={isCreating}
-                  className={`flex-1 text-xs font-mono py-2 border-l border-border transition-colors ${
+                  className={`flex-1 text-xs font-medium py-2 border-l border-border-dark transition-colors ${
                     isPrivate
-                      ? "bg-foreground text-background"
-                      : "bg-background text-foreground hover:bg-accent-hover"
+                      ? "bg-primary text-primary-text"
+                      : "bg-panel text-foreground hover:bg-subtle"
                   } disabled:opacity-50`}
                 >
                   Private
@@ -146,7 +146,7 @@ export function GitHubPublishDialog({
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="A short description..."
                 disabled={isCreating}
-                className="w-full px-3 py-2 text-sm border border-border outline-none focus:border-foreground transition-colors disabled:opacity-50"
+                className="w-full px-3 py-2 text-[13px] rounded-[8px] border border-border-dark bg-panel text-foreground outline-none focus:border-accent transition-colors disabled:opacity-50"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -165,7 +165,7 @@ export function GitHubPublishDialog({
               <motion.div
                 initial={{ opacity: 0, y: -5 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2"
+                className="text-[12.5px] text-error bg-error-bg border border-[var(--danger-line)] rounded-[8px] px-3 py-2"
               >
                 {error}
               </motion.div>

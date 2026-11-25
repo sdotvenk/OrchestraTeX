@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  ArrowsOutSimple,
-  Crosshair,
-  MagnifyingGlassMinus,
-  MagnifyingGlassPlus,
-} from "@phosphor-icons/react";
+import { Crosshair, MagnifyingGlassMinus, MagnifyingGlassPlus } from "@phosphor-icons/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -25,6 +20,15 @@ export interface PdfHighlightTarget {
   nonce: number;
 }
 
+export interface PdfViewerControls {
+  prevPage: () => void;
+  nextPage: () => void;
+  setFitWidth: () => void;
+  setFitPage: () => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+}
+
 type Props = {
   src?: string;
   pdfData?: Uint8Array | null;
@@ -32,6 +36,14 @@ type Props = {
   onSynctexClick?: (page: number, x: number, y: number) => void;
   highlightTarget?: PdfHighlightTarget | null;
   compactToolbar?: boolean;
+  hideToolbar?: boolean;
+  onStateChange?: (state: {
+    currentPage: number;
+    numPages: number;
+    fitMode: "custom" | "width" | "page";
+    scale: number;
+  }) => void;
+  controlRef?: React.MutableRefObject<PdfViewerControls | null>;
 };
 
 export const PdfViewer = memo(function PdfViewer({
@@ -41,6 +53,9 @@ export const PdfViewer = memo(function PdfViewer({
   onSynctexClick,
   highlightTarget,
   compactToolbar = false,
+  hideToolbar = false,
+  onStateChange,
+  controlRef,
 }: Props) {
   const [numPages, setNumPages] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -56,9 +71,32 @@ export const PdfViewer = memo(function PdfViewer({
   const [activeHighlight, setActiveHighlight] = useState<PdfHighlightTarget | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const fitOptionsRef = useRef<HTMLDetailsElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const preservedScrollTopRef = useRef<number | null>(null);
   const hasAutoFittedRef = useRef(false);
+
+  useEffect(() => {
+    const dismissFitOptions = (event: PointerEvent) => {
+      const options = fitOptionsRef.current;
+      if (options?.open && event.target instanceof Node && !options.contains(event.target)) {
+        options.open = false;
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      const options = fitOptionsRef.current;
+      if (event.key !== "Escape" || !options?.open) return;
+      event.preventDefault();
+      options.open = false;
+      options.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", dismissFitOptions);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissFitOptions);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
 
   // Clone Uint8Array so pdf.js worker transfer cannot detach caller state
   const documentFile = useMemo(() => {
@@ -218,6 +256,31 @@ export const PdfViewer = memo(function PdfViewer({
 
   const pageNumbers = useMemo(() => Array.from({ length: numPages }, (_, i) => i + 1), [numPages]);
 
+  useEffect(() => {
+    onStateChange?.({ currentPage, numPages, fitMode, scale });
+  }, [currentPage, numPages, fitMode, scale, onStateChange]);
+
+  useEffect(() => {
+    if (!controlRef) return;
+    controlRef.current = {
+      prevPage: () => jumpToPage(Math.max(1, currentPageRef.current - 1)),
+      nextPage: () => jumpToPage(currentPageRef.current + 1),
+      setFitWidth: () => setFitMode("width"),
+      setFitPage: () => setFitMode("page"),
+      zoomIn: () => {
+        setFitMode("custom");
+        setScale((s) => Math.min(Number((s + 0.2).toFixed(2)), 4.0));
+      },
+      zoomOut: () => {
+        setFitMode("custom");
+        setScale((s) => Math.max(Number((s - 0.2).toFixed(2)), 0.25));
+      },
+    };
+    return () => {
+      controlRef.current = null;
+    };
+  }, [controlRef, jumpToPage]);
+
   if (!documentFile) {
     return (
       <div className="flex-1 flex items-center justify-center text-xs font-mono text-muted p-4">
@@ -228,103 +291,115 @@ export const PdfViewer = memo(function PdfViewer({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-center justify-between px-2 py-1 border-b border-border bg-surface-secondary shrink-0 gap-2">
-        <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted">
-          {numPages > 0 ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const parsed = Number.parseInt(pageInput, 10);
-                if (Number.isFinite(parsed)) {
-                  jumpToPage(parsed);
-                } else {
-                  setPageInput(String(currentPage));
-                }
-              }}
-              className="flex items-center gap-1"
-            >
-              <input
-                type="text"
-                inputMode="numeric"
-                value={pageInput}
-                onChange={(e) => setPageInput(e.target.value)}
-                aria-label="Current PDF page"
-                className="w-8 px-1 py-0.5 text-center border border-border bg-background text-foreground text-[11px] font-mono focus:outline-none focus:border-foreground"
-              />
-              <span>/ {numPages}</span>
-            </form>
-          ) : (
-            <span>Loading...</span>
-          )}
-          {!compactToolbar && onSynctexClick && (
-            <span className="hidden lg:inline text-[10px] text-muted border-l border-border pl-2">
-              Double-click or Cmd/Ctrl+Click to jump to source
-            </span>
-          )}
-        </div>
+      {!hideToolbar && (
+        <div className="flex items-center justify-between px-2 py-1 border-b border-border bg-surface-secondary shrink-0 gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted">
+            {numPages > 0 ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const parsed = Number.parseInt(pageInput, 10);
+                  if (Number.isFinite(parsed)) {
+                    jumpToPage(parsed);
+                  } else {
+                    setPageInput(String(currentPage));
+                  }
+                }}
+                className="flex items-center gap-1"
+              >
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={pageInput}
+                  onChange={(e) => setPageInput(e.target.value)}
+                  aria-label="Current PDF page"
+                  className="w-8 px-1 py-0.5 text-center border border-border bg-background text-foreground text-[11px] font-mono focus:outline-none focus:border-foreground"
+                />
+                <span>/ {numPages}</span>
+              </form>
+            ) : (
+              <span>Loading...</span>
+            )}
+            {!compactToolbar && onSynctexClick && (
+              <span className="hidden lg:inline text-[10px] text-muted border-l border-border pl-2">
+                Double-click or Cmd/Ctrl+Click to jump to source
+              </span>
+            )}
+          </div>
 
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => {
-              setFitMode("width");
-              computeFitScale("width");
+          <details
+            ref={fitOptionsRef}
+            className="relative"
+            onBlur={(event) => {
+              if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) {
+                event.currentTarget.open = false;
+              }
             }}
-            className={`px-1.5 py-0.5 text-[10px] font-mono uppercase border transition-colors ${
-              fitMode === "width"
-                ? "border-foreground bg-foreground text-background"
-                : "border-border bg-background text-muted hover:text-foreground"
-            }`}
-            title="Fit page width"
           >
-            Width
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setFitMode("page");
-              computeFitScale("page");
-            }}
-            className={`px-1.5 py-0.5 text-[10px] font-mono uppercase border transition-colors ${
-              fitMode === "page"
-                ? "border-foreground bg-foreground text-background"
-                : "border-border bg-background text-muted hover:text-foreground"
-            }`}
-            title="Fit full page"
-          >
-            <ArrowsOutSimple className="size-3 inline" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={zoomOut}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary transition-colors"
-            title="Zoom out"
-            aria-label="Zoom out"
-          >
-            <MagnifyingGlassMinus className="size-3.5" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setFitMode("custom");
-              setScale(1.0);
-            }}
-            className="px-1.5 py-0.5 text-[11px] font-mono tabular-nums text-muted hover:text-foreground hover:bg-surface-tertiary transition-colors min-w-[3rem] text-center"
-            title="Reset zoom to 100%"
-          >
-            {Math.round(scale * 100)}%
-          </button>
-          <button
-            type="button"
-            onClick={zoomIn}
-            className="p-1 text-muted hover:text-foreground hover:bg-surface-tertiary transition-colors"
-            title="Zoom in"
-            aria-label="Zoom in"
-          >
-            <MagnifyingGlassPlus className="size-3.5" aria-hidden="true" />
-          </button>
+            <summary className="cursor-pointer list-none rounded px-2 py-1 text-[12px] text-foreground hover:bg-subtle focus-visible:outline-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+              {fitMode === "width"
+                ? "Fit width"
+                : fitMode === "page"
+                  ? "Fit page"
+                  : `${Math.round(scale * 100)}%`}
+            </summary>
+            <div className="absolute right-0 top-full z-50 flex flex-col gap-1 rounded-lg border border-border bg-panel p-1.5 shadow-[var(--shadow-2)]">
+              <div className="flex gap-1 whitespace-nowrap">
+                {(["width", "page"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={fitMode === mode}
+                    className={`btn btn-sm ${fitMode === mode ? "btn-secondary" : "btn-ghost"}`}
+                    onClick={() => {
+                      setFitMode(mode);
+                      computeFitScale(mode);
+                      const options = fitOptionsRef.current;
+                      if (options) {
+                        options.open = false;
+                        options.querySelector("summary")?.focus();
+                      }
+                    }}
+                  >
+                    {mode === "width" ? "Fit width" : "Fit page"}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center justify-between gap-1 border-t border-border pt-1">
+                <button
+                  type="button"
+                  onClick={zoomOut}
+                  className="btn btn-ghost btn-sm"
+                  title="Zoom out"
+                  aria-label="Zoom out"
+                >
+                  <MagnifyingGlassMinus className="size-3.5" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFitMode("custom");
+                    setScale(1.0);
+                  }}
+                  className="btn btn-ghost btn-sm font-mono tabular-nums"
+                  title="Reset zoom to 100%"
+                >
+                  {Math.round(scale * 100)}%
+                </button>
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  className="btn btn-ghost btn-sm"
+                  title="Zoom in"
+                  aria-label="Zoom in"
+                >
+                  <MagnifyingGlassPlus className="size-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          </details>
         </div>
-      </div>
+      )}
 
       <div
         ref={containerRef}

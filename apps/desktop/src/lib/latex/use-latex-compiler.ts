@@ -16,6 +16,7 @@ import type {
 export interface UseLatexCompilerOptions {
   settings: LaTeXSettings;
   projectPath: string | null;
+  onCompileStart?: (mainFile: string) => void;
 }
 
 export interface CompileInvocationOptions {
@@ -24,31 +25,11 @@ export interface CompileInvocationOptions {
   compilerOverride?: ConcreteLaTeXCompiler;
 }
 
-export function resolveEffectiveCompiler(
-  preferred: LaTeXSettings["compiler"],
-  status: LaTeXCompilersStatus | null,
-): ConcreteLaTeXCompiler {
-  if (preferred !== "auto") {
-    return preferred;
-  }
-  if (status) {
-    const order: ConcreteLaTeXCompiler[] = [
-      "latexmk",
-      "pdflatex",
-      "xelatex",
-      "lualatex",
-      "tectonic",
-    ];
-    for (const candidate of order) {
-      if (status[candidate]?.available) {
-        return candidate;
-      }
-    }
-  }
-  return "latexmk";
-}
-
-export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOptions) {
+export function useLatexCompiler({
+  settings,
+  projectPath,
+  onCompileStart,
+}: UseLatexCompilerOptions) {
   const [compilersStatus, setCompilersStatus] = useState<LaTeXCompilersStatus | null>(null);
   const [isDetecting, setIsDetecting] = useState(false);
 
@@ -59,18 +40,20 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
   const [pdfPath, setPdfPath] = useState<string | null>(null);
   const [pdfVersion, setPdfVersion] = useState(0);
   const [lastCompileDurationMs, setLastCompileDurationMs] = useState<number | null>(null);
+  const [lastPdfBuildStartedAt, setLastPdfBuildStartedAt] = useState<number | null>(null);
 
   const settingsRef = useRef(settings);
+  const onCompileStartRef = useRef(onCompileStart);
+  onCompileStartRef.current = onCompileStart;
   const projectPathRef = useRef(projectPath);
-  const compilersStatusRef = useRef(compilersStatus);
   const autoCompileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingLogRef = useRef<CompileOutputEvent[]>([]);
   const logRafRef = useRef<number | null>(null);
   const logSeqRef = useRef(0);
+  const generationRef = useRef(0);
 
   settingsRef.current = settings;
   projectPathRef.current = projectPath;
-  compilersStatusRef.current = compilersStatus;
 
   const flushCompileLog = useCallback(() => {
     if (logRafRef.current !== null) {
@@ -86,18 +69,26 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
     });
   }, []);
 
-  // Listen to real-time compiler stdout/stderr lines (batched at display refresh rate)
+  // Listen to real-time compiler stdout/stderr lines (batched on Rust IPC & display refresh rate)
   useEffect(() => {
     let active = true;
-    const unlistenPromise = listen<CompileOutputEvent>("latex-compile-output", (event) => {
-      if (!active) return;
-      logSeqRef.current += 1;
-      pendingLogRef.current.push({ ...event.payload, seq: logSeqRef.current });
+    const enqueue = (items: CompileOutputEvent[]) => {
+      if (!active || items.length === 0) return;
+      for (const item of items) {
+        logSeqRef.current += 1;
+        pendingLogRef.current.push({ ...item, seq: logSeqRef.current });
+      }
       if (logRafRef.current === null) {
         logRafRef.current = requestAnimationFrame(() => {
           flushCompileLog();
         });
       }
+    };
+    const unlistenSingle = listen<CompileOutputEvent>("latex-compile-output", (event) => {
+      enqueue([event.payload]);
+    });
+    const unlistenBatch = listen<CompileOutputEvent[]>("latex-compile-output-batch", (event) => {
+      enqueue(Array.isArray(event.payload) ? event.payload : []);
     });
 
     return () => {
@@ -107,13 +98,15 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
         logRafRef.current = null;
       }
       pendingLogRef.current = [];
-      void unlistenPromise.then((unlisten) => unlisten());
+      void unlistenSingle.then((unlisten) => unlisten());
+      void unlistenBatch.then((unlisten) => unlisten());
     };
   }, [flushCompileLog]);
 
   // Reset build state when project changes
   useEffect(() => {
     void projectPath;
+    generationRef.current += 1;
     if (autoCompileTimerRef.current) {
       clearTimeout(autoCompileTimerRef.current);
       autoCompileTimerRef.current = null;
@@ -129,6 +122,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
     setLastResult(null);
     setPdfPath(null);
     setLastCompileDurationMs(null);
+    setLastPdfBuildStartedAt(null);
   }, [projectPath]);
 
   useEffect(() => {
@@ -165,6 +159,8 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
     }: CompileInvocationOptions): Promise<CompilationResult | null> => {
       const targetDir = directory ?? projectPathRef.current;
       if (!targetDir || !mainFile) return null;
+      const generation = ++generationRef.current;
+      const startedAt = Date.now();
 
       if (autoCompileTimerRef.current) {
         clearTimeout(autoCompileTimerRef.current);
@@ -172,16 +168,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
       }
 
       const curSettings = settingsRef.current;
-      const compiler =
-        compilerOverride ??
-        resolveEffectiveCompiler(curSettings.compiler, compilersStatusRef.current);
-      const args: string[] = [];
-      if (curSettings.shellEscape && compiler !== "tectonic") {
-        args.push("-shell-escape");
-      }
-      if (curSettings.customArgs.length > 0) {
-        args.push(...curSettings.customArgs);
-      }
+      const compiler = compilerOverride ?? curSettings.compiler;
 
       if (logRafRef.current !== null) {
         cancelAnimationFrame(logRafRef.current);
@@ -190,17 +177,20 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
       pendingLogRef.current = [];
       setCompileStatus("compiling");
       setCompileLog([]);
+      onCompileStartRef.current?.(mainFile);
 
       try {
         const result = await invoke<CompilationResult>("latex_compile", {
           directory: targetDir,
           compiler,
           mainFile,
-          args,
+          args: curSettings.customArgs,
           customPath: curSettings.customCompilerPath ?? undefined,
-          latexmkEngine: compiler === "latexmk" ? curSettings.latexmkEngine : undefined,
+          latexmkEngine: curSettings.latexmkEngine,
+          shellEscape: curSettings.shellEscape,
         });
 
+        if (generationRef.current !== generation) return null;
         flushCompileLog();
         setLastResult(result);
         if (result.cancelled) {
@@ -213,12 +203,14 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
         setLastCompileDurationMs(result.duration_ms);
         setCompileStatus(result.success ? "success" : "error");
 
-        if (result.pdf_path) {
+        if (result.success && result.pdf_path) {
           setPdfPath(result.pdf_path);
           setPdfVersion((v) => v + 1);
+          setLastPdfBuildStartedAt(startedAt);
         }
         return result;
       } catch (error) {
+        if (generationRef.current !== generation) return null;
         const msg = error instanceof Error ? error.message : String(error);
         const failResult: CompilationResult = {
           success: false,
@@ -333,6 +325,7 @@ export function useLatexCompiler({ settings, projectPath }: UseLatexCompilerOpti
     pdfPath,
     pdfVersion,
     lastCompileDurationMs,
+    lastPdfBuildStartedAt,
     compile,
     scheduleAutoCompile,
     stopCompilation,

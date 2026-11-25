@@ -1,16 +1,9 @@
 "use client";
 
-import {
-  ArrowDown,
-  CaretDown,
-  CaretRight,
-  CheckCircle,
-  FileText,
-  Sparkle,
-  WarningCircle,
-} from "@phosphor-icons/react";
+import { ArrowDown, CaretDown, CaretRight, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 import Image from "next/image";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { formatModelDisplayName, formatProviderDisplayName } from "@/lib/agent/model-display";
 import type { AgentMessage, AgentPart, AgentThread, InteractionResponse } from "@/lib/agent/types";
 import { ApprovalCard } from "./approval-card";
 import { ProviderIcon } from "./icons";
@@ -52,7 +45,10 @@ function ReasoningBlock({
   const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
   const [elapsedSec, setElapsedSec] = useState<number>(0);
   const startTimeRef = useRef<number | null>(null);
-  const streamRef = useRef<HTMLDivElement>(null);
+  const streamRef = useRef<HTMLElement>(null);
+  const streamId = useId();
+  const followStreamRef = useRef(true);
+  const expanded = userExpanded ?? isActivelyThinking;
 
   useEffect(() => {
     if (isActivelyThinking) {
@@ -75,103 +71,68 @@ function ReasoningBlock({
 
   // Keep live thought trace scrolled to the newest line while thinking
   useEffect(() => {
-    if (!isActivelyThinking || !streamRef.current || text.length === 0) return;
-    streamRef.current.scrollTop = streamRef.current.scrollHeight;
-  }, [isActivelyThinking, text]);
-
-  const expanded = userExpanded ?? isActivelyThinking;
+    const stream = streamRef.current;
+    if (text && isActivelyThinking && expanded && followStreamRef.current && stream) {
+      stream.scrollTop = stream.scrollHeight;
+    }
+  }, [expanded, isActivelyThinking, text]);
 
   const label = isActivelyThinking
     ? elapsedSec > 0
       ? `Thinking · ${elapsedSec}s`
-      : "Thinking..."
+      : "Thinking…"
     : elapsedSec > 0
       ? `Thought for ${elapsedSec}s`
       : "Thought process";
 
   return (
-    <div className="my-1">
+    <div className={expanded ? "my-1 rounded-lg border border-border bg-subtle/40" : "my-0.5"}>
       <button
         type="button"
-        onClick={() => setUserExpanded((prev) => !(prev ?? isActivelyThinking))}
-        className="inline-flex items-center gap-1.5 py-0.5 text-[12px] text-muted hover:text-foreground transition-colors"
+        aria-expanded={expanded}
+        aria-controls={streamId}
+        onClick={() => {
+          if (!expanded) followStreamRef.current = true;
+          setUserExpanded(!expanded);
+        }}
+        className={
+          expanded
+            ? "flex min-h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-[12px] text-muted hover:bg-subtle hover:text-foreground transition-colors"
+            : "text-[12px] italic text-muted hover:text-foreground inline-flex items-center gap-1.5 py-0.5 transition-colors"
+        }
       >
-        {isActivelyThinking ? (
-          <span
-            className="size-1.5 rounded-full bg-accent thought-dot shrink-0"
+        {expanded ? (
+          <CaretDown className="size-3 shrink-0" aria-hidden="true" />
+        ) : (
+          <CaretRight className="size-3 shrink-0" aria-hidden="true" />
+        )}
+        <span className={expanded ? "font-medium tabular-nums" : "tabular-nums"}>{label}</span>
+        {isActivelyThinking && (
+          <SpinnerGap
+            className="ml-auto size-3.5 shrink-0 motion-safe:animate-spin"
             aria-hidden="true"
           />
-        ) : expanded ? (
-          <CaretDown className="size-3 text-muted-foreground shrink-0" aria-hidden="true" />
-        ) : (
-          <CaretRight className="size-3 text-muted-foreground shrink-0" aria-hidden="true" />
         )}
-        <span className="font-medium">{label}</span>
       </button>
 
-      {expanded && text.trim().length > 0 && (
-        <div
+      <div id={streamId} hidden={!expanded}>
+        <section
           ref={streamRef}
-          className={`mt-1 pl-3 border-l-2 border-border text-[12px] leading-relaxed text-muted whitespace-pre-wrap break-words overflow-y-auto ${
-            isActivelyThinking ? "max-h-36 thought-stream-fade py-1" : "max-h-60 py-0.5"
+          aria-label="Thought trace"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: WebKit needs a focusable target for keyboard scrolling.
+          tabIndex={0}
+          onScroll={(event) => {
+            const stream = event.currentTarget;
+            followStreamRef.current =
+              stream.scrollHeight - stream.scrollTop - stream.clientHeight <= 8;
+          }}
+          className={`border-t border-border px-3 py-2 text-[12px] leading-relaxed text-muted whitespace-pre-wrap wrap-anywhere overflow-y-auto overscroll-contain ${
+            isActivelyThinking ? "max-h-36" : "max-h-60"
           }`}
         >
           {text}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ChangedFilesCard({
-  files,
-  projectPath,
-  onFileClick,
-}: {
-  files: string[];
-  projectPath: string | null;
-  onFileClick?: (path: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  if (files.length === 0) return null;
-
-  return (
-    <div className="mt-2.5 rounded-xl border border-border bg-panel overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded((p) => !p)}
-        className="w-full px-3 py-2 bg-success-bg/70 hover:bg-success-bg flex items-center justify-between gap-2 text-left transition-colors"
-      >
-        <div className="flex items-center gap-1.5 text-[12px] font-medium text-success">
-          <CheckCircle className="size-3.5 shrink-0" weight="fill" aria-hidden="true" />
-          <span>
-            {files.length} {files.length === 1 ? "file" : "files"} updated
-          </span>
-        </div>
-        {expanded ? (
-          <CaretDown className="size-3 text-success" aria-hidden="true" />
-        ) : (
-          <CaretRight className="size-3 text-success" aria-hidden="true" />
-        )}
-      </button>
-      {expanded && (
-        <div className="px-2.5 py-2 flex flex-wrap gap-1.5 bg-panel">
-          {files.map((fp) => {
-            const rel = toRelativeProjectPath(fp, projectPath);
-            return (
-              <button
-                key={fp}
-                type="button"
-                onClick={() => onFileClick?.(rel)}
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11.5px] font-mono bg-subtle hover:bg-accent-soft hover:text-accent text-foreground transition-colors"
-              >
-                <FileText className="size-3 text-muted shrink-0" aria-hidden="true" />
-                <span>{rel}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+        </section>
+      </div>
     </div>
   );
 }
@@ -213,8 +174,33 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
       ((p.type === "text" || p.type === "reasoning") && p.text.trim().length > 0),
   );
 
+  const voice = message.providerId === "custom-acp" ? "custom" : message.providerId;
+  const voiceInk = voice ? `var(--voice-${voice}-ink)` : "var(--line)";
+  const voiceText = voice ? `var(--voice-${voice}-text)` : "var(--text-muted)";
+  const providerDisplayName =
+    message.providerId === "claude"
+      ? "Claude"
+      : message.providerId === "codex"
+        ? "Codex"
+        : message.providerId === "antigravity"
+          ? "Antigravity"
+          : message.providerId === "custom-acp"
+            ? "Custom ACP"
+            : "Assistant";
+
+  const lastVisibleTextIdx = (() => {
+    for (let i = message.parts.length - 1; i >= 0; i -= 1) {
+      const p = message.parts[i];
+      if (p?.type === "text" && p.text.trim().length > 0) return i;
+    }
+    return -1;
+  })();
+
   return (
-    <div className="space-y-2 py-1">
+    <div className="space-y-2 py-1 border-l-2 pl-3" style={{ borderColor: voiceInk }}>
+      <div className="text-[11.5px] font-semibold leading-none" style={{ color: voiceText }}>
+        {providerDisplayName}
+      </div>
       <div className="space-y-1.5">
         {message.parts.map((part, idx) => {
           if (part.type === "reasoning") {
@@ -222,7 +208,10 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
               .slice(idx + 1)
               .some(
                 (next) =>
-                  next.type === "tool" || (next.type === "text" && next.text.trim().length > 0),
+                  next.type === "tool" ||
+                  next.type === "image" ||
+                  ((next.type === "text" || next.type === "reasoning") &&
+                    next.text.trim().length > 0),
               );
             return (
               <ReasoningBlock
@@ -234,28 +223,46 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
             );
           }
           if (part.type === "tool") {
-            if (part.parentToolCallId && knownCallIds.has(part.parentToolCallId)) {
-              return null;
+            if (idx > 0 && message.parts[idx - 1]?.type === "tool") return null;
+            const group: ToolPart[] = [];
+            for (const next of message.parts.slice(idx)) {
+              if (next.type !== "tool") break;
+              if (!next.parentToolCallId || !knownCallIds.has(next.parentToolCallId))
+                group.push(next);
             }
+            if (group.length === 0) return null;
             return (
-              <ToolDisplay
-                key={part.id}
-                part={part}
-                childrenTools={childToolsByParent.get(part.callId) ?? EMPTY_TOOLS}
-                projectPath={projectPath}
-                onFileClick={onFileClick}
-              />
+              <div key={part.id} className="space-y-0.5 py-0.5">
+                {group.map((tool) => (
+                  <ToolDisplay
+                    key={tool.id}
+                    part={tool}
+                    childrenTools={childToolsByParent.get(tool.callId) ?? EMPTY_TOOLS}
+                    projectPath={projectPath}
+                    onFileClick={onFileClick}
+                  />
+                ))}
+              </div>
             );
           }
           if (part.type === "text") {
             if (!part.text.trim()) return null;
+            const showStreamingCursor = isLast && isStreaming && idx === lastVisibleTextIdx;
             return (
-              <MarkdownText
-                key={part.id}
-                text={part.text}
-                projectFiles={projectFiles}
-                onFileClick={onFileClick}
-              />
+              <div key={part.id}>
+                <MarkdownText
+                  text={part.text}
+                  projectFiles={projectFiles}
+                  onFileClick={onFileClick}
+                />
+                {showStreamingCursor && (
+                  <span
+                    className="inline-block w-[7px] h-[14px] rounded-[1px] ml-1 align-[-2px] animate-pulse"
+                    style={{ backgroundColor: voiceInk }}
+                    aria-hidden="true"
+                  />
+                )}
+              </div>
             );
           }
           if (part.type === "image") {
@@ -279,20 +286,10 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
         })}
 
         {isLast && isStreaming && !hasAnyVisibleParts && (
-          <div className="flex items-center gap-2 py-1 text-[12.5px] text-muted">
-            <span className="inline-flex items-center gap-1" aria-hidden="true">
-              <span className="size-1.5 rounded-full bg-muted-foreground thought-dot" />
-              <span
-                className="size-1.5 rounded-full bg-muted-foreground thought-dot"
-                style={{ animationDelay: "0.2s" }}
-              />
-              <span
-                className="size-1.5 rounded-full bg-muted-foreground thought-dot"
-                style={{ animationDelay: "0.4s" }}
-              />
-            </span>
-            <span>Working...</span>
-          </div>
+          <output className="flex items-center gap-2 py-1 text-[12.5px] text-muted">
+            <SpinnerGap className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+            Working…
+          </output>
         )}
       </div>
 
@@ -303,18 +300,14 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
         </div>
       )}
 
-      <ChangedFilesCard
-        files={message.changedFiles}
-        projectPath={projectPath}
-        onFileClick={onFileClick}
-      />
-
       {!isStreaming && hasAnyVisibleParts && (
         <div className="flex items-center gap-1.5 pt-0.5 text-[11px] text-muted-foreground">
           {message.providerId && (
             <ProviderIcon providerId={message.providerId} className="size-3 opacity-80" />
           )}
-          <span>{message.model || message.providerId || "Assistant"}</span>
+          <span>
+            {formatModelDisplayName(message.model) || formatProviderDisplayName(message.providerId)}
+          </span>
           <span>·</span>
           <span>{formatRelativeTime(message.createdAt)}</span>
         </div>
@@ -379,6 +372,21 @@ export const MessageTimeline = memo(function MessageTimeline({
     requestAnimationFrame(() => scrollToBottom(false));
   }, [scrollTrigger, scrollToBottom]);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedToBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+    observer.observe(el);
+    if (el.firstElementChild) {
+      observer.observe(el.firstElementChild);
+    }
+    return () => observer.disconnect();
+  }, []);
+
   const activeRelFile = activeFile ? toRelativeProjectPath(activeFile, projectPath) : null;
 
   const quickPrompts = [
@@ -406,148 +414,143 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   return (
     <div className="flex-1 min-h-0 relative flex flex-col">
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
-      >
-        {messages.length === 0 ? (
-          <div className="py-4 space-y-4">
-            <p className="text-[13px] text-muted leading-relaxed">
-              Ask about your paper, edit TeX directly, verify notation, or fix build errors. Type{" "}
-              <code className="px-1 py-0.5 rounded bg-sunken font-mono text-[12px] text-foreground-strong">
-                @
-              </code>{" "}
-              for files or{" "}
-              <code className="px-1 py-0.5 rounded bg-sunken font-mono text-[12px] text-foreground-strong">
-                /
-              </code>{" "}
-              for commands.
-            </p>
-
-            <div className="flex flex-col items-start gap-2">
-              {quickPrompts.map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => onQuickPrompt(item.prompt)}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full border border-border bg-panel hover:border-border-dark hover:bg-subtle text-[12.5px] font-medium text-foreground transition-colors text-left"
-                  style={{ boxShadow: "var(--shadow-1)" }}
-                >
-                  <Sparkle className="size-3.5 text-muted shrink-0" aria-hidden="true" />
-                  <span>{item.label}</span>
-                </button>
-              ))}
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[720px] px-3 py-3 space-y-4">
+          {messages.length === 0 ? (
+            <div className="py-4 space-y-4">
+              <div className="flex flex-wrap items-start gap-1.5">
+                {quickPrompts.map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => onQuickPrompt(item.prompt)}
+                    className="rounded-lg border border-border px-2.5 py-1.5 text-left text-[12px] font-medium text-foreground transition-colors hover:bg-subtle hover:border-border-dark"
+                  >
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ) : (
-          messages.map((msg, idx) => {
-            if (msg.role === "user") {
-              const images = msg.parts.filter(
-                (p): p is Extract<AgentPart, { type: "image" }> => p.type === "image",
-              );
-              const textParts = msg.parts.filter(
-                (p): p is Extract<AgentPart, { type: "text" }> => p.type === "text",
-              );
+          ) : (
+            messages.map((msg, idx) => {
+              if (msg.role === "user") {
+                const images = msg.parts.filter(
+                  (p): p is Extract<AgentPart, { type: "image" }> => p.type === "image",
+                );
+                const textParts = msg.parts.filter(
+                  (p): p is Extract<AgentPart, { type: "text" }> => p.type === "text",
+                );
 
-              return (
-                <div key={msg.id} className="flex justify-end">
-                  <div className="max-w-[86%] rounded-2xl bg-subtle px-3.5 py-2.5 space-y-2 text-foreground-strong">
-                    {images.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {images.map((img) => (
-                          <Image
-                            unoptimized
-                            key={img.id}
-                            src={img.url}
-                            alt={img.filename ?? "Attachment"}
-                            width={160}
-                            height={80}
-                            className="h-20 w-auto rounded-lg border border-border object-contain bg-panel"
-                          />
-                        ))}
-                      </div>
-                    )}
+                return (
+                  <div key={msg.id} className="space-y-1.5">
+                    <div className="text-[11.5px] font-semibold text-foreground-strong">You</div>
+                    <div className="space-y-2 text-[13.5px] leading-[1.6] text-foreground">
+                      {images.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {images.map((img) => (
+                            <Image
+                              unoptimized
+                              key={img.id}
+                              src={img.url}
+                              alt={img.filename ?? "Attachment"}
+                              width={160}
+                              height={80}
+                              className="h-20 w-auto rounded-lg border border-border object-contain bg-panel"
+                            />
+                          ))}
+                        </div>
+                      )}
 
-                    {textParts.map((tp) => (
-                      <div
-                        key={tp.id}
-                        className="text-[13px] whitespace-pre-wrap break-words leading-relaxed"
-                      >
-                        {tp.text}
-                      </div>
-                    ))}
+                      {textParts.map((tp) => (
+                        <div
+                          key={tp.id}
+                          className="text-[13px] whitespace-pre-wrap break-words leading-relaxed"
+                        >
+                          {tp.text}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                );
+              }
+
+              const isLastMsg = idx === messages.length - 1;
+              return (
+                <AssistantMessageItem
+                  key={msg.id}
+                  message={msg}
+                  isLast={isLastMsg}
+                  isStreaming={isLastMsg && Boolean(isRunning)}
+                  projectPath={projectPath}
+                  projectFiles={projectFiles}
+                  onFileClick={onFileClick}
+                />
               );
-            }
+            })
+          )}
 
-            const isLastMsg = idx === messages.length - 1;
-            return (
-              <AssistantMessageItem
-                key={msg.id}
-                message={msg}
-                isLast={isLastMsg}
-                isStreaming={isLastMsg && Boolean(isRunning)}
-                projectPath={projectPath}
-                projectFiles={projectFiles}
-                onFileClick={onFileClick}
-              />
-            );
-          })
-        )}
-
-        {pendingInteraction && (
-          <div>
-            {pendingInteraction.kind === "question" && (
-              <QuestionCard
-                key={pendingInteraction.id}
-                interaction={pendingInteraction}
-                onSubmit={(answers) =>
-                  onRespondInteraction(pendingInteraction.id, {
-                    kind: "questionAnswer",
-                    answers,
-                    dismissed: false,
-                  })
-                }
-                onDismiss={() =>
-                  onRespondInteraction(pendingInteraction.id, {
-                    kind: "questionAnswer",
-                    answers: {},
-                    dismissed: true,
-                  })
-                }
-              />
-            )}
-            {pendingInteraction.kind === "approval" && (
-              <ApprovalCard
-                key={pendingInteraction.id}
-                interaction={pendingInteraction}
-                onDecide={(decision) =>
-                  onRespondInteraction(pendingInteraction.id, {
-                    kind: "approvalDecision",
-                    decision: decision.decision,
-                    optionId: decision.optionId,
-                    reason: decision.reason,
-                  })
-                }
-              />
-            )}
-            {pendingInteraction.kind === "planApproval" && (
-              <PlanApprovalCard
-                key={pendingInteraction.id}
-                interaction={pendingInteraction}
-                onDecide={(approved, feedback) =>
-                  onRespondInteraction(pendingInteraction.id, {
-                    kind: "planDecision",
-                    approved,
-                    feedback,
-                  })
-                }
-              />
-            )}
-          </div>
-        )}
+          {pendingInteraction && (
+            <div>
+              {pendingInteraction.kind === "question" && (
+                <QuestionCard
+                  key={pendingInteraction.id}
+                  interaction={pendingInteraction}
+                  onSubmit={(answers) =>
+                    onRespondInteraction(pendingInteraction.id, {
+                      kind: "questionAnswer",
+                      answers,
+                      dismissed: false,
+                    })
+                  }
+                  onDismiss={() =>
+                    onRespondInteraction(pendingInteraction.id, {
+                      kind: "questionAnswer",
+                      answers: {},
+                      dismissed: true,
+                    })
+                  }
+                />
+              )}
+              {pendingInteraction.kind === "approval" && (
+                <ApprovalCard
+                  key={pendingInteraction.id}
+                  interaction={pendingInteraction}
+                  sessionDirectory={thread?.summary.workspacePath ?? projectPath}
+                  providerLabel={
+                    thread?.summary.providerId === "claude"
+                      ? "Claude"
+                      : thread?.summary.providerId === "codex"
+                        ? "Codex"
+                        : thread?.summary.providerId === "antigravity"
+                          ? "Antigravity"
+                          : "Custom ACP"
+                  }
+                  onDecide={(decision) =>
+                    onRespondInteraction(pendingInteraction.id, {
+                      kind: "approvalDecision",
+                      decision: decision.decision,
+                      optionId: decision.optionId,
+                      reason: decision.reason,
+                    })
+                  }
+                />
+              )}
+              {pendingInteraction.kind === "planApproval" && (
+                <PlanApprovalCard
+                  key={pendingInteraction.id}
+                  interaction={pendingInteraction}
+                  onDecide={(approved, feedback) =>
+                    onRespondInteraction(pendingInteraction.id, {
+                      kind: "planDecision",
+                      approved,
+                      feedback,
+                    })
+                  }
+                />
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {showJumpToLatest && (

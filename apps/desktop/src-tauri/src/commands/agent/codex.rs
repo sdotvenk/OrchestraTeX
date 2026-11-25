@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -321,7 +321,7 @@ impl CodexClient {
                     "thread/resume",
                     json!({
                         "threadId": codex_tid,
-                        "cwd": thread.summary.project_path,
+                        "cwd": thread.summary.effective_workspace_path(),
                         "model": thread.summary.model,
                         "approvalPolicy": approval_policy,
                         "sandbox": sandbox_mode,
@@ -338,7 +338,7 @@ impl CodexClient {
             .rpc_call(
                 "thread/start",
                 json!({
-                    "cwd": thread.summary.project_path,
+                    "cwd": thread.summary.effective_workspace_path(),
                     "model": thread.summary.model,
                     "approvalPolicy": approval_policy,
                     "sandbox": sandbox_mode,
@@ -394,7 +394,7 @@ impl CodexClient {
         let sandbox_policy = map_codex_sandbox_policy(
             thread.summary.interaction_mode,
             thread.summary.runtime_mode,
-            &thread.summary.project_path,
+            thread.summary.effective_workspace_path(),
         );
 
         let mut params = serde_json::Map::new();
@@ -1073,6 +1073,22 @@ async fn handle_codex_notification(
             if let Some((local_tid, project_path)) =
                 client.codex_to_local.lock().await.get(codex_tid).cloned()
             {
+                if let Some(tu_val) = params.get("tokenUsage") {
+                    if let Some(mgr) = app.try_state::<super::AgentManagerState>() {
+                        if let Ok(log) = mgr.get_usage_log(&app).await {
+                            let model = store.get_thread_model(&project_path, &local_tid).await;
+                            let _ = log
+                                .record_codex_cumulative(
+                                    &project_path,
+                                    &local_tid,
+                                    (!codex_tid.is_empty()).then_some(codex_tid),
+                                    model.as_deref(),
+                                    tu_val,
+                                )
+                                .await;
+                        }
+                    }
+                }
                 if let Some(usage) = parse_codex_token_usage(params.get("tokenUsage")) {
                     let _ = store
                         .mutate_thread(&project_path, &local_tid, |t| {
@@ -1404,7 +1420,7 @@ async fn handle_codex_server_request(
                 .get("itemId")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let interaction = PendingInteraction::Approval {
+            let mut interaction = PendingInteraction::Approval {
                 id: interaction_id.clone(),
                 thread_id: local_tid.clone(),
                 tool_call_id,
@@ -1444,6 +1460,21 @@ async fn handle_codex_server_request(
             );
             let _ = store
                 .mutate_thread(&project_path, &local_tid, |t| {
+                    if let PendingInteraction::Approval {
+                        tool_call_id: Some(item_id), file_path, diff, input, ..
+                    } = &mut interaction {
+                        if let Some(AgentPart::Tool {
+                            file_path: stored_path, diff: stored_diff, input: stored_input, ..
+                        }) = t.messages.iter().rev().flat_map(|m| m.parts.iter().rev()).find(
+                            |part| matches!(part, AgentPart::Tool { call_id, tool, .. } if call_id == item_id && tool == "edit"),
+                        ) {
+                            *file_path = stored_path.clone().or_else(|| file_path.clone());
+                            *diff = stored_diff.clone();
+                            if let Some(changes) = stored_input.get("changes") {
+                                input["changes"] = changes.clone();
+                            }
+                        }
+                    }
                     ThreadStore::set_pending_interaction(t, Some(interaction.clone()));
                     t.summary.status = "waiting_input".to_string();
                 })

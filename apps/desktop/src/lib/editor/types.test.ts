@@ -16,8 +16,8 @@ describe("DEFAULT_EDITOR_SETTINGS", () => {
     expect(DEFAULT_EDITOR_SETTINGS.vimMode).toBe(false);
   });
 
-  it("has font size 14", () => {
-    expect(DEFAULT_EDITOR_SETTINGS.fontSize).toBe(14);
+  it("has font size 12", () => {
+    expect(DEFAULT_EDITOR_SETTINGS.fontSize).toBe(12);
   });
 
   it("uses default font stacks by default", () => {

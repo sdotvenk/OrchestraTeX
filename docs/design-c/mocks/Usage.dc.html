@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Usage across harnesses</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;family=Instrument+Serif:ital@0;1&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.ui{font-family:'Geist',system-ui,sans-serif;font-size:13px;color:#1B1F33;-webkit-font-smoothing:antialiased}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+.sec{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#5A5E70}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block}
+.box{background:#FCFAF5;border:1px solid #DCD4C4;border-radius:10px;box-shadow:0 1px 2px rgba(27,31,51,.06);padding:14px 16px;box-sizing:border-box}
+.meter{height:8px;border-radius:4px;background:#E6DFD1;position:relative;overflow:hidden}
+.meter span{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+table{border-collapse:collapse;width:100%}
+th{font-size:11px;font-weight:600;color:#5A5E70;text-align:right;padding:0 10px 8px;border-bottom:1px solid #E6DFD1;white-space:nowrap;letter-spacing:.02em}
+th:first-child,td:first-child{text-align:left}
+td{font-family:'Geist Mono',monospace;font-size:12px;text-align:right;padding:0 10px;height:30px;border-bottom:1px solid #F0EADF;white-space:nowrap}
+.grp td{font-family:'Geist',sans-serif;font-weight:600;font-size:12.5px;background:#F6F2EA}
+.na{color:#8A8C99}
+</style>
+</helmet>
+<div class="ui" style="width:1440px;height:900px;background:#ECE7DC;display:flex;flex-direction:column;overflow:hidden">
+
+  <header style="height:40px;display:flex;align-items:center;gap:14px;padding:0 12px 0 14px;border-bottom:1px solid #DCD4C4;flex:none">
+    <div style="display:flex;gap:8px" aria-hidden="true"><span style="width:12px;height:12px;border-radius:50%;background:#EE6A5F"></span><span style="width:12px;height:12px;border-radius:50%;background:#F5BF4F"></span><span style="width:12px;height:12px;border-radius:50%;background:#62C655"></span></div>
+    <div style="display:flex;align-items:center;gap:7px;margin-left:10px">
+      <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true"><g stroke="#1B1F33" stroke-width="1.3"><line x1="0" y1="3" x2="20" y2="3"></line><line x1="0" y1="6.5" x2="20" y2="6.5"></line><line x1="0" y1="10" x2="20" y2="10"></line><line x1="0" y1="13.5" x2="20" y2="13.5"></line></g><line x1="6" y1="1" x2="14" y2="15" stroke="#E2622A" stroke-width="2.4" stroke-linecap="round"></line></svg>
+      <span style="font-family:'Instrument Serif',serif;font-size:19px">OrchestraTeX</span>
+    </div>
+    <span style="width:1px;height:18px;background:#D3CABA"></span>
+    <span style="font-weight:500">Usage &amp; limits</span>
+    <nav aria-label="Workspace" style="margin-left:auto;margin-right:auto;display:flex;background:#E2DCCF;border-radius:9px;padding:3px;gap:2px">
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63">Write</button>
+      <button style="border:0;font:inherit;font-weight:500;padding:4px 14px;border-radius:7px;background:#FCFAF5;box-shadow:0 1px 0 rgba(27,31,51,.12),0 0 0 1px rgba(27,31,51,.08)">Agents</button>
+      <button style="border:0;font:inherit;padding:4px 14px;border-radius:7px;background:transparent;color:#4A4F63">History</button>
+    </nav>
+    <span style="font-size:12px;color:#4A4F63">Refreshed 07:08</span>
+    <button style="font:inherit;font-weight:500;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:8px;padding:4px 11px">Export CSV</button>
+  </header>
+
+  <div style="flex:1;padding:20px 28px;display:flex;flex-direction:column;gap:14px;min-height:0">
+    <div style="display:flex;align-items:flex-end;gap:16px">
+      <div>
+        <div style="font-family:'Instrument Serif',serif;font-size:34px;line-height:1">Usage &amp; limits</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <div style="display:flex;background:#E2DCCF;border-radius:9px;padding:3px;gap:2px;font-size:12.5px">
+          <button style="border:0;font:inherit;padding:3px 12px;border-radius:7px;background:transparent;color:#4A4F63">Today</button>
+          <button style="border:0;font:inherit;font-weight:500;padding:3px 12px;border-radius:7px;background:#FCFAF5;box-shadow:0 0 0 1px rgba(27,31,51,.08)">7 days</button>
+          <button style="border:0;font:inherit;padding:3px 12px;border-radius:7px;background:transparent;color:#4A4F63">30 days</button>
+        </div>
+        <button style="font:inherit;font-size:12.5px;border:1px solid #C9BFAD;background:#FCFAF5;border-radius:8px;padding:4px 10px">All projects ▾</button>
+      </div>
+    </div>
+
+    <!-- Limits -->
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">
+      <div class="box" style="border-top:3px solid #D9541A">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:600"><span class="dot" style="background:#D9541A"></span>Claude Code<span style="margin-left:auto;font-weight:400;font-size:11.5px;color:#5A5E70">Max plan</span></div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-top:12px"><span style="font-size:28px;font-weight:600;letter-spacing:-.02em">58%</span><span style="font-size:12px;color:#4A4F63">of 5-hour window</span></div>
+        <div class="meter" style="margin-top:8px"><span style="width:58%;background:#D9541A"></span></div>
+        <div style="display:flex;font-size:11.5px;color:#4A4F63;margin-top:6px"><span>Resets in 4h 12m</span><span class="mono" style="margin-left:auto">weekly 34%</span></div>
+      </div>
+      <div class="box" style="border-top:3px solid #2F5BD3">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:600"><span class="dot" style="background:#2F5BD3"></span>Codex<span style="margin-left:auto;font-weight:400;font-size:11.5px;color:#5A5E70">Pro</span></div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-top:12px"><span style="font-size:28px;font-weight:600;letter-spacing:-.02em">31%</span><span style="font-size:12px;color:#4A4F63">of 5-hour window</span></div>
+        <div class="meter" style="margin-top:8px"><span style="width:31%;background:#2F5BD3"></span></div>
+        <div style="display:flex;font-size:11.5px;color:#4A4F63;margin-top:6px"><span>Resets in 1h 48m</span><span class="mono" style="margin-left:auto">weekly 12%</span></div>
+      </div>
+      <div class="box" style="border-top:3px solid #0E8597">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:600"><span class="dot" style="background:#0E8597"></span>Antigravity<span style="margin-left:auto;font-weight:400;font-size:11.5px;color:#5A5E70">ACP</span></div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-top:12px"><span style="font-size:28px;font-weight:600;color:#8A8C99">—</span><span style="font-size:12px;color:#4A4F63">quota not reported</span></div>
+        <div class="meter" style="margin-top:8px;background:repeating-linear-gradient(135deg,#E6DFD1 0 4px,#F0EADF 4px 8px)"></div>
+        <div style="display:flex;font-size:11.5px;color:#4A4F63;margin-top:6px"><span>Token counts only</span><span class="mono" style="margin-left:auto">last seen 12m</span></div>
+      </div>
+      <div class="box" style="border-top:3px solid #8E4CC4">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:600"><span class="dot" style="background:#8E4CC4"></span>Custom ACP<span style="margin-left:auto;font-weight:400;font-size:11.5px;color:#5A5E70">local-llm</span></div>
+        <div style="display:flex;align-items:baseline;gap:6px;margin-top:12px"><span style="font-size:28px;font-weight:600">0</span><span style="font-size:12px;color:#4A4F63">limits · runs locally</span></div>
+        <div class="meter" style="margin-top:8px"></div>
+        <div style="display:flex;font-size:11.5px;color:#4A4F63;margin-top:6px"><span>Measured zero, not missing</span><span class="mono" style="margin-left:auto">1 thread</span></div>
+      </div>
+    </div>
+
+    <div style="flex:1;display:grid;grid-template-columns:1fr 400px;gap:12px;min-height:0">
+      <div class="box" style="padding:14px 6px 6px">
+        <div style="display:flex;align-items:center;padding:0 10px 12px"><span style="font-weight:600">Tokens by harness and model</span><span style="margin-left:auto;font-size:11.5px;color:#5A5E70">Input includes cache reads once · — = not reported</span></div>
+        <table>
+          <thead><tr><th>Harness / model</th><th>Input</th><th>Cache read</th><th>Cache write</th><th>Output</th><th>Cache share</th><th>Hit rate</th><th>Threads</th></tr></thead>
+          <tbody>
+            <tr class="grp"><td><span class="dot" style="background:#D9541A;margin-right:8px"></span>Claude Code</td><td>9.82M</td><td>7.21M</td><td>0.64M</td><td>412k</td><td>73%</td><td>81%</td><td>14</td></tr>
+            <tr><td style="padding-left:30px;font-family:'Geist'">Opus 5.5</td><td>7.40M</td><td>5.61M</td><td>0.48M</td><td>318k</td><td>76%</td><td>84%</td><td>9</td></tr>
+            <tr><td style="padding-left:30px;font-family:'Geist'">Haiku 5.5 <span style="color:#5A5E70">· sub-agents</span></td><td>2.42M</td><td>1.60M</td><td>0.16M</td><td>94k</td><td>66%</td><td>72%</td><td>5</td></tr>
+            <tr class="grp"><td><span class="dot" style="background:#2F5BD3;margin-right:8px"></span>Codex</td><td>4.10M</td><td>2.79M</td><td class="na">—</td><td>226k</td><td>68%</td><td class="na">—</td><td>6</td></tr>
+            <tr><td style="padding-left:30px;font-family:'Geist'">gpt-6.2 · high</td><td>3.36M</td><td>2.35M</td><td class="na">—</td><td>188k</td><td>70%</td><td class="na">—</td><td>4</td></tr>
+            <tr><td style="padding-left:30px;font-family:'Geist'">gpt-6.1 · low</td><td>0.74M</td><td>0.44M</td><td class="na">—</td><td>38k</td><td>59%</td><td class="na">—</td><td>2</td></tr>
+            <tr class="grp"><td><span class="dot" style="background:#0E8597;margin-right:8px"></span>Antigravity</td><td>1.12M</td><td class="na">—</td><td class="na">—</td><td>61k</td><td class="na">—</td><td class="na">—</td><td>3</td></tr>
+            <tr class="grp"><td><span class="dot" style="background:#8E4CC4;margin-right:8px"></span>Custom ACP</td><td>0.38M</td><td>0</td><td>0</td><td>29k</td><td>0%</td><td class="na">—</td><td>1</td></tr>
+            <tr><td style="font-family:'Geist';font-weight:600;border-bottom:0">All harnesses</td><td style="font-weight:500;border-bottom:0">15.42M</td><td style="font-weight:500;border-bottom:0">10.00M</td><td style="border-bottom:0">0.64M</td><td style="font-weight:500;border-bottom:0">728k</td><td style="font-weight:500;border-bottom:0">72%*</td><td class="na" style="border-bottom:0">—</td><td style="border-bottom:0">24</td></tr>
+          </tbody>
+        </table>
+        <div style="font-size:11.5px;color:#4A4F63;padding:10px 10px 0;line-height:1.5">* Cache share is computed over harnesses that report cache reads (93% of input). Hit rate needs request-level counts, so it isn't totalled.</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px;min-height:0">
+        <div class="box">
+          <div style="display:flex;align-items:center;margin-bottom:12px"><span style="font-weight:600">Input tokens per day</span><span style="margin-left:auto;font-size:11.5px;color:#5A5E70">M</span></div>
+          <div style="display:flex;align-items:flex-end;gap:12px;height:132px;border-bottom:1px solid #C9BFAD;padding:0 4px" role="img" aria-label="Stacked bars of daily input tokens by harness, peaking Thursday at 3.4 million">
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><span style="height:10px;background:#0E8597;border-radius:2px"></span><span style="height:22px;background:#2F5BD3;border-radius:2px"></span><span style="height:40px;background:#D9541A;border-radius:2px"></span></div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><span style="height:28px;background:#2F5BD3;border-radius:2px"></span><span style="height:52px;background:#D9541A;border-radius:2px"></span></div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><span style="height:8px;background:#8E4CC4;border-radius:2px"></span><span style="height:14px;background:#0E8597;border-radius:2px"></span><span style="height:30px;background:#2F5BD3;border-radius:2px"></span><span style="height:74px;background:#D9541A;border-radius:2px"></span></div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><span style="height:12px;background:#0E8597;border-radius:2px"></span><span style="height:20px;background:#2F5BD3;border-radius:2px"></span><span style="height:48px;background:#D9541A;border-radius:2px"></span></div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><span style="height:16px;background:#2F5BD3;border-radius:2px"></span><span style="height:34px;background:#D9541A;border-radius:2px"></span></div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><span style="height:6px;background:#2F5BD3;border-radius:2px"></span><span style="height:12px;background:#D9541A;border-radius:2px"></span></div>
+            <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%"><span style="height:10px;background:#0E8597;border-radius:2px"></span><span style="height:26px;background:#2F5BD3;border-radius:2px"></span><span style="height:46px;background:#D9541A;border-radius:2px;outline:1.5px solid #1B1F33;outline-offset:1px"></span></div>
+          </div>
+          <div class="mono" style="display:flex;justify-content:space-around;font-size:10.5px;color:#5A5E70;margin-top:5px"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span style="color:#1B1F33">S</span></div>
+        </div>
+        <div class="box" style="flex:1">
+          <div style="font-weight:600;margin-bottom:8px">Heaviest threads</div>
+          <div style="display:flex;flex-direction:column;font-size:12.5px">
+            <div style="display:flex;align-items:center;gap:8px;height:28px"><span class="dot" style="background:#D9541A"></span>Rewrite related work<span class="mono" style="margin-left:auto;font-size:12px">2.1M · 81%</span></div>
+            <div style="display:flex;align-items:center;gap:8px;height:28px"><span class="dot" style="background:#2F5BD3"></span>Port figures to TikZ<span class="mono" style="margin-left:auto;font-size:12px">1.4M · 70%</span></div>
+            <div style="display:flex;align-items:center;gap:8px;height:28px"><span class="dot" style="background:#D9541A"></span>Tighten §2 prose<span class="mono" style="margin-left:auto;font-size:12px">0.9M · 77%</span></div>
+            <div style="display:flex;align-items:center;gap:8px;height:28px"><span class="dot" style="background:#0E8597"></span>Audit bibliography<span class="mono" style="margin-left:auto;font-size:12px">0.6M · —</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

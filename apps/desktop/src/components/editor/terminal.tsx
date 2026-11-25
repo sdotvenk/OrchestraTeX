@@ -6,6 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { useTheme } from "next-themes";
 import { memo, useEffect, useRef, useState } from "react";
+import { isNocturneAppearance } from "@/lib/editor/appearance";
 import { resolveTerminalFontFamily } from "@/lib/editor/font-stacks";
 
 // GitHub Light terminal colors
@@ -110,7 +111,9 @@ export const Terminal = memo(function Terminal({
 
   // Reactively update terminal theme when app mode changes
   useEffect(() => {
-    const nextTheme = resolvedTheme === "dark" ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME;
+    const nextTheme = isNocturneAppearance(resolvedTheme)
+      ? DARK_TERMINAL_THEME
+      : LIGHT_TERMINAL_THEME;
     themeRef.current = nextTheme;
 
     if (termRef.current) {

@@ -2,15 +2,16 @@
 
 import type { FileNode } from "@orchestratex/shared";
 import {
-  ArrowsInSimple,
-  ArrowsOutSimple,
-  CaretDown,
+  ArrowSquareOut,
+  Chats,
   GitFork,
   Plus,
+  SidebarSimple,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatModelDisplayName, formatProviderDisplayName } from "@/lib/agent/model-display";
 import type {
   AgentProviderId,
   AgentSettings,
@@ -19,13 +20,15 @@ import type {
   RuntimeMode,
 } from "@/lib/agent/types";
 import type { useAgent } from "@/lib/agent/use-agent";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import { AgentComposer, type AgentDraftInjection } from "./agent-composer";
 import { MessageTimeline } from "./message-timeline";
+import { formatShortPath } from "./orchestration-types";
 import { ProviderOnboarding } from "./provider-onboarding";
 import { TasksDisplay } from "./tasks-display";
 import { ThreadList } from "./thread-list";
 import { UsagePopover } from "./usage-popover";
-import { flattenFileNodes } from "./utils";
+import { flattenFileNodes, formatTokenCount } from "./utils";
 
 type UseAgentReturn = ReturnType<typeof useAgent>;
 
@@ -45,12 +48,17 @@ interface AgentPanelProps {
   onFileClick?: (path: string) => void;
   onRunTerminalCommand: (command: string) => void;
   onOpenAgentSettings: () => void;
-  isExpanded?: boolean;
-  onToggleExpand?: () => void;
+  onOpenWorkspace?: () => void;
+  onApproveInteraction?: (threadId: string, interactionId: string) => void;
+  mode?: "docked" | "workspace";
+  threePane?: boolean;
+  onSwitchToPdf?: () => void;
+  onDockInWrite?: () => void;
+  latestBuildLogExcerpt?: string | null;
   onClose?: () => void;
 }
 
-export function AgentPanel({
+export const AgentPanel = memo(function AgentPanel({
   agent,
   agentSettings,
   onUpdateAgentSettings,
@@ -66,10 +74,16 @@ export function AgentPanel({
   onFileClick,
   onRunTerminalCommand,
   onOpenAgentSettings,
-  isExpanded = false,
-  onToggleExpand,
+  onOpenWorkspace,
+  onApproveInteraction,
+  mode = "docked",
+  threePane = false,
+  onSwitchToPdf,
+  onDockInWrite,
+  latestBuildLogExcerpt = null,
   onClose,
 }: AgentPanelProps) {
+  const chatToggleRef = useRef<HTMLButtonElement>(null);
   const [view, setView] = useState<"chat" | "threads" | "providers">("chat");
 
   const projectFiles = useMemo(() => flattenFileNodes(files, projectPath), [files, projectPath]);
@@ -89,7 +103,7 @@ export function AgentPanel({
     agent.providers.length > 0 &&
     !agent.loadingProviders &&
     (!activeProvider?.installed || !activeProvider.authenticated) &&
-    !activeThread?.messages.length;
+    !(activeThread?.messages?.length ?? 0);
 
   useEffect(() => {
     if (anyReadyProvider) {
@@ -98,7 +112,6 @@ export function AgentPanel({
   }, [anyReadyProvider]);
 
   const handleSelectProvider = async (providerId: AgentProviderId) => {
-    onUpdateAgentSettings({ defaultProvider: providerId });
     const targetProvider = agent.providers.find((p) => p.id === providerId);
     const savedModel = agentSettings.defaultModelByProvider[providerId];
     const defaultModel =
@@ -107,163 +120,344 @@ export function AgentPanel({
       targetProvider?.models[0]?.id;
     const modelInfo = targetProvider?.models.find((m) => m.id === defaultModel);
     const savedEffort = agentSettings.defaultEffortByProvider[providerId];
+    const supported = modelInfo?.supportedEffortLevels ?? [];
+    const validSaved =
+      savedEffort && (supported.length === 0 || supported.includes(savedEffort))
+        ? savedEffort
+        : undefined;
     const defaultEffort = modelInfo?.supportsEffort
-      ? (savedEffort ?? modelInfo.defaultEffort ?? undefined)
+      ? (validSaved ?? modelInfo.defaultEffort ?? supported[0] ?? undefined)
       : undefined;
 
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         providerId,
         model: defaultModel ?? "",
         reasoningEffort: defaultEffort ?? "",
       });
+      if (!updated) return;
     }
+    onUpdateAgentSettings({ defaultProvider: providerId });
   };
 
   const handleChangeModel = async (modelId: string) => {
-    onSetDefaultModel(currentProviderId, modelId);
     const modelInfo = activeProvider?.models.find((m) => m.id === modelId);
+    const savedEffort = agentSettings.defaultEffortByProvider[currentProviderId];
+    const supported = modelInfo?.supportedEffortLevels ?? [];
+    const validSaved =
+      savedEffort && (supported.length === 0 || supported.includes(savedEffort))
+        ? savedEffort
+        : undefined;
     const effort = modelInfo?.supportsEffort
-      ? (agentSettings.defaultEffortByProvider[currentProviderId] ??
-        modelInfo.defaultEffort ??
-        modelInfo.supportedEffortLevels[0] ??
-        "")
+      ? (validSaved ?? modelInfo.defaultEffort ?? supported[0] ?? "")
       : "";
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         model: modelId,
         reasoningEffort: effort,
       });
+      if (!updated) return;
     }
+    onSetDefaultModel(currentProviderId, modelId);
   };
 
   const handleChangeEffort = async (effort: string) => {
-    onSetDefaultEffort(currentProviderId, effort);
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         reasoningEffort: effort,
       });
+      if (!updated) return;
     }
+    onSetDefaultEffort(currentProviderId, effort);
   };
 
   const handleChangeInteractionMode = async (mode: InteractionMode) => {
-    onUpdateAgentSettings({ defaultInteractionMode: mode });
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         interactionMode: mode,
       });
+      if (!updated) return;
     }
+    onUpdateAgentSettings({ defaultInteractionMode: mode });
   };
 
   const handleChangeRuntimeMode = async (mode: RuntimeMode) => {
-    onUpdateAgentSettings({ defaultRuntimeMode: mode });
     if (activeThread) {
-      await agent.updateThread(activeThread.summary.id, {
+      const updated = await agent.updateThread(activeThread.summary.id, {
         runtimeMode: mode,
       });
+      if (!updated) return;
     }
+    onUpdateAgentSettings({ defaultRuntimeMode: mode });
   };
 
-  const handleSend = async (content: string, attachments?: AttachmentInput[]) => {
-    setUserBypassedOnboarding(true);
-    setView("chat");
-    await agent.sendMessage(content, attachments);
-  };
+  const handleSend = useCallback(
+    async (content: string, attachments?: AttachmentInput[]) => {
+      setUserBypassedOnboarding(true);
+      setView("chat");
+      await agent.sendMessage(content, attachments);
+    },
+    [agent],
+  );
+
+  const handleQuickPrompt = useCallback(
+    (prompt: string) => {
+      void handleSend(prompt);
+    },
+    [handleSend],
+  );
+
+  const handleRespondInteraction = useCallback(
+    async (interactionId: string, response: Parameters<typeof agent.respondInteraction>[2]) => {
+      if (!activeThread) return;
+      await agent.respondInteraction(activeThread.summary.id, interactionId, response);
+      if (
+        (response.kind === "approvalDecision" && response.decision !== "deny") ||
+        (response.kind === "planDecision" && response.approved)
+      ) {
+        onApproveInteraction?.(activeThread.summary.id, interactionId);
+      }
+    },
+    [activeThread, agent, onApproveInteraction],
+  );
 
   const queuedForActive = activeThread ? (agent.queuesByThread[activeThread.summary.id] ?? []) : [];
-  const isRunning = activeThread?.summary.status === "running";
+  const closeThreads = () => {
+    setView("chat");
+    chatToggleRef.current?.focus();
+  };
+
+  const recentTabs = useMemo(
+    () => agent.threads.filter((t) => !t.archived).slice(0, 3),
+    [agent.threads],
+  );
+  const activeVoice = VOICE_COLORS[currentProviderId] ?? VOICE_COLORS.claude;
+  const providerDisplayName = formatProviderDisplayName(currentProviderId);
+  const currentModelId =
+    activeThread?.summary.model ?? activeProvider?.models?.[0]?.id ?? "default";
+  const currentModelLabel =
+    formatModelDisplayName(currentModelId, activeProvider?.models) || "Default";
+  const currentEffort = activeThread?.summary.reasoningEffort ?? null;
+  const currentRuntime = activeThread?.summary.runtimeMode ?? agentSettings.defaultRuntimeMode;
+  const runtimeLabel =
+    currentRuntime === "full-access"
+      ? "Full access"
+      : currentRuntime === "auto-accept-edits"
+        ? "Auto-accept edits"
+        : "Ask before commands";
+  const shortProjectPath = projectPath ? formatShortPath(projectPath) : "~/workspace";
+  const contextUsedTokens = activeThread?.usage?.contextUsedTokens ?? 0;
+  const compactLabel =
+    contextUsedTokens > 0
+      ? `${formatTokenCount(contextUsedTokens).toLowerCase()} → ~${formatTokenCount(Math.round(contextUsedTokens * 0.25)).toLowerCase()}`
+      : undefined;
+  const hasContextPercent = Boolean(
+    activeThread?.usage?.contextWindowTokens && activeThread.usage.contextWindowTokens > 0,
+  );
 
   return (
     <div className="h-full w-full flex flex-col bg-panel min-w-0">
-      {/* Calm Silkscreen-style Agent Header */}
-      <div className="h-10 px-3 border-b border-border flex items-center justify-between gap-2 bg-panel shrink-0">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <button
-            type="button"
-            onClick={() => setView((v) => (v === "threads" ? "chat" : "threads"))}
-            className={`inline-flex items-center gap-1.5 h-7 px-2 -ml-1 rounded-lg text-[13px] font-semibold transition-colors min-w-0 ${
-              view === "threads"
-                ? "bg-accent-soft text-accent"
-                : "text-foreground-strong hover:bg-subtle"
-            }`}
-            title="Switch or manage chats"
-          >
-            <span className="truncate max-w-[165px]">
-              {activeThread?.summary.title || "New chat"}
-            </span>
-            <CaretDown className="size-3 text-muted shrink-0" aria-hidden="true" />
-          </button>
-
-          {isRunning && (
-            <span className="px-2 py-0.5 rounded-full bg-success-bg text-success text-[10.5px] font-medium shrink-0">
-              Working
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button
-            type="button"
-            disabled={!projectPath}
-            onClick={() => {
-              void agent.createThread();
-              setView("chat");
-            }}
-            className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
-            title="New chat"
-            aria-label="New chat"
-          >
-            <Plus className="size-4" aria-hidden="true" />
-          </button>
-
-          {activeThread && activeProvider?.supportsFork && (
-            <button
-              type="button"
-              onClick={() => {
-                void agent.forkThread(activeThread.summary.id);
-                setView("chat");
+      {mode === "docked" && !threePane ? (
+        <>
+          <div className="h-9 bg-[var(--tab-strip-bg)] border-b border-border flex items-center shrink-0 min-w-0">
+            <div
+              className="flex items-center min-w-0 flex-1 overflow-x-auto pr-2"
+              style={{
+                maskImage: "linear-gradient(to right, black calc(100% - 8px), transparent)",
+                WebkitMaskImage: "linear-gradient(to right, black calc(100% - 8px), transparent)",
               }}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              title="Fork current chat"
-              aria-label="Fork chat"
             >
-              <GitFork className="size-3.5" aria-hidden="true" />
-            </button>
-          )}
-
-          {onToggleExpand && (
+              {onSwitchToPdf && (
+                <button
+                  type="button"
+                  onClick={onSwitchToPdf}
+                  className="h-9 px-3 border-r border-border text-[12.5px] text-muted hover:text-foreground inline-flex items-center gap-1.5 shrink-0"
+                >
+                  <span>PDF</span>
+                </button>
+              )}
+              {recentTabs.map((t) => {
+                const isTabActive = t.id === activeThread?.summary.id && view === "chat";
+                const tabVoice = VOICE_COLORS[t.providerId] ?? VOICE_COLORS.claude;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      void agent.loadThread(t.id);
+                      setView("chat");
+                    }}
+                    style={
+                      isTabActive ? { boxShadow: `inset 0 -2px 0 ${tabVoice.ink}` } : undefined
+                    }
+                    className={`h-9 px-3 border-r border-border text-[12.5px] inline-flex items-center gap-1.5 max-w-[160px] shrink-0 ${
+                      isTabActive
+                        ? "bg-panel text-foreground-strong font-medium"
+                        : "text-muted hover:text-foreground"
+                    }`}
+                  >
+                    <span
+                      className="size-2 rounded-full shrink-0"
+                      style={{ backgroundColor: tabVoice.ink }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">{t.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {onOpenWorkspace && (
+              <div className="px-1.5 shrink-0 border-l border-border h-full flex items-center bg-[var(--tab-strip-bg)]">
+                <button
+                  type="button"
+                  onClick={onOpenWorkspace}
+                  className="rounded-[7px] border border-border-dark bg-panel px-2.5 py-1 text-[12px] text-foreground inline-flex items-center gap-1 hover:bg-subtle shrink-0 whitespace-nowrap"
+                >
+                  <ArrowSquareOut className="size-3" aria-hidden="true" />
+                  <span>Open in Agents</span>
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="px-4 py-1.5 border-b border-border/70 flex items-center gap-2 text-[12px] text-muted shrink-0 min-w-0">
+            <span className="font-medium text-foreground shrink-0 whitespace-nowrap">
+              {providerDisplayName}
+            </span>
+            <span className="font-mono shrink-0 max-w-[40%] truncate" title={currentModelLabel}>
+              {currentModelLabel}
+            </span>
+            {currentEffort && (
+              <>
+                <span aria-hidden="true" className="shrink-0">
+                  ·
+                </span>
+                <span className="font-mono shrink-0 whitespace-nowrap">{currentEffort}</span>
+              </>
+            )}
+            <span aria-hidden="true" className="shrink-0">
+              ·
+            </span>
+            <span className="shrink-0 whitespace-nowrap">{runtimeLabel}</span>
+            <span className="ml-auto font-mono min-w-0 shrink-[4] truncate">
+              {shortProjectPath}
+            </span>
+          </div>
+        </>
+      ) : mode === "docked" && threePane ? (
+        <div className="h-9 bg-[var(--tab-strip-bg)] border-b border-border px-3.5 flex items-center gap-2 text-[12.5px] shrink-0">
+          <span
+            className="size-2 rounded-full shrink-0"
+            style={{ backgroundColor: activeVoice.ink }}
+            aria-hidden="true"
+          />
+          <button
+            ref={chatToggleRef}
+            type="button"
+            aria-expanded={view === "threads"}
+            onClick={() => setView((v) => (v === "threads" ? "chat" : "threads"))}
+            className="font-medium text-foreground-strong truncate hover:underline text-left"
+          >
+            {activeThread?.summary.title ?? "New thread"}
+          </button>
+          <span className="ml-auto text-[11.5px] text-muted shrink-0">{providerDisplayName}</span>
+          {onOpenWorkspace && (
             <button
               type="button"
-              onClick={onToggleExpand}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              title={isExpanded ? "Restore pane width" : "Expand agent pane"}
-              aria-label={isExpanded ? "Restore pane width" : "Expand agent pane"}
+              onClick={onOpenWorkspace}
+              className="size-6 rounded inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle shrink-0"
+              title="Open in Agents"
+              aria-label="Open in Agents"
             >
-              {isExpanded ? (
-                <ArrowsInSimple className="size-3.5" aria-hidden="true" />
-              ) : (
-                <ArrowsOutSimple className="size-3.5" aria-hidden="true" />
-              )}
+              <ArrowSquareOut className="size-3.5" aria-hidden="true" />
             </button>
           )}
-
           {onClose && (
             <button
               type="button"
               onClick={onClose}
-              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-              title="Hide Agent Panel (Cmd+L)"
-              aria-label="Close agent panel"
+              className="size-6 rounded inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle shrink-0"
+              title="Close thread pane"
+              aria-label="Close thread pane"
             >
               <X className="size-3.5" aria-hidden="true" />
             </button>
           )}
         </div>
-      </div>
+      ) : (
+        <div className="h-10 px-4 border-b border-border/70 flex items-center gap-2 bg-panel shrink-0">
+          <span
+            className="size-2 rounded-full shrink-0"
+            style={{ backgroundColor: activeVoice.ink }}
+            aria-hidden="true"
+          />
+          <span className="font-semibold text-[13px] text-foreground-strong truncate">
+            {activeThread?.summary.title ?? "New thread"}
+          </span>
+          <span className="border border-border rounded px-1.5 font-mono text-[10.5px] text-muted shrink-0">
+            {activeThread?.summary.workspaceBranch ?? "main"}
+          </span>
+
+          <div className="ml-auto flex items-center gap-0.5 shrink-0">
+            {onDockInWrite && (
+              <button
+                type="button"
+                onClick={onDockInWrite}
+                className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+                title="Dock beside editor"
+                aria-label="Dock beside editor"
+              >
+                <SidebarSimple className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+            {activeThread && activeProvider?.supportsFork && (
+              <button
+                type="button"
+                onClick={() => {
+                  void agent.forkThread(activeThread.summary.id);
+                  setView("chat");
+                }}
+                className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+                title="Fork thread"
+                aria-label="Fork thread"
+              >
+                <GitFork className="size-3.5" aria-hidden="true" />
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={!projectPath}
+              onClick={() => {
+                void agent.createThread();
+                setView("chat");
+              }}
+              className="size-7 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle disabled:opacity-40 transition-colors"
+              title="New chat"
+              aria-label="New chat"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+            </button>
+            <button
+              ref={chatToggleRef}
+              type="button"
+              aria-expanded={view === "threads"}
+              onClick={() => setView((v) => (v === "threads" ? "chat" : "threads"))}
+              className={`size-7 rounded-lg inline-flex items-center justify-center transition-colors ${
+                view === "threads"
+                  ? "bg-accent-soft text-accent"
+                  : "text-muted hover:text-foreground hover:bg-subtle"
+              }`}
+              title="Switch chats"
+              aria-label="Switch chats"
+            >
+              <Chats className="size-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tasks Progress Bar */}
-      {view === "chat" && activeThread && activeThread.tasks.length > 0 && (
-        <TasksDisplay tasks={activeThread.tasks} />
+      {view === "chat" && activeThread && (activeThread.tasks?.length ?? 0) > 0 && (
+        <TasksDisplay tasks={activeThread.tasks ?? []} />
       )}
 
       {/* Global / Turn Error Banner */}
@@ -293,7 +487,6 @@ export function AgentPanel({
           activeThreadId={activeThread?.summary.id}
           providers={agent.providers}
           onSelectThread={(id) => void agent.loadThread(id)}
-          onCreateThread={() => void agent.createThread()}
           onRenameThread={async (id, title) => {
             await agent.updateThread(id, { title });
           }}
@@ -304,7 +497,7 @@ export function AgentPanel({
             await agent.forkThread(id);
           }}
           onDeleteThread={agent.deleteThread}
-          onClose={() => setView("chat")}
+          onClose={closeThreads}
         />
       ) : view === "providers" || needsOnboarding ? (
         <ProviderOnboarding
@@ -330,14 +523,13 @@ export function AgentPanel({
             projectFiles={projectFiles}
             activeFile={activeFile}
             onFileClick={onFileClick}
-            onQuickPrompt={(prompt) => void handleSend(prompt)}
-            onRespondInteraction={async (interactionId, response) => {
-              if (!activeThread) return;
-              await agent.respondInteraction(activeThread.summary.id, interactionId, response);
-            }}
+            onQuickPrompt={handleQuickPrompt}
+            onRespondInteraction={handleRespondInteraction}
           />
 
           <AgentComposer
+            compact={mode === "docked"}
+            latestBuildLogExcerpt={latestBuildLogExcerpt}
             projectPath={projectPath}
             files={files}
             providers={agent.providers}
@@ -363,6 +555,14 @@ export function AgentPanel({
             onChangeEffort={handleChangeEffort}
             onChangeInteractionMode={handleChangeInteractionMode}
             onChangeRuntimeMode={handleChangeRuntimeMode}
+            onOpenWorkspace={onOpenWorkspace}
+            workspaceLabel={activeThread?.summary.workspaceBranch ?? "Local"}
+            compactLabel={compactLabel}
+            onCompactContext={
+              activeThread && activeProvider?.supportsCompact
+                ? () => agent.compactThread(activeThread.summary.id)
+                : undefined
+            }
             usageTrigger={
               <UsagePopover
                 open={usageOpen}
@@ -371,6 +571,7 @@ export function AgentPanel({
                 usage={activeThread?.usage}
                 threadStatus={activeThread?.summary.status}
                 compactRing={true}
+                showPercent={hasContextPercent}
                 onRefreshLimits={async () => {
                   if (activeProvider) {
                     await agent.refreshRateLimits(activeProvider.id);
@@ -390,4 +591,4 @@ export function AgentPanel({
       )}
     </div>
   );
-}
+});

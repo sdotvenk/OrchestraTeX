@@ -17,6 +17,8 @@ pub struct GhRepoResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GitFileChange {
     pub path: String,
+    #[serde(rename = "originalPath", skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<String>,
     pub status: String,
     pub staged: bool,
 }
@@ -61,6 +63,244 @@ async fn run_git(cwd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchPullRequest {
+    pub number: u64,
+    pub title: String,
+    pub state: String,
+    pub url: String,
+    pub is_draft: bool,
+}
+
+#[tauri::command]
+pub async fn git_branch_pull_request(
+    dir: String,
+    branch: Option<String>,
+) -> Result<Option<GitBranchPullRequest>, String> {
+    run_git(&dir, &["rev-parse", "--show-toplevel"]).await?;
+    let branch = match branch {
+        Some(branch) => branch,
+        None => run_git(&dir, &["branch", "--show-current"])
+            .await?
+            .trim()
+            .to_owned(),
+    };
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err("A valid branch is required".to_string());
+    }
+    run_git(&dir, &["check-ref-format", "--branch", &branch]).await?;
+    let output = match command("gh")
+        .args([
+            "pr",
+            "view",
+            &branch,
+            "--json",
+            "number,title,state,url,isDraft",
+        ])
+        .current_dir(&dir)
+        .output()
+        .await
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        if error.starts_with("no pull requests found for branch ") {
+            return Ok(None);
+        }
+        return Err(if error.is_empty() {
+            "gh pr view failed".to_string()
+        } else {
+            error
+        });
+    }
+    serde_json::from_slice(&output.stdout)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn git_open_branch_pull_request(dir: String) -> Result<String, String> {
+    let branch = run_git(&dir, &["branch", "--show-current"]).await?;
+    let branch = branch.trim();
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err("Check out a branch before opening a pull request".to_string());
+    }
+    let existing = git_branch_pull_request(dir.clone(), Some(branch.to_string())).await?;
+    git_push(dir.clone()).await?;
+    if let Some(pr) = existing {
+        if pr.state == "OPEN" {
+            return Ok(pr.url);
+        }
+    }
+    let output = command("gh")
+        .args(["pr", "create", "--fill", "--head", branch])
+        .current_dir(&dir)
+        .output()
+        .await
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn git_merge_thread_worktree(
+    dir: String,
+    workspace: String,
+    target_branch: String,
+) -> Result<(), String> {
+    let common_dir = |checkout: String| async move {
+        let path = run_git(&checkout, &["rev-parse", "--git-common-dir"]).await?;
+        tokio::fs::canonicalize(std::path::Path::new(&checkout).join(path.trim()))
+            .await
+            .map_err(|error| error.to_string())
+    };
+    let (project_git_dir, worktree_git_dir) =
+        tokio::try_join!(common_dir(dir.clone()), common_dir(workspace.clone()))?;
+    if project_git_dir != worktree_git_dir {
+        return Err("The worktree belongs to a different repository".to_string());
+    }
+    let current_branch = run_git(&dir, &["branch", "--show-current"]).await?;
+    if target_branch.is_empty() || current_branch.trim() != target_branch {
+        return Err(
+            "The project branch changed. Review the target branch before merging".to_string(),
+        );
+    }
+    let branch = run_git(&workspace, &["branch", "--show-current"]).await?;
+    let branch = branch.trim();
+    if !branch.starts_with("orchestratex/") {
+        return Err("Select an OrchestraTeX thread worktree".to_string());
+    }
+    for checkout in [&dir, &workspace] {
+        let status = run_git(checkout, &["status", "--porcelain"]).await?;
+        if !status.trim().is_empty() {
+            return Err(
+                "Commit or review pending changes in both checkouts before merging".to_string(),
+            );
+        }
+    }
+    if run_git(&dir, &["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+        .await
+        .is_ok()
+    {
+        return Err("Finish the current merge first".to_string());
+    }
+    match run_git(&dir, &["merge", "--no-edit", "--", branch]).await {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            if run_git(&dir, &["rev-parse", "--quiet", "--verify", "MERGE_HEAD"])
+                .await
+                .is_ok()
+            {
+                run_git(&dir, &["merge", "--abort"])
+                    .await
+                    .map_err(|abort_error| {
+                        format!("Merge failed: {error}. Could not abort: {abort_error}")
+                    })?;
+                return Err("The branches have conflicts. The merge was aborted".to_string());
+            }
+            Err(error)
+        }
+    }
+}
+
+/// Parse `git status --porcelain=v1 -z` output into `GitFileChange` entries.
+/// Preserves literal paths (spaces, tabs, Unicode, trailing spaces, arrows)
+/// and consumes the second NUL-terminated original path record for renames/copies.
+fn parse_porcelain_v1_z(output: &str) -> Vec<GitFileChange> {
+    let mut changes = Vec::new();
+    let mut parts = output.split('\0');
+
+    while let Some(record) = parts.next() {
+        if record.len() < 4 {
+            continue;
+        }
+        let bytes = record.as_bytes();
+        if bytes[2] != b' ' {
+            continue;
+        }
+
+        let x = bytes[0] as char;
+        let y = bytes[1] as char;
+        let path = record[3..].to_string();
+
+        let original_path = if matches!(x, 'R' | 'C') || matches!(y, 'R' | 'C') {
+            parts.next().map(str::to_owned)
+        } else {
+            None
+        };
+
+        let status_label = |code: char| -> String {
+            match code {
+                'M' => "modified",
+                'A' => "added",
+                'D' => "deleted",
+                'R' => "renamed",
+                '?' => "untracked",
+                _ => "modified",
+            }
+            .to_string()
+        };
+
+        if x == '?' && y == '?' {
+            changes.push(GitFileChange {
+                path,
+                original_path: None,
+                status: "untracked".to_string(),
+                staged: false,
+            });
+            continue;
+        }
+
+        // Unmerged / conflict entries (DD, AU, UD, UA, DU, AA, UU) are represented once as unstaged conflicts.
+        let is_conflict = matches!(
+            (x, y),
+            ('D', 'D')
+                | ('A', 'U')
+                | ('U', 'D')
+                | ('U', 'A')
+                | ('D', 'U')
+                | ('A', 'A')
+                | ('U', 'U')
+        );
+        if is_conflict {
+            changes.push(GitFileChange {
+                path,
+                original_path: None,
+                status: "conflict".to_string(),
+                staged: false,
+            });
+            continue;
+        }
+
+        if x != ' ' && x != '?' {
+            changes.push(GitFileChange {
+                path: path.clone(),
+                original_path: if x == 'R' { original_path.clone() } else { None },
+                status: status_label(x),
+                staged: true,
+            });
+        }
+
+        if y != ' ' && y != '?' {
+            changes.push(GitFileChange {
+                path,
+                original_path: if y == 'R' { original_path } else { None },
+                status: status_label(y),
+                staged: false,
+            });
+        }
+    }
+
+    changes
+}
+
 #[tauri::command]
 pub async fn git_status(dir: String) -> Result<GitStatus, String> {
     let git_dir = std::path::Path::new(&dir).join(".git");
@@ -93,7 +333,7 @@ pub async fn git_status(dir: String) -> Result<GitStatus, String> {
                     .or_else(|_| Ok("main".to_string()))
             }
         },
-        run_git(dir_ref, &["status", "--porcelain"]),
+        run_git(dir_ref, &["status", "--porcelain=v1", "-z"]),
         run_git(dir_ref, &["remote"]),
         async {
             if has_commits {
@@ -126,36 +366,7 @@ pub async fn git_status(dir: String) -> Result<GitStatus, String> {
     let status_output = status_result.unwrap_or_default();
     let has_upstream = upstream_result.is_ok();
 
-    let mut changes = Vec::new();
-    for line in status_output.lines() {
-        if line.len() < 3 {
-            continue;
-        }
-        let staged =
-            line.chars().next().unwrap_or(' ') != ' ' && line.chars().next().unwrap_or(' ') != '?';
-        let status_char = if staged {
-            line.chars().next().unwrap_or(' ')
-        } else {
-            line.chars().nth(1).unwrap_or(' ')
-        };
-
-        let status = match status_char {
-            'M' => "modified",
-            'A' => "added",
-            'D' => "deleted",
-            'R' => "renamed",
-            '?' => "untracked",
-            _ => "modified",
-        }
-        .to_string();
-
-        let path = line[3..].trim().to_string();
-        changes.push(GitFileChange {
-            path,
-            status,
-            staged,
-        });
-    }
+    let changes = parse_porcelain_v1_z(&status_output);
 
     let remote = remote_result
         .ok()
@@ -197,7 +408,7 @@ pub async fn git_status(dir: String) -> Result<GitStatus, String> {
 #[tauri::command]
 pub async fn git_log(dir: String, limit: Option<i32>) -> Result<Vec<GitLogEntry>, String> {
     let limit = limit.unwrap_or(20);
-    let format = "%H%n%h%n%s%n%an%n%ci%n---";
+    let format = "%H%n%h%n%s%n%an%n%cI%n---";
 
     let output = match run_git(
         &dir,
@@ -270,7 +481,7 @@ pub async fn git_diff(
     file: Option<String>,
     staged: Option<bool>,
 ) -> Result<String, String> {
-    let mut args = vec!["diff"];
+    let mut args = vec!["-c", "core.quotepath=false", "--literal-pathspecs", "diff"];
     if staged.unwrap_or(false) {
         args.push("--staged");
     }
@@ -279,6 +490,32 @@ pub async fn git_diff(
         args.push(f);
     }
     run_git(&dir, &args).await
+}
+
+#[tauri::command]
+pub async fn git_commit_diff(dir: String, hash: String) -> Result<String, String> {
+    let trimmed = hash.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with('-')
+        || !trimmed.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Err("Invalid commit hash".to_string());
+    }
+    run_git(
+        &dir,
+        &[
+            "-c",
+            "core.quotepath=false",
+            "show",
+            "--first-parent",
+            "-m",
+            "--format=",
+            "--patch",
+            "--no-color",
+            trimmed,
+        ],
+    )
+    .await
 }
 
 #[tauri::command]
@@ -293,7 +530,11 @@ pub async fn git_discard_all(dir: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn git_discard_file(dir: String, file: String) -> Result<(), String> {
     // Check if it's an untracked file by looking at git status
-    let status = run_git(&dir, &["status", "--porcelain", "--", &file]).await?;
+    let status = run_git(
+        &dir,
+        &["--literal-pathspecs", "status", "--porcelain", "--", &file],
+    )
+    .await?;
     if status.starts_with("??") {
         // Untracked file: delete it
         let path = std::path::Path::new(&dir).join(&file);
@@ -305,14 +546,14 @@ pub async fn git_discard_file(dir: String, file: String) -> Result<(), String> {
         }
     } else {
         // Tracked file: restore it
-        run_git(&dir, &["checkout", "--", &file]).await?;
+        run_git(&dir, &["--literal-pathspecs", "checkout", "--", &file]).await?;
     }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn git_unstage(dir: String, files: Vec<String>) -> Result<(), String> {
-    let mut args = vec!["reset", "HEAD", "--"];
+    let mut args = vec!["--literal-pathspecs", "reset", "HEAD", "--"];
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     args.extend(file_refs);
     run_git(&dir, &args).await?;
@@ -321,7 +562,7 @@ pub async fn git_unstage(dir: String, files: Vec<String>) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn git_add(dir: String, files: Vec<String>) -> Result<(), String> {
-    let mut args = vec!["add"];
+    let mut args = vec!["--literal-pathspecs", "add", "--"];
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     args.extend(file_refs);
     run_git(&dir, &args).await?;
@@ -895,6 +1136,75 @@ pub async fn gh_create_repo(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn thread_worktree_merge_aborts_conflicts_and_keeps_the_project_head() {
+        let temp =
+            std::env::temp_dir().join(format!("orchestratex-merge-{}", uuid::Uuid::new_v4()));
+        let project = temp.join("project");
+        let worktree = temp.join("worktree");
+        tokio::fs::create_dir_all(&project).await.unwrap();
+        let project_path = project.to_string_lossy();
+        let worktree_path = worktree.to_string_lossy();
+        for args in [
+            &["init", "-b", "main"][..],
+            &["config", "user.name", "OrchestraTeX test"],
+            &["config", "user.email", "test@example.com"],
+        ] {
+            run_git(&project_path, args).await.unwrap();
+        }
+        tokio::fs::write(project.join("main.tex"), "base\n")
+            .await
+            .unwrap();
+        run_git(&project_path, &["add", "main.tex"]).await.unwrap();
+        run_git(&project_path, &["commit", "-m", "base"])
+            .await
+            .unwrap();
+        run_git(
+            &project_path,
+            &["worktree", "add", "-b", "orchestratex/test", &worktree_path],
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(project.join("main.tex"), "project version\n")
+            .await
+            .unwrap();
+        tokio::fs::write(worktree.join("main.tex"), "thread version\n")
+            .await
+            .unwrap();
+        run_git(&project_path, &["commit", "-am", "project version"])
+            .await
+            .unwrap();
+        run_git(&worktree_path, &["commit", "-am", "thread version"])
+            .await
+            .unwrap();
+        let head = run_git(&project_path, &["rev-parse", "HEAD"])
+            .await
+            .unwrap();
+        let result = git_merge_thread_worktree(
+            project_path.to_string(),
+            worktree_path.to_string(),
+            "main".to_string(),
+        )
+        .await;
+        assert!(result.unwrap_err().contains("merge was aborted"));
+        assert_eq!(
+            run_git(&project_path, &["rev-parse", "HEAD"])
+                .await
+                .unwrap(),
+            head
+        );
+        assert_eq!(
+            run_git(&project_path, &["status", "--porcelain"])
+                .await
+                .unwrap(),
+            ""
+        );
+        run_git(&project_path, &["worktree", "remove", &worktree_path])
+            .await
+            .unwrap();
+        tokio::fs::remove_dir_all(temp).await.unwrap();
+    }
+
     #[test]
     fn gh_auth_login_windows_launch_plan_uses_visible_cmd() {
         let plan = gh_auth_login_launch_plan(GhAuthLoginPlatform::Windows);
@@ -928,5 +1238,80 @@ mod tests {
             GH_AUTH_LOGIN_COMMAND
         );
         assert!(!plan.hide_outer_window);
+    }
+
+    #[test]
+    fn parse_porcelain_v1_z_handles_special_paths_and_renames() {
+        let input = concat!(
+            "?? sections/methodology copy.tex\0",
+            " M sections/tab\tname.tex\0",
+            "A  sections/résumé — αβγ.tex\0",
+            "?? trailing space.tex \0",
+            " M arrow -> file.tex\0",
+            "R  figures/modes.pdf\0old/modes.pdf\0",
+            " D deleted.tex\0",
+        );
+
+        let changes = parse_porcelain_v1_z(input);
+        assert_eq!(changes.len(), 7);
+
+        assert_eq!(changes[0].path, "sections/methodology copy.tex");
+        assert_eq!(changes[0].status, "untracked");
+        assert!(!changes[0].staged);
+
+        assert_eq!(changes[1].path, "sections/tab\tname.tex");
+        assert_eq!(changes[1].status, "modified");
+        assert!(!changes[1].staged);
+
+        assert_eq!(changes[2].path, "sections/résumé — αβγ.tex");
+        assert_eq!(changes[2].status, "added");
+        assert!(changes[2].staged);
+
+        assert_eq!(changes[3].path, "trailing space.tex ");
+        assert_eq!(changes[3].status, "untracked");
+        assert!(!changes[3].staged);
+
+        assert_eq!(changes[4].path, "arrow -> file.tex");
+        assert_eq!(changes[4].status, "modified");
+        assert!(!changes[4].staged);
+
+        assert_eq!(changes[5].path, "figures/modes.pdf");
+        assert_eq!(changes[5].status, "renamed");
+        assert!(changes[5].staged);
+        assert_eq!(changes[5].original_path.as_deref(), Some("old/modes.pdf"));
+
+        assert_eq!(changes[6].path, "deleted.tex");
+        assert_eq!(changes[6].status, "deleted");
+        assert!(!changes[6].staged);
+    }
+
+    #[test]
+    fn parse_porcelain_v1_z_emits_mixed_staged_unstaged_and_conflicts() {
+        let input = concat!(
+            "MM sections/mixed.tex\0",
+            "AM sections/added-then-edited.tex\0",
+            "UU sections/conflicted.tex\0",
+        );
+
+        let changes = parse_porcelain_v1_z(input);
+        assert_eq!(changes.len(), 5);
+
+        assert_eq!(changes[0].path, "sections/mixed.tex");
+        assert_eq!(changes[0].status, "modified");
+        assert!(changes[0].staged);
+        assert_eq!(changes[1].path, "sections/mixed.tex");
+        assert_eq!(changes[1].status, "modified");
+        assert!(!changes[1].staged);
+
+        assert_eq!(changes[2].path, "sections/added-then-edited.tex");
+        assert_eq!(changes[2].status, "added");
+        assert!(changes[2].staged);
+        assert_eq!(changes[3].path, "sections/added-then-edited.tex");
+        assert_eq!(changes[3].status, "modified");
+        assert!(!changes[3].staged);
+
+        assert_eq!(changes[4].path, "sections/conflicted.tex");
+        assert_eq!(changes[4].status, "conflict");
+        assert!(!changes[4].staged);
     }
 }

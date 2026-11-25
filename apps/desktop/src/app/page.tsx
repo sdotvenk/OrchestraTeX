@@ -1,14 +1,26 @@
 "use client";
 
+import type { FileNode, GitLogEntry, GitStatus } from "@orchestratex/shared";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { AnimatePresence, motion, type PanInfo, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { useTheme } from "next-themes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentDraftInjection } from "@/components/agent/agent-composer";
-import { AgentStatusCard } from "@/components/agent/agent-status-card";
+import { ProviderIcon } from "@/components/agent/icons";
+import { OrchestrationSidebar } from "@/components/agent/orchestration-sidebar";
+import {
+  type DelegateTaskInput,
+  ProjectInspector,
+  type ScheduleThreadInput,
+} from "@/components/agent/project-inspector";
+import { UsageDashboard, type UsageDashboardTopBarState } from "@/components/agent/usage-dashboard";
 import { flattenFileNodes } from "@/components/agent/utils";
+import { WorkspaceChanges } from "@/components/agent/workspace-changes";
+import {
+  BuildActivityDrawer,
+  type BuildActivityTab,
+} from "@/components/editor/build-activity-drawer";
 import {
   type DockviewPanelItem,
   DockviewPanelLayout,
@@ -16,20 +28,25 @@ import {
 import { EditorErrorBoundary } from "@/components/editor/editor-error-boundary";
 import { EditorSkeleton } from "@/components/editor/editor-skeleton";
 import { GitHubPublishDialog } from "@/components/editor/github-publish-dialog";
+import { formatCheckpointTime } from "@/components/editor/history-diff-utils";
+import { HistoryWorkspace } from "@/components/editor/history-workspace";
+import { HomeWorkspace, type ProjectThreadCounts } from "@/components/editor/home-workspace";
 import type { PdfHighlightTarget } from "@/components/editor/pdf-viewer";
+import { ProjectSwitcher } from "@/components/editor/project-switcher";
+import { ScoreDrawer } from "@/components/editor/score-drawer";
 import { FileSidebarPanel } from "@/components/editor/sidebar-file-panel";
-import { GitSidebarPanel } from "@/components/editor/sidebar-git-panel";
 import { SidebarOutlinePanel } from "@/components/editor/sidebar-outline-panel";
+import { StatusBar } from "@/components/editor/status-bar";
 import { TerminalPanel } from "@/components/editor/terminal-panel";
+import { VisualEditor } from "@/components/editor/visual-editor";
 import {
   LaTeXInstallPrompt,
   LaTeXSettingsDialog,
   MainFileSelectionDialog,
-  SynctexInstallDialog,
 } from "@/components/latex";
-import { RecentProjects } from "@/components/recent-projects";
 import { CommandPalette } from "@/components/ui/command-palette";
 import { InputDialog } from "@/components/ui/input-dialog";
+import { OrchestraTeXWordmark } from "@/components/ui/orchestratex-wordmark";
 import {
   TabBar,
   type TabDragEndPayload,
@@ -37,10 +54,20 @@ import {
   type TabItem,
   type TabReorderPosition,
 } from "@/components/ui/tab-bar";
+import { ThemePicker } from "@/components/ui/theme-picker";
 import { useToast } from "@/components/ui/toast";
 import { useAgent, useAgentSettings } from "@/lib/agent";
+import { type AttributedEdit, projectRelativePath } from "@/lib/agent/edit-attribution";
+import { formatProviderDisplayName } from "@/lib/agent/model-display";
+import type { ScoreMark } from "@/lib/agent/score";
+import type { AgentProviderId, AgentThread, ThreadSummary } from "@/lib/agent/types";
+import { computeDateRange, queryUsageLog } from "@/lib/agent/usage-dashboard";
+import { useAgentEdits } from "@/lib/agent/use-agent-edits";
+import { useOrchestration } from "@/lib/agent/use-orchestration";
+import { useScore } from "@/lib/agent/use-score";
 import { useEditorSettings } from "@/lib/editor";
-import { UI_PALETTES } from "@/lib/editor/types";
+import { mayHaveNewContents } from "@/lib/editor/file-change";
+import { VOICE_COLORS } from "@/lib/editor/voice-colors";
 import {
   type BibEntry,
   countLatexWords,
@@ -53,10 +80,16 @@ import {
   useLatexCompiler,
   useLatexSettings,
 } from "@/lib/latex";
+import {
+  findMissingFileSuggestion,
+  type RecentRenameRecord,
+} from "@/lib/latex/missing-file-suggestions";
+import { planRenameReferences } from "@/lib/latex/rename-references";
 import type { LatexDiagnostic, MainFileDetectionResult, SynctexResult } from "@/lib/latex/types";
-import { pathSync } from "@/lib/path";
+import { pathSync, pathsEqual } from "@/lib/path";
 import { useRecentProjects } from "@/lib/recent-projects";
 import { useTauriDaemon } from "@/lib/tauri";
+import type { RenameReferenceUpdate } from "@/lib/tauri/use-tauri-daemon";
 
 const PdfViewer = dynamic(
   () => import("@/components/editor/pdf-viewer").then((mod) => mod.PdfViewer),
@@ -70,32 +103,15 @@ const LivePdfPreview = dynamic(
 
 import {
   FilePdfIcon,
-  FolderOpenIcon,
   GearIcon,
+  GitBranchIcon,
   MagnifyingGlassIcon,
-  MoonIcon,
-  PlayIcon,
-  RobotIcon,
   SidebarSimpleIcon,
-  SpinnerGapIcon,
-  StopIcon,
-  SunIcon,
-  SwatchesIcon,
   TerminalIcon,
 } from "@phosphor-icons/react";
 
-function throttle<T extends (...args: Parameters<T>) => void>(fn: T, limit: number): T {
-  let lastCall = 0;
-  return ((...args: Parameters<T>) => {
-    const now = Date.now();
-    if (now - lastCall >= limit) {
-      lastCall = now;
-      fn(...args);
-    }
-  }) as T;
-}
-
 type EditorViewMode = "file" | "git-diff";
+const WORKSPACE_VIEWS = ["write", "agents", "history"] as const;
 type GitDiffPreviewState = {
   path: string;
   staged: boolean;
@@ -320,9 +336,20 @@ export default function EditorPage() {
   const recentProjects = useRecentProjects();
 
   const [selectedFile, setSelectedFile] = useState<string>();
+  const [failedSourceWrites, setFailedSourceWrites] = useState<Record<string, string>>({});
+  const [recentRenames, setRecentRenames] = useState<RecentRenameRecord[]>([]);
   const [fileContent, setFileContent] = useState<string>("");
   const [editorViewMode, setEditorViewMode] = useState<EditorViewMode>("file");
   const [gitDiffPreview, setGitDiffPreview] = useState<GitDiffPreviewState | null>(null);
+  const [historyDiffPreview, setHistoryDiffPreview] = useState<GitDiffPreviewState | null>(null);
+  const [selectedHistoryCommit, setSelectedHistoryCommit] = useState<GitLogEntry | null>(null);
+  const [historyCommitDiff, setHistoryCommitDiff] = useState<{
+    entry: GitLogEntry;
+    content: string;
+    isLoading: boolean;
+    error: string | null;
+  } | null>(null);
+  const [worktreeGitLog, setWorktreeGitLog] = useState<GitLogEntry[]>([]);
   const [splitPane, setSplitPane] = useState<SplitPaneState | null>(null);
   const [splitDropHint, setSplitDropHint] = useState<SplitPaneSide | null>(null);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
@@ -331,7 +358,15 @@ export default function EditorPage() {
   const [pendingGoToLine, setPendingGoToLine] = useState(0);
   const [showSidebar, setShowSidebar] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(false);
-  const [showTerminal, setShowTerminal] = useState(false);
+  const [buildActivityTab, setBuildActivityTab] = useState<BuildActivityTab>("score");
+  const [buildActivityCollapsed, setBuildActivityCollapsed] = useState(true);
+  const [terminalMounted, setTerminalMounted] = useState(false);
+  const showTerminal = !buildActivityCollapsed && buildActivityTab === "terminal";
+  const openBuildActivity = useCallback((tab: BuildActivityTab) => {
+    setBuildActivityTab(tab);
+    setBuildActivityCollapsed(false);
+    if (tab === "terminal") setTerminalMounted(true);
+  }, []);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("sidebarWidth");
@@ -342,19 +377,43 @@ export default function EditorPage() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("rightPanelWidth");
-      return saved ? parseInt(saved, 10) : 280;
+      return saved ? parseInt(saved, 10) : 560;
     }
-    return 280;
+    return 560;
   });
+  const [windowWidth, setWindowWidth] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1440,
+  );
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const [resizing, setResizing] = useState<"sidebar" | "right" | "preview" | null>(null);
-  const [sidebarTab, setSidebarTab] = useState<"files" | "outline" | "git">("files");
+  const [workspaceView, setWorkspaceView] = useState<"write" | "agents" | "history">("write");
+  const [showUsageDashboard, setShowUsageDashboard] = useState(false);
+  const [usageTopBarState, setUsageTopBarState] = useState<UsageDashboardTopBarState | null>(null);
+  const [showHomeWorkspace, setShowHomeWorkspace] = useState(false);
+  const [showThreadHistory, setShowThreadHistory] = useState(false);
+  const [checkoutMenuOpen, setCheckoutMenuOpen] = useState(false);
+  const [showCloneDialog, setShowCloneDialog] = useState(false);
+  const [openingThread, setOpeningThread] = useState<ThreadSummary | null>(null);
+  const [worktreeGitStatus, setWorktreeGitStatus] = useState<GitStatus | null>(null);
+  const [pullRequestDraft, setPullRequestDraft] = useState<ThreadSummary | null>(null);
+  const toggleTerminal = useCallback(() => {
+    setWorkspaceView("write");
+    if (showTerminal && workspaceView === "write") setBuildActivityCollapsed(true);
+    else openBuildActivity("terminal");
+  }, [openBuildActivity, showTerminal, workspaceView]);
+  const [showSettledThreads, setShowSettledThreads] = useState(false);
+  const [todayUsageByProvider, setTodayUsageByProvider] = useState<
+    Array<{ providerId: AgentProviderId; tokens: number }>
+  >([]);
+  const [todayCachePercent, setTodayCachePercent] = useState<number | null>(null);
   const [highlightedFile, _setHighlightedFile] = useState<string | null>(null);
 
   const [commitMessage, setCommitMessage] = useState("");
-  const [showCommitInput, setShowCommitInput] = useState(false);
   const [isGeneratingCommitMessageAI, setIsGeneratingCommitMessageAI] = useState(false);
-  const [showRemoteInput, setShowRemoteInput] = useState(false);
-  const [remoteUrl, setRemoteUrl] = useState("");
   const [createDialog, setCreateDialog] = useState<{
     type: "file" | "directory";
   } | null>(null);
@@ -365,6 +424,22 @@ export default function EditorPage() {
   );
 
   const [showLivePreview, setShowLivePreview] = useState(false);
+  const [visualMode, setVisualMode] = useState(false);
+  const [pendingSnippet, setPendingSnippet] = useState<{
+    id: number;
+    before: string;
+    after: string;
+    placeholder?: string;
+  } | null>(null);
+  const snippetCounterRef = useRef(0);
+  const triggerLatexSnippet = useCallback(
+    (before: string, after: string, placeholder?: string) => {
+      if (visualMode) setVisualMode(false);
+      snippetCounterRef.current += 1;
+      setPendingSnippet({ id: snippetCounterRef.current, before, after, placeholder });
+    },
+    [visualMode],
+  );
   const [livePreviewWidth, setLivePreviewWidth] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("livePreviewWidth");
@@ -394,9 +469,139 @@ export default function EditorPage() {
     settings: agentSettings.settings,
     onOpenUsage: handleOpenUsagePopover,
   });
-  const { resolvedTheme, setTheme } = useTheme();
+  const orchestration = useOrchestration(agentSettings.settings);
+  const mergedOrchestrationThreads = useMemo(() => {
+    const byId = new Map<string, ThreadSummary>();
+    for (const thread of orchestration.threads) {
+      byId.set(thread.id, thread);
+    }
+    for (const thread of agent.threads) {
+      byId.set(thread.id, thread);
+    }
+    return Array.from(byId.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [agent.threads, orchestration.threads]);
+  const threadCountsByProject = useMemo(() => {
+    const counts: Record<string, ProjectThreadCounts> = {};
+    for (const thread of mergedOrchestrationThreads) {
+      if (thread.archived) continue;
+      const project = counts[thread.projectPath] ?? {
+        total: 0,
+        running: 0,
+        waiting: 0,
+        providerIds: [],
+      };
+      project.total++;
+      if (thread.status === "running") project.running++;
+      if (thread.status === "waiting_input") project.waiting++;
+      if (!project.providerIds.includes(thread.providerId)) {
+        project.providerIds.push(thread.providerId);
+      }
+      counts[thread.projectPath] = project;
+    }
+    return counts;
+  }, [mergedOrchestrationThreads]);
+  const activeWorkspaceThread =
+    agent.activeThread?.summary.projectPath === daemon.projectPath
+      ? agent.activeThread.summary
+      : null;
+  const activeWorktreePath = activeWorkspaceThread?.workspacePath;
+  const activeThreadBranch = activeWorkspaceThread?.workspaceBranch;
+  const activeWorkspaceThreadId = activeWorkspaceThread?.id;
+  const { loadThread } = agent;
+  const { refreshPullRequest } = orchestration;
+  const activeWorktreePathRef = useRef(activeWorktreePath);
+  activeWorktreePathRef.current = activeWorktreePath;
+  const worktreeStatusRequestIdRef = useRef(0);
+  const refreshWorktreeStatus = useCallback(async () => {
+    const targetDir = activeWorktreePath;
+    if (!targetDir) return;
+    const requestId = ++worktreeStatusRequestIdRef.current;
+    const [status, log] = await Promise.all([
+      invoke<GitStatus>("git_status", { dir: targetDir }),
+      invoke<GitLogEntry[]>("git_log", { dir: targetDir, limit: 30 }).catch(() => []),
+    ]);
+    if (
+      worktreeStatusRequestIdRef.current !== requestId ||
+      activeWorktreePathRef.current !== targetDir
+    ) {
+      return;
+    }
+    setWorktreeGitStatus(status);
+    setWorktreeGitLog(log);
+  }, [activeWorktreePath]);
+
+  useEffect(() => {
+    if (
+      !openingThread ||
+      daemon.isOpeningProject ||
+      openingThread.projectPath !== daemon.projectPath
+    ) {
+      return;
+    }
+    setOpeningThread(null);
+    void loadThread(openingThread.id, openingThread.projectPath).catch((error: unknown) =>
+      toast(String(error), "error"),
+    );
+  }, [daemon.isOpeningProject, daemon.projectPath, loadThread, openingThread, toast]);
+
+  useEffect(() => {
+    if (workspaceView !== "agents" && !(workspaceView === "history" && showThreadHistory)) return;
+    let active = true;
+    const updateStatus = async () => {
+      if (!activeWorktreePath) return;
+      try {
+        const [status, log] = await Promise.all([
+          invoke<GitStatus>("git_status", { dir: activeWorktreePath }),
+          invoke<GitLogEntry[]>("git_log", { dir: activeWorktreePath, limit: 30 }).catch(() => []),
+        ]);
+        if (active) {
+          setWorktreeGitStatus(status);
+          setWorktreeGitLog(log);
+        }
+      } catch {
+        if (active) {
+          setWorktreeGitStatus(null);
+          setWorktreeGitLog([]);
+        }
+      }
+    };
+    setWorktreeGitStatus(null);
+    setWorktreeGitLog([]);
+    void updateStatus();
+    const timer = setInterval(() => void updateStatus(), 10_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [activeWorktreePath, showThreadHistory, workspaceView]);
+
+  useEffect(() => {
+    if (workspaceView !== "agents" || !activeWorkspaceThreadId || !daemon.projectPath) return;
+    void refreshPullRequest({
+      id: activeWorkspaceThreadId,
+      projectPath: daemon.projectPath,
+      workspaceBranch: activeThreadBranch,
+      workspacePath: activeWorktreePath,
+    });
+  }, [
+    activeThreadBranch,
+    activeWorktreePath,
+    activeWorkspaceThreadId,
+    daemon.projectPath,
+    refreshPullRequest,
+    workspaceView,
+  ]);
+
+  const projectThreads = useMemo(
+    () => agent.threads.filter((thread) => !thread.archived),
+    [agent.threads],
+  );
+  const waitingThreads = projectThreads.filter(
+    (thread) => thread.status === "waiting_input",
+  ).length;
+  const runningThreads = projectThreads.filter((thread) => thread.status === "running").length;
+  const [showThemePicker, setShowThemePicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [agentExpanded, setAgentExpanded] = useState(false);
   const [agentDraftInjection, setAgentDraftInjection] = useState<AgentDraftInjection | null>(null);
   const [pendingTerminalCommand, setPendingTerminalCommand] = useState<{
     id: number;
@@ -408,18 +613,87 @@ export default function EditorPage() {
     useState<MainFileDetectionResult | null>(null);
   const [showGitHubPublishDialog, setShowGitHubPublishDialog] = useState(false);
   const [ghPublishError, setGhPublishError] = useState<string | null>(null);
-  const [showSynctexInstallDialog, setShowSynctexInstallDialog] = useState(false);
-  const pendingSynctexRetryRef = useRef<{
-    page: number;
-    x: number;
-    y: number;
-    context: "main" | "split" | "preview";
-  } | null>(null);
-
   const contentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const splitContentSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const savingVisualTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastSaveTimeRef = useRef<{ path: string; time: number } | null>(null);
+  const lastSaveTimesRef = useRef(new Map<string, number>());
+  const pendingSourceWritesRef = useRef<{ primary?: string; split?: string }>({});
+  const shouldIgnoreRenameChangeRef = useRef<((path: string) => boolean) | null>(null);
+  const processedFileChangeRef = useRef(daemon.lastFileChange);
+  const renamePlanRef = useRef<{
+    projectPath: string;
+    oldPath: string;
+    newPath: string;
+    updates: RenameReferenceUpdate[];
+  } | null>(null);
+  const currentProjectRef = useRef(daemon.projectPath);
+  const selectedFileRef = useRef(selectedFile);
+  currentProjectRef.current = daemon.projectPath;
+  selectedFileRef.current = selectedFile;
+  const sourceIsDirty = useCallback(
+    (path: string) => {
+      const pending = pendingSourceWritesRef.current;
+      return pending.primary === path || pending.split === path || path in failedSourceWrites;
+    },
+    [failedSourceWrites],
+  );
+  const rememberSaveResult = useCallback((path: string, content: string, saved: boolean) => {
+    setFailedSourceWrites((previous) => {
+      if (!saved) return { ...previous, [path]: content };
+      if (!(path in previous)) return previous;
+      const next = { ...previous };
+      delete next[path];
+      return next;
+    });
+  }, []);
+  const isLocallyModified = useCallback(
+    (path: string) =>
+      sourceIsDirty(path) || Date.now() - (lastSaveTimesRef.current.get(path) ?? 0) < 750,
+    [sourceIsDirty],
+  );
+  const {
+    edits: attributedEdits,
+    rememberFile: rememberAgentEditFile,
+    markAccepted,
+    markRejected,
+  } = useAgentEdits(daemon.projectPath, projectThreads, daemon.readFile, isLocallyModified);
+  const fileVoiceDots = useMemo(() => {
+    const dots: NonNullable<React.ComponentProps<typeof FileSidebarPanel>["fileVoiceDots"]> = {};
+    for (const edit of attributedEdits) {
+      if (
+        edit.status === "rejected" ||
+        !daemon.projectPath ||
+        !pathsEqual(edit.thread.projectPath, daemon.projectPath)
+      )
+        continue;
+      const thread = projectThreads.find((item) => item.id === edit.thread.id) ?? edit.thread;
+      const entries = dots[edit.filePath] ?? [];
+      const label =
+        agent.providers.find((provider) => provider.id === thread.providerId)?.name ?? thread.title;
+      if (!entries.some((entry) => entry.provider === thread.providerId)) {
+        entries.push({ provider: thread.providerId, label, pulse: thread.status === "running" });
+      }
+      dots[edit.filePath] = entries;
+    }
+    return dots;
+  }, [agent.providers, attributedEdits, daemon.projectPath, projectThreads]);
+  const fileVoiceByPath = useMemo(() => {
+    const map: Record<string, AgentProviderId> = {};
+    for (const [path, entries] of Object.entries(fileVoiceDots)) {
+      const first = entries.find((entry) => entry.provider !== "you");
+      if (!first || first.provider === "you") continue;
+      map[path] = first.provider;
+      if (daemon.projectPath) {
+        const rel = projectRelativePath(daemon.projectPath, path);
+        if (rel) map[rel] = first.provider;
+      }
+    }
+    return map;
+  }, [daemon.projectPath, fileVoiceDots]);
+  const keepAttributedEdit = useCallback(
+    (edit: AttributedEdit) => markAccepted(edit.id),
+    [markAccepted],
+  );
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const gitDiffRequestIdRef = useRef(0);
   const splitLoadRequestIdRef = useRef(0);
@@ -432,14 +706,6 @@ export default function EditorPage() {
   const rafIdRef = useRef<number | null>(null);
 
   const gitStatus = daemon.gitStatus;
-  const stagedChanges = useMemo(
-    () => (gitStatus?.changes ?? []).filter((c: { staged: boolean; path: string }) => c.staged),
-    [gitStatus?.changes],
-  );
-  const unstagedChanges = useMemo(
-    () => (gitStatus?.changes ?? []).filter((c: { staged: boolean; path: string }) => !c.staged),
-    [gitStatus?.changes],
-  );
 
   // LaTeX settings and editor settings
   const latexSettings = useLatexSettings();
@@ -447,18 +713,44 @@ export default function EditorPage() {
 
   // Auto-detect main file when project opens
   useEffect(() => {
-    if (daemon.files.length > 0 && !latexSettings.settings.mainFile) {
+    if (
+      daemon.files.length > 0 &&
+      !texFiles.some(
+        (path) =>
+          latexSettings.settings.mainFile && pathsEqual(path, latexSettings.settings.mainFile),
+      )
+    ) {
       const mainFile = findMainTexFile(daemon.files);
-      if (mainFile) {
+      if (mainFile !== latexSettings.settings.mainFile) {
         latexSettings.setMainFile(mainFile);
       }
     }
-  }, [daemon.files, latexSettings.settings.mainFile, latexSettings]);
+  }, [daemon.files, latexSettings.settings.mainFile, latexSettings, texFiles]);
+
+  const score = useScore(
+    daemon.projectPath,
+    agent.threads,
+    workspaceView === "write" &&
+      !buildActivityCollapsed &&
+      buildActivityTab === "score" &&
+      !showHomeWorkspace &&
+      !showUsageDashboard,
+  );
 
   const latexCompiler = useLatexCompiler({
     settings: latexSettings.settings,
     projectPath: daemon.projectPath,
+    onCompileStart: (mainFile) => score.recordUser("compile", mainFile),
   });
+  const staleAgentEdits = latexCompiler.pdfPath
+    ? attributedEdits.filter(
+        (edit) =>
+          daemon.projectPath &&
+          pathsEqual(edit.thread.projectPath, daemon.projectPath) &&
+          edit.status !== "rejected" &&
+          edit.observedAt > (latexCompiler.lastPdfBuildStartedAt ?? 0),
+      ).length
+    : 0;
 
   // Check if any LaTeX compiler is available
   const hasAnyCompiler =
@@ -469,6 +761,82 @@ export default function EditorPage() {
       latexCompiler.compilersStatus.latexmk.available ||
       latexCompiler.compilersStatus.tectonic.available);
 
+  const undoAttributedEdit = useCallback(
+    async (edit: AttributedEdit) => {
+      const projectPath = daemon.projectPath;
+      if (
+        edit.status !== "pending" ||
+        !projectPath ||
+        !pathsEqual(edit.thread.projectPath, projectPath)
+      )
+        return;
+      if (sourceIsDirty(edit.filePath)) {
+        toast("Save your current changes before undoing this edit.", "error");
+        return;
+      }
+      try {
+        await daemon.writeFileIfUnchanged(edit.filePath, edit.after, edit.before);
+        if (currentProjectRef.current !== projectPath) return;
+        lastSaveTimesRef.current.set(edit.filePath, Date.now());
+        markRejected(edit.id);
+        rememberAgentEditFile(edit.filePath, edit.before, projectPath);
+        if (selectedFileRef.current === edit.filePath) {
+          setFileContent((current) => (current === edit.after ? edit.before : current));
+        }
+        setSplitPane((current) =>
+          current?.selectedFile === edit.filePath && current.content === edit.after
+            ? { ...current, content: edit.before }
+            : current,
+        );
+        if (hasAnyCompiler && latexSettings.settings.mainFile) {
+          latexCompiler.scheduleAutoCompile({
+            directory: projectPath,
+            mainFile: latexSettings.settings.mainFile,
+          });
+        }
+      } catch (error) {
+        toast(String(error), "error");
+      }
+    },
+    [
+      daemon.projectPath,
+      daemon.writeFileIfUnchanged,
+      hasAnyCompiler,
+      latexCompiler,
+      latexSettings.settings.mainFile,
+      markRejected,
+      rememberAgentEditFile,
+      sourceIsDirty,
+      toast,
+    ],
+  );
+
+  const threePaneAgentWidth = Math.min(Math.max(rightPanelWidth, 330), 360);
+  const threePanePdfWidth = Math.min(livePreviewWidth, 420);
+  const threePaneChromeBudget = (showSidebar ? sidebarWidth + 14 : 0) + 48;
+  const canFitThreePanes =
+    windowWidth >= threePaneChromeBudget + 360 + threePaneAgentWidth + threePanePdfWidth;
+  const showLivePreviewEffective = showLivePreview && (!showRightPanel || canFitThreePanes);
+  const openPdfPreview = useCallback(() => {
+    if (showRightPanel && !canFitThreePanes) {
+      setShowRightPanel(false);
+    }
+    setShowLivePreview(true);
+  }, [canFitThreePanes, showRightPanel]);
+  const togglePdfPreview = useCallback(() => {
+    if (showLivePreviewEffective) {
+      setShowLivePreview(false);
+    } else {
+      openPdfPreview();
+    }
+  }, [openPdfPreview, showLivePreviewEffective]);
+  const openDockedAgentPanel = useCallback(() => {
+    setShowRightPanel(true);
+    if (windowWidth < 1600) {
+      setShowLivePreview(false);
+    }
+  }, [windowWidth]);
+
   const executeLocalCompile = useCallback(
     async (mainFile: string) => {
       if (!daemon.projectPath) return;
@@ -476,7 +844,7 @@ export default function EditorPage() {
         toast("No LaTeX compiler detected. Install TinyTeX, Tectonic, or TeX Live below.", "error");
         return;
       }
-      setShowLivePreview(true);
+      openPdfPreview();
       const res = await latexCompiler.compile({
         directory: daemon.projectPath,
         mainFile,
@@ -491,7 +859,7 @@ export default function EditorPage() {
         }
       }
     },
-    [daemon.projectPath, hasAnyCompiler, latexCompiler, toast],
+    [daemon.projectPath, hasAnyCompiler, latexCompiler, openPdfPreview, toast],
   );
 
   // Handle compile with main file detection
@@ -540,8 +908,12 @@ export default function EditorPage() {
   }, []);
 
   const handleToggleRightPanel = useCallback(() => {
-    setShowRightPanel((prev) => !prev);
-  }, []);
+    if (showRightPanel) {
+      setShowRightPanel(false);
+    } else {
+      openDockedAgentPanel();
+    }
+  }, [openDockedAgentPanel, showRightPanel]);
 
   useEffect(() => {
     localStorage.setItem("sidebarWidth", String(sidebarWidth));
@@ -563,12 +935,24 @@ export default function EditorPage() {
   }, [pendingGoToLine]);
 
   useEffect(() => {
+    setOpenTabs([]);
+    setSelectedFile(undefined);
+    setFileContent("");
+    setBinaryPreviewUrl(null);
+    setSplitPane(null);
+    setEditorViewMode("file");
+    setShowThreadHistory(false);
+    setFailedSourceWrites({});
+    setRecentRenames([]);
+    const timers = [contentSaveTimeoutRef, splitContentSaveTimeoutRef, savingVisualTimeoutRef];
+    for (const timer of timers) {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+    }
+    pendingSourceWritesRef.current = {};
+    lastSaveTimesRef.current.clear();
+    setIsSaving(false);
     if (!daemon.projectPath) {
-      if (splitContentSaveTimeoutRef.current) {
-        clearTimeout(splitContentSaveTimeoutRef.current);
-        splitContentSaveTimeoutRef.current = null;
-      }
-      setSplitPane(null);
       setShowLivePreview(false);
       setBibEntries([]);
       setTexLabels([]);
@@ -576,7 +960,10 @@ export default function EditorPage() {
   }, [daemon.projectPath]);
 
   useEffect(() => {
-    setShowTerminal(Boolean(daemon.projectPath));
+    void daemon.projectPath;
+    setTerminalMounted(false);
+    setBuildActivityTab("score");
+    setBuildActivityCollapsed(true);
   }, [daemon.projectPath]);
 
   useEffect(() => {
@@ -602,13 +989,13 @@ export default function EditorPage() {
         Promise.all(
           bibPaths.map(async (p) => ({
             file: p,
-            content: (await daemonReadFile(p).catch(() => null)) ?? "",
+            content: await daemonReadFile(p).catch(() => null),
           })),
         ),
         Promise.all(
           texPaths.map(async (p) => ({
             file: p,
-            content: (await daemonReadFile(p).catch(() => null)) ?? "",
+            content: await daemonReadFile(p).catch(() => null),
           })),
         ),
       ]);
@@ -616,10 +1003,14 @@ export default function EditorPage() {
 
       const parsedBibs: BibEntry[] = [];
       for (const item of bibContents) {
+        if (item.content === null) continue;
+        rememberAgentEditFile(item.file, item.content, projectRoot, true);
         parsedBibs.push(...parseBibTeXEntries(item.content, item.file));
       }
       const parsedLabels: LabelEntry[] = [];
       for (const item of texContents) {
+        if (item.content === null) continue;
+        rememberAgentEditFile(item.file, item.content, projectRoot, true);
         parsedLabels.push(...parseLatexLabels(item.content, item.file));
       }
       setBibEntries(parsedBibs);
@@ -629,7 +1020,7 @@ export default function EditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [daemon.projectPath, daemon.files, daemonReadFile]);
+  }, [daemon.projectPath, daemon.files, daemonReadFile, rememberAgentEditFile]);
 
   // Debounced body word count & outline source for active TeX file
   useEffect(() => {
@@ -699,20 +1090,6 @@ export default function EditorPage() {
     document.documentElement.style.removeProperty("--right-panel-width");
     document.documentElement.style.removeProperty("--preview-panel-width");
     setResizing(null);
-  }, []);
-
-  useEffect(() => {
-    const COMPACT_THRESHOLD = 1100;
-
-    const handleResize = throttle(() => {
-      if (window.innerWidth < COMPACT_THRESHOLD) {
-        setShowRightPanel(false);
-      }
-    }, 100);
-
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   const getFileType = useCallback((path: string): "text" | "image" | "pdf" => {
@@ -816,6 +1193,7 @@ export default function EditorPage() {
         if (prev.includes(resolvedPath)) return prev;
         return [...prev, resolvedPath];
       });
+      selectedFileRef.current = resolvedPath;
       setSelectedFile(resolvedPath);
       setBinaryPreviewUrl(null);
 
@@ -823,7 +1201,13 @@ export default function EditorPage() {
         setIsLoadingFile(true);
         try {
           const content = await daemon.readFile(resolvedPath);
-          setFileContent(content ?? "");
+          if (
+            currentProjectRef.current !== daemon.projectPath ||
+            selectedFileRef.current !== resolvedPath
+          )
+            return;
+          if (content !== null) rememberAgentEditFile(resolvedPath, content, daemon.projectPath);
+          setFileContent(failedSourceWrites[resolvedPath] ?? content ?? "");
         } catch (err) {
           const errorStr = String(err);
 
@@ -867,17 +1251,11 @@ export default function EditorPage() {
         setFileContent("");
       }
     },
-    [daemon, getFileType, resolveSelectablePath, toast],
+    [daemon, failedSourceWrites, getFileType, rememberAgentEditFile, resolveSelectablePath, toast],
   );
 
   const runInverseSynctex = useCallback(
-    async (
-      pdfPath: string,
-      page: number,
-      x: number,
-      y: number,
-      context: "main" | "split" | "preview",
-    ) => {
+    async (pdfPath: string, page: number, x: number, y: number) => {
       if (!daemon.projectPath) return;
       try {
         const result = await invoke<SynctexResult>("latex_synctex_edit", {
@@ -894,24 +1272,16 @@ export default function EditorPage() {
             .replace(/\/+/g, "/");
 
         const normalFile = normalize(result.file);
-        const normalProject = normalize(daemon.projectPath);
-
-        let resolvedFile = normalFile;
-        if (resolvedFile.startsWith(normalProject)) {
-          resolvedFile = resolvedFile.slice(normalProject.length).replace(/^\/+/, "");
-        }
+        const projectPrefix = `${normalize(daemon.projectPath).replace(/\/$/, "")}/`;
+        const resolvedFile = normalFile.startsWith(projectPrefix)
+          ? normalFile.slice(projectPrefix.length)
+          : normalFile;
 
         await handleFileSelect(resolvedFile);
         setPendingGoToLine(result.line);
       } catch (err) {
-        const errorStr = String(err);
-        if (errorStr.includes("SYNCTEX_NOT_INSTALLED")) {
-          pendingSynctexRetryRef.current = { page, x, y, context };
-          setShowSynctexInstallDialog(true);
-        } else {
-          console.error("SyncTeX lookup failed:", err);
-          toast("SyncTeX lookup failed. Check that your PDF has a .synctex.gz file.", "error");
-        }
+        console.error("SyncTeX lookup failed:", err);
+        toast("Could not find a source location for this PDF position.", "error");
       }
     },
     [daemon.projectPath, handleFileSelect, toast],
@@ -921,7 +1291,7 @@ export default function EditorPage() {
     (page: number, x: number, y: number) => {
       if (!daemon.projectPath || !selectedFile) return;
       const pdfPath = pathSync.join(daemon.projectPath, selectedFile);
-      void runInverseSynctex(pdfPath, page, x, y, "main");
+      void runInverseSynctex(pdfPath, page, x, y);
     },
     [daemon.projectPath, runInverseSynctex, selectedFile],
   );
@@ -930,7 +1300,7 @@ export default function EditorPage() {
     (page: number, x: number, y: number) => {
       if (!daemon.projectPath || !splitPane?.selectedFile) return;
       const pdfPath = pathSync.join(daemon.projectPath, splitPane.selectedFile);
-      void runInverseSynctex(pdfPath, page, x, y, "split");
+      void runInverseSynctex(pdfPath, page, x, y);
     },
     [daemon.projectPath, runInverseSynctex, splitPane?.selectedFile],
   );
@@ -938,7 +1308,7 @@ export default function EditorPage() {
   const handleLivePreviewSynctexClick = useCallback(
     (page: number, x: number, y: number) => {
       if (!latexCompiler.pdfPath) return;
-      void runInverseSynctex(latexCompiler.pdfPath, page, x, y, "preview");
+      void runInverseSynctex(latexCompiler.pdfPath, page, x, y);
     },
     [latexCompiler.pdfPath, runInverseSynctex],
   );
@@ -965,7 +1335,7 @@ export default function EditorPage() {
           line: line ?? cursorPosition.line,
           column: column ?? cursorPosition.column,
         });
-        setShowLivePreview(true);
+        openPdfPreview();
         setPdfHighlightTarget({
           page: res.page,
           x: res.h,
@@ -975,12 +1345,8 @@ export default function EditorPage() {
           nonce: Date.now(),
         });
       } catch (err) {
-        const errorStr = String(err);
-        if (errorStr.includes("SYNCTEX_NOT_INSTALLED")) {
-          setShowSynctexInstallDialog(true);
-        } else {
-          toast("Could not resolve PDF location for this source line.", "error");
-        }
+        console.error("SyncTeX lookup failed:", err);
+        toast("Could not resolve PDF location for this source line.", "error");
       }
     },
     [
@@ -989,34 +1355,134 @@ export default function EditorPage() {
       daemon.projectPath,
       latexCompiler,
       latexSettings.settings.mainFile,
+      openPdfPreview,
       selectedFile,
       toast,
     ],
   );
 
-  const handleSynctexInstallComplete = useCallback(() => {
-    setShowSynctexInstallDialog(false);
-    const pending = pendingSynctexRetryRef.current;
-    if (pending) {
-      pendingSynctexRetryRef.current = null;
-      setTimeout(() => {
-        if (pending.context === "main") {
-          handleSynctexClick(pending.page, pending.x, pending.y);
-        } else if (pending.context === "preview") {
-          handleLivePreviewSynctexClick(pending.page, pending.x, pending.y);
-        } else {
-          handleSplitSynctexClick(pending.page, pending.x, pending.y);
-        }
-      }, 500);
-    }
-  }, [handleLivePreviewSynctexClick, handleSplitSynctexClick, handleSynctexClick]);
+  const historyDiffRequestIdRef = useRef(0);
+  const historyCommitRequestIdRef = useRef(0);
 
-  const loadGitDiffPreview = useCallback(
+  const isViewingWorktreeHistory = Boolean(showThreadHistory && activeWorktreePath);
+  const activeHistoryDir = isViewingWorktreeHistory ? activeWorktreePath : daemon.projectPath;
+  const activeHistoryGitStatus = isViewingWorktreeHistory ? worktreeGitStatus : gitStatus;
+  const activeHistoryStagedChanges = useMemo(
+    () => (activeHistoryGitStatus?.changes ?? []).filter((c) => c.staged),
+    [activeHistoryGitStatus?.changes],
+  );
+  const activeHistoryUnstagedChanges = useMemo(
+    () => (activeHistoryGitStatus?.changes ?? []).filter((c) => !c.staged),
+    [activeHistoryGitStatus?.changes],
+  );
+  const uniqueHistoryChangeCount = useMemo(
+    () => new Set((activeHistoryGitStatus?.changes ?? []).map((c) => c.path)).size,
+    [activeHistoryGitStatus?.changes],
+  );
+
+  useEffect(() => {
+    void activeHistoryDir;
+    gitDiffRequestIdRef.current += 1;
+    historyDiffRequestIdRef.current += 1;
+    historyCommitRequestIdRef.current += 1;
+    setGitDiffPreview(null);
+    setHistoryDiffPreview(null);
+    setSelectedHistoryCommit(null);
+    setHistoryCommitDiff(null);
+    setEditorViewMode("file");
+  }, [activeHistoryDir]);
+
+  const handlePreviewHistoryFileDiff = useCallback(
     async (path: string, staged: boolean) => {
-      const requestId = gitDiffRequestIdRef.current + 1;
-      gitDiffRequestIdRef.current = requestId;
+      if (!activeHistoryDir) return;
+      const requestId = historyDiffRequestIdRef.current + 1;
+      historyDiffRequestIdRef.current = requestId;
+      historyCommitRequestIdRef.current += 1;
+      setSelectedHistoryCommit(null);
+      setHistoryCommitDiff(null);
+      setHistoryDiffPreview({
+        path,
+        staged,
+        content: "",
+        isLoading: true,
+        error: null,
+      });
+      try {
+        const content = isViewingWorktreeHistory
+          ? await invoke<string>("git_diff", { dir: activeHistoryDir, file: path, staged })
+          : await daemon.gitDiff(path, staged);
+        if (historyDiffRequestIdRef.current !== requestId) return;
+        setHistoryDiffPreview({
+          path,
+          staged,
+          content,
+          isLoading: false,
+          error: null,
+        });
+      } catch (error) {
+        if (historyDiffRequestIdRef.current !== requestId) return;
+        setHistoryDiffPreview({
+          path,
+          staged,
+          content: "",
+          isLoading: false,
+          error: String(error),
+        });
+      }
+    },
+    [activeHistoryDir, daemon, isViewingWorktreeHistory],
+  );
 
-      setGitDiffPreview({
+  const handleSelectHistoryCommit = useCallback(
+    async (entry: GitLogEntry) => {
+      if (!activeHistoryDir) return;
+      const requestId = historyCommitRequestIdRef.current + 1;
+      historyCommitRequestIdRef.current = requestId;
+      historyDiffRequestIdRef.current += 1;
+      setHistoryDiffPreview(null);
+      setSelectedHistoryCommit(entry);
+      setHistoryCommitDiff({
+        entry,
+        content: "",
+        isLoading: true,
+        error: null,
+      });
+      try {
+        const content = await invoke<string>("git_commit_diff", {
+          dir: activeHistoryDir,
+          hash: entry.hash,
+        });
+        if (historyCommitRequestIdRef.current !== requestId) return;
+        setHistoryCommitDiff({
+          entry,
+          content,
+          isLoading: false,
+          error: null,
+        });
+      } catch (error) {
+        if (historyCommitRequestIdRef.current !== requestId) return;
+        setHistoryCommitDiff({
+          entry,
+          content: "",
+          isLoading: false,
+          error: String(error),
+        });
+      }
+    },
+    [activeHistoryDir],
+  );
+
+  const loadDiffPreview = useCallback(
+    async (
+      path: string,
+      staged: boolean,
+      requestIdRef: React.MutableRefObject<number>,
+      setPreview: React.Dispatch<React.SetStateAction<GitDiffPreviewState | null>>,
+    ) => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+
+      setPreview({
         path,
         staged,
         content: "",
@@ -1026,8 +1492,8 @@ export default function EditorPage() {
 
       try {
         const content = await daemon.gitDiff(path, staged);
-        if (gitDiffRequestIdRef.current !== requestId) return;
-        setGitDiffPreview({
+        if (requestIdRef.current !== requestId) return;
+        setPreview({
           path,
           staged,
           content,
@@ -1035,8 +1501,8 @@ export default function EditorPage() {
           error: null,
         });
       } catch (error) {
-        if (gitDiffRequestIdRef.current !== requestId) return;
-        setGitDiffPreview({
+        if (requestIdRef.current !== requestId) return;
+        setPreview({
           path,
           staged,
           content: "",
@@ -1048,7 +1514,13 @@ export default function EditorPage() {
     [daemon],
   );
 
-  const handlePreviewGitDiff = useCallback(
+  const loadGitDiffPreview = useCallback(
+    (path: string, staged: boolean) =>
+      loadDiffPreview(path, staged, gitDiffRequestIdRef, setGitDiffPreview),
+    [loadDiffPreview],
+  );
+
+  const _handlePreviewGitDiff = useCallback(
     async (path: string, staged: boolean) => {
       setOpenTabs((prev) => {
         if (prev.includes(path)) return prev;
@@ -1070,9 +1542,11 @@ export default function EditorPage() {
 
   // Handle file changes - deletion and external modifications
   useEffect(() => {
-    if (!daemon.lastFileChange) return;
+    if (!daemon.lastFileChange || processedFileChangeRef.current === daemon.lastFileChange) return;
+    processedFileChangeRef.current = daemon.lastFileChange;
 
     const { path, kind } = daemon.lastFileChange;
+    if (shouldIgnoreRenameChangeRef.current?.(path)) return;
 
     if (kind === "remove") {
       if (splitPane?.openTabs.includes(path)) {
@@ -1102,35 +1576,25 @@ export default function EditorPage() {
 
         return newTabs;
       });
-    } else if (kind === "modify") {
-      // Reload file content if the currently selected file was modified externally
-      // Skip if this was our own save (within 2 seconds)
-      const lastSave = lastSaveTimeRef.current;
-      const isOurSave = lastSave && lastSave.path === path && Date.now() - lastSave.time < 2000;
-
-      if (path === selectedFile && !isOurSave) {
+    } else if (mayHaveNewContents(kind) && !isLocallyModified(path)) {
+      const projectPath = daemon.projectPath;
+      const reloadPrimary = path === selectedFile && getFileType(path) === "text";
+      const reloadSplit = path === splitPane?.selectedFile && !splitPane.binaryPreviewUrl;
+      if (reloadPrimary || reloadSplit) {
         daemon
           .readFile(path)
           .then((content) => {
-            if (content !== null) {
+            if (
+              content === null ||
+              currentProjectRef.current !== projectPath ||
+              isLocallyModified(path)
+            ) {
+              return;
+            }
+            if (reloadPrimary && selectedFileRef.current === path) {
               setFileContent(content);
             }
-          })
-          .catch((err) => {
-            console.error("Failed to reload modified file:", err);
-          });
-      }
-
-      if (
-        splitPane &&
-        path === splitPane.selectedFile &&
-        !splitPane.binaryPreviewUrl &&
-        !isOurSave
-      ) {
-        daemon
-          .readFile(path)
-          .then((content) => {
-            if (content !== null) {
+            if (reloadSplit) {
               setSplitPane((prev) => {
                 if (!prev || prev.selectedFile !== path) return prev;
                 return {
@@ -1142,7 +1606,7 @@ export default function EditorPage() {
             }
           })
           .catch((err) => {
-            console.error("Failed to reload modified split file:", err);
+            console.error("Failed to reload changed file:", err);
           });
       }
       // Trigger OverLeaf auto-compile on external TeX/Bib edits (e.g. by AI agent or git)
@@ -1150,7 +1614,6 @@ export default function EditorPage() {
         daemon.projectPath &&
         latexSettings.settings.mainFile &&
         hasAnyCompiler &&
-        !isOurSave &&
         /\.(tex|bib|sty|cls)$/i.test(path)
       ) {
         latexCompiler.scheduleAutoCompile({
@@ -1166,7 +1629,9 @@ export default function EditorPage() {
     latexCompiler,
     latexSettings.settings.mainFile,
     selectedFile,
+    getFileType,
     handleFileSelect,
+    isLocallyModified,
     daemon,
     splitPane,
   ]);
@@ -1273,6 +1738,7 @@ export default function EditorPage() {
       clearTimeout(splitContentSaveTimeoutRef.current);
       splitContentSaveTimeoutRef.current = null;
     }
+    pendingSourceWritesRef.current.split = undefined;
     setSplitPane(null);
   }, []);
 
@@ -1339,12 +1805,13 @@ export default function EditorPage() {
         try {
           const content = await daemon.readFile(resolvedPath);
           if (splitLoadRequestIdRef.current !== requestId) return;
+          if (content !== null) rememberAgentEditFile(resolvedPath, content, daemon.projectPath);
           setSplitPane((prev) => {
             if (!prev || prev.selectedFile !== resolvedPath) return prev;
             return {
               ...prev,
               side,
-              content: content ?? "",
+              content: failedSourceWrites[resolvedPath] ?? content ?? "",
               isLoading: false,
               error: null,
               binaryPreviewUrl: null,
@@ -1399,7 +1866,16 @@ export default function EditorPage() {
         };
       });
     },
-    [daemon, getFileType, resolveSelectablePath, toast, selectedFile, handleFileSelect],
+    [
+      daemon,
+      failedSourceWrites,
+      getFileType,
+      resolveSelectablePath,
+      toast,
+      selectedFile,
+      handleFileSelect,
+      rememberAgentEditFile,
+    ],
   );
 
   const handleSplitContentChange = useCallback(
@@ -1418,11 +1894,16 @@ export default function EditorPage() {
 
       const fileToSave = splitPane?.selectedFile;
       if (!fileToSave) return;
+      pendingSourceWritesRef.current.split = fileToSave;
 
-      splitContentSaveTimeoutRef.current = setTimeout(async () => {
+      const timer = setTimeout(async () => {
+        let saved = false;
         try {
-          await daemon.writeFile(fileToSave, content);
-          lastSaveTimeRef.current = { path: fileToSave, time: Date.now() };
+          saved = await daemon.writeFile(fileToSave, content);
+          if (!saved || currentProjectRef.current !== daemon.projectPath) return;
+          lastSaveTimesRef.current.set(fileToSave, Date.now());
+          rememberAgentEditFile(fileToSave, content, daemon.projectPath);
+          score.recordUser("edit", fileToSave);
           if (
             daemon.projectPath &&
             latexSettings.settings.mainFile &&
@@ -1436,14 +1917,26 @@ export default function EditorPage() {
           }
         } catch (error) {
           console.error("Failed to save split pane file:", error);
+        } finally {
+          if (splitContentSaveTimeoutRef.current === timer) {
+            splitContentSaveTimeoutRef.current = null;
+            pendingSourceWritesRef.current.split = undefined;
+            if (currentProjectRef.current === daemon.projectPath) {
+              rememberSaveResult(fileToSave, content, saved);
+            }
+          }
         }
       }, 500);
+      splitContentSaveTimeoutRef.current = timer;
     },
     [
       daemon,
       hasAnyCompiler,
       latexCompiler,
       latexSettings.settings.mainFile,
+      rememberAgentEditFile,
+      rememberSaveResult,
+      score.recordUser,
       splitPane?.selectedFile,
     ],
   );
@@ -1702,8 +2195,9 @@ export default function EditorPage() {
         id: path,
         label: pathSync.basename(path),
         title: path,
+        voiceDot: fileVoiceDots[path]?.[0],
       })) ?? [],
-    [splitPane?.openTabs],
+    [fileVoiceDots, splitPane?.openTabs],
   );
 
   const renderSplitPane = useCallback(
@@ -1778,6 +2272,14 @@ export default function EditorPage() {
                   onContentChange={handleSplitContentChange}
                   language={getFileLanguage(splitSelectedFile)}
                   filePath={splitSelectedFile}
+                  attributedEdits={attributedEdits.filter(
+                    (edit) =>
+                      edit.status !== "rejected" &&
+                      edit.filePath === splitSelectedFile &&
+                      edit.after === splitPane.content,
+                  )}
+                  onKeepEdit={keepAttributedEdit}
+                  onUndoEdit={undoAttributedEdit}
                   bibEntries={bibEntries}
                   texLabels={texLabels}
                   onCompileShortcut={() => {
@@ -1794,6 +2296,9 @@ export default function EditorPage() {
       );
     },
     [
+      attributedEdits,
+      keepAttributedEdit,
+      undoAttributedEdit,
       splitPane,
       getFileType,
       closeSplitPane,
@@ -1824,23 +2329,76 @@ export default function EditorPage() {
         id: path,
         label: pathSync.basename(path),
         title: path,
+        voiceDot: fileVoiceDots[path]?.[0],
       })),
-    [openTabs],
+    [fileVoiceDots, openTabs],
   );
 
-  // Sidebar tabs configuration
-  const sidebarTabs = useMemo(
-    (): TabItem[] => [
-      { id: "files", label: "Files" },
-      { id: "outline", label: "Outline" },
-      {
-        id: "git",
-        label: "Git",
-        badge: gitStatus && gitStatus.changes.length > 0 ? gitStatus.changes.length : undefined,
-      },
-    ],
-    [gitStatus],
-  );
+  useEffect(() => {
+    let cancelled = false;
+    const { startMs, endMs } = computeDateRange("today");
+    void queryUsageLog({
+      startMs,
+      endMs,
+      projectPath: daemon.projectPath ?? undefined,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setTodayUsageByProvider(
+          res.byProvider
+            .filter((entry) => (entry.summary.inputTokens ?? 0) > 0)
+            .map((entry) => ({
+              providerId: entry.provider,
+              tokens: entry.summary.inputTokens ?? 0,
+            })),
+        );
+        setTodayCachePercent(
+          res.total.cacheShare != null ? Math.round(res.total.cacheShare * 100) : null,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTodayUsageByProvider([]);
+          setTodayCachePercent(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [daemon.projectPath]);
+
+  const gitStatusByPath = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (!gitStatus?.changes) return map;
+    for (const change of gitStatus.changes) {
+      const normalized = change.path.replace(/\\/g, "/").replace(/^\.\//, "");
+      const code =
+        change.status === "conflict"
+          ? "!"
+          : change.status === "modified"
+            ? "M"
+            : change.status === "added"
+              ? "A"
+              : change.status === "deleted"
+                ? "D"
+                : change.status === "renamed"
+                  ? "R"
+                  : "?";
+      map[normalized] = code;
+    }
+    return map;
+  }, [gitStatus]);
+
+  const errorCountByPath = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const diag of latexCompiler.diagnostics) {
+      if (diag.severity === "error" && diag.file) {
+        const normalized = diag.file.replace(/\\/g, "/").replace(/^\.\//, "");
+        map[normalized] = (map[normalized] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [latexCompiler.diagnostics]);
 
   const handleContentChange = useCallback(
     (content: string) => {
@@ -1859,12 +2417,20 @@ export default function EditorPage() {
       }
 
       const fileToSave = selectedFile;
-      contentSaveTimeoutRef.current = setTimeout(async () => {
+      pendingSourceWritesRef.current.primary = fileToSave;
+      const timer = setTimeout(async () => {
+        let saved = false;
         if (fileToSave) {
           try {
-            await daemon.writeFile(fileToSave, content);
-            lastSaveTimeRef.current = { path: fileToSave, time: Date.now() };
+            saved = await daemon.writeFile(fileToSave, content);
+            if (saved && currentProjectRef.current === daemon.projectPath) {
+              lastSaveTimesRef.current.set(fileToSave, Date.now());
+              rememberAgentEditFile(fileToSave, content, daemon.projectPath);
+              score.recordUser("edit", fileToSave);
+            }
             if (
+              saved &&
+              currentProjectRef.current === daemon.projectPath &&
               daemon.projectPath &&
               latexSettings.settings.mainFile &&
               hasAnyCompiler &&
@@ -1879,14 +2445,30 @@ export default function EditorPage() {
             console.error("Failed to save file:", error);
           }
         }
+        if (contentSaveTimeoutRef.current !== timer) return;
+        contentSaveTimeoutRef.current = null;
+        pendingSourceWritesRef.current.primary = undefined;
+        if (fileToSave && currentProjectRef.current === daemon.projectPath) {
+          rememberSaveResult(fileToSave, content, saved);
+        }
         if (savingVisualTimeoutRef.current) {
           clearTimeout(savingVisualTimeoutRef.current);
           savingVisualTimeoutRef.current = null;
         }
         setIsSaving(false);
       }, 500);
+      contentSaveTimeoutRef.current = timer;
     },
-    [selectedFile, daemon, hasAnyCompiler, latexCompiler, latexSettings.settings.mainFile],
+    [
+      selectedFile,
+      daemon,
+      hasAnyCompiler,
+      latexCompiler,
+      latexSettings.settings.mainFile,
+      rememberAgentEditFile,
+      rememberSaveResult,
+      score.recordUser,
+    ],
   );
 
   const handleOpenFolder = useCallback(async () => {
@@ -1899,72 +2481,403 @@ export default function EditorPage() {
       });
 
       if (selected && typeof selected === "string") {
+        if (
+          selected !== daemon.projectPath &&
+          (Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+            Object.keys(failedSourceWrites).length)
+        ) {
+          throw new Error("Wait for the editor to finish saving");
+        }
         await daemon.setProject(selected);
         await recentProjects.addProject(selected);
+        setShowHomeWorkspace(false);
         setShowSidebar(true);
         setShowRightPanel(true);
       }
     } catch (err) {
       console.error("Failed to open project:", err);
+      toast(String(err), "error");
     }
-  }, [daemon, recentProjects]);
+  }, [daemon, failedSourceWrites, recentProjects, toast]);
+
+  const retrySourceSave = async (path: string, content: string) => {
+    if (Object.values(pendingSourceWritesRef.current).includes(path)) return;
+    const projectPath = daemon.projectPath;
+    try {
+      if (!(await daemon.writeFile(path, content))) return;
+      if (currentProjectRef.current !== projectPath) return;
+      lastSaveTimesRef.current.set(path, Date.now());
+      rememberAgentEditFile(path, content, projectPath);
+      rememberSaveResult(path, content, true);
+      score.recordUser("edit", path);
+      if (
+        projectPath &&
+        hasAnyCompiler &&
+        latexSettings.settings.mainFile &&
+        /\.(tex|bib|sty|cls)$/i.test(path)
+      ) {
+        latexCompiler.scheduleAutoCompile({
+          directory: projectPath,
+          mainFile: latexSettings.settings.mainFile,
+        });
+      }
+    } catch (error) {
+      toast(String(error), "error");
+    }
+  };
 
   const handleOpenRecentProject = useCallback(
     async (path: string) => {
+      if (
+        path !== daemon.projectPath &&
+        (Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+          Object.keys(failedSourceWrites).length)
+      ) {
+        toast("Wait for the editor to finish saving", "error");
+        return false;
+      }
       try {
-        await daemon.setProject(path);
+        if (path !== daemon.projectPath) await daemon.setProject(path);
         await recentProjects.addProject(path);
+        setShowHomeWorkspace(false);
         setShowSidebar(true);
         setShowRightPanel(true);
+        return true;
       } catch (err) {
         console.error("Failed to open project:", err);
-        toast("Failed to open project", "error");
-        recentProjects.removeProject(path);
+        toast(String(err), "error");
+        return false;
       }
     },
-    [daemon, recentProjects, toast],
+    [daemon, failedSourceWrites, recentProjects, toast],
   );
 
-  const handleStageAll = useCallback(() => {
-    if (!gitStatus) return;
-    const unstaged = gitStatus.changes
-      .filter((c: { staged: boolean }) => !c.staged)
-      .map((c: { path: string }) => c.path);
-    if (unstaged.length > 0) {
-      daemon.gitAdd(unstaged);
+  const handleNewLatexProject = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const directory = await open({ directory: true, title: "Choose a folder for the project" });
+      if (typeof directory !== "string") return;
+      await invoke("create_latex_project", { directory });
+      setWorkspaceView("write");
+      await handleOpenRecentProject(directory);
+    } catch (error) {
+      toast(String(error), "error");
     }
-  }, [gitStatus, daemon]);
+  };
+
+  const handleCloneProject = async (url: string) => {
+    setShowCloneDialog(false);
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const directory = await save({ title: "Choose a location for the cloned project" });
+      if (!directory) return;
+      const path = await invoke<string>("git_clone", { url: url.trim(), directory });
+      setWorkspaceView("write");
+      await handleOpenRecentProject(path);
+    } catch (error) {
+      toast(String(error), "error");
+    }
+  };
+
+  const handlePlanRename = useCallback(
+    async (node: FileNode, newPath: string) => {
+      renamePlanRef.current = null;
+      const projectPath = daemon.projectPath;
+      if (!projectPath || (node.type === "file" && !/\.tex$/i.test(node.path))) return 0;
+
+      const files = await Promise.all(
+        texFiles.map(async (path) => ({ path, content: await daemon.readFile(path) })),
+      );
+      if (currentProjectRef.current !== projectPath) throw new Error("The active project changed");
+      const sourceFiles = files.flatMap(({ path, content }) =>
+        content === null ? [] : [{ path, content }],
+      );
+      const edits = planRenameReferences({
+        oldPath: node.path,
+        newPath,
+        isDirectory: node.type === "directory",
+        projectRoot: projectPath,
+        mainFile: latexSettings.settings.mainFile,
+        files: sourceFiles,
+      });
+      const originalByPath = new Map(sourceFiles.map((file) => [file.path, file.content]));
+      const updatesByPath = new Map<string, RenameReferenceUpdate>();
+      for (const edit of edits.reverse()) {
+        const before = originalByPath.get(edit.filePath);
+        if (before === undefined) continue;
+        const previous = updatesByPath.get(edit.filePath)?.after ?? before;
+        updatesByPath.set(edit.filePath, {
+          path: edit.filePath,
+          before,
+          after: previous.slice(0, edit.startOffset) + edit.after + previous.slice(edit.endOffset),
+        });
+      }
+      renamePlanRef.current = {
+        projectPath,
+        oldPath: node.path,
+        newPath,
+        updates: [...updatesByPath.values()],
+      };
+      return edits.length;
+    },
+    [daemon.projectPath, daemon.readFile, latexSettings.settings.mainFile, texFiles],
+  );
+
+  const handleOpenOrchestrationThread = useCallback(
+    async (thread: ThreadSummary) => {
+      setWorkspaceView("agents");
+      if (thread.projectPath === daemon.projectPath) {
+        await loadThread(thread.id, thread.projectPath);
+      } else {
+        if (await handleOpenRecentProject(thread.projectPath)) setOpeningThread(thread);
+      }
+    },
+    [daemon.projectPath, handleOpenRecentProject, loadThread],
+  );
+
+  const handleDelegateTask = async ({ providerId, title, prompt }: DelegateTaskInput) => {
+    if (!activeWorkspaceThread) throw new Error("Open a parent thread");
+    const settings = agentSettings.settings;
+    await invoke<AgentThread>("agent_delegate_thread", {
+      projectPath: activeWorkspaceThread.projectPath,
+      parentThreadId: activeWorkspaceThread.id,
+      providerId,
+      brief: prompt,
+      title,
+      model: settings.defaultModelByProvider[providerId],
+      reasoningEffort: settings.defaultEffortByProvider[providerId],
+      customConfigs: orchestration.customConfigs,
+    });
+    await orchestration.refreshThreads();
+  };
+
+  const handleScheduleThread = async ({
+    providerId,
+    title,
+    prompt,
+    runAt,
+    repeatIntervalMs,
+  }: ScheduleThreadInput) => {
+    if (!daemon.projectPath) throw new Error("Open a project");
+    const settings = agentSettings.settings;
+    const thread = await invoke<AgentThread>("agent_create_thread", {
+      projectPath: daemon.projectPath,
+      providerId,
+      title,
+      model: settings.defaultModelByProvider[providerId],
+      reasoningEffort: settings.defaultEffortByProvider[providerId],
+      interactionMode: settings.defaultInteractionMode,
+      runtimeMode: settings.defaultRuntimeMode,
+    });
+    await invoke("agent_set_thread_schedule", {
+      projectPath: daemon.projectPath,
+      threadId: thread.summary.id,
+      schedule: { prompt, runAt, repeatIntervalMs },
+    });
+    await orchestration.refreshThreads();
+  };
+
+  const handleCreateThreadWorktree = async () => {
+    if (!activeWorkspaceThread) return;
+    await invoke("agent_create_worktree", {
+      projectPath: activeWorkspaceThread.projectPath,
+      threadId: activeWorkspaceThread.id,
+    });
+    await orchestration.refreshThreads();
+  };
+
+  const handleMergeThreadWorktree = async () => {
+    const projectPath = daemon.projectPath;
+    const targetBranch = gitStatus?.branch;
+    if (!projectPath || !activeWorktreePath || !activeThreadBranch || !targetBranch) return;
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    if (
+      !(await ask(`Merge ${activeThreadBranch} into ${targetBranch}?`, {
+        title: "Merge thread worktree",
+        kind: "warning",
+      }))
+    )
+      return;
+    if (
+      currentProjectRef.current !== projectPath ||
+      Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+      Object.keys(failedSourceWrites).length > 0 ||
+      projectThreads.some(
+        (thread) => thread.status === "running" || thread.status === "waiting_input",
+      )
+    ) {
+      throw new Error("Wait for project saves and active agent turns to finish before merging");
+    }
+    try {
+      await invoke("git_merge_thread_worktree", {
+        dir: projectPath,
+        workspace: activeWorktreePath,
+        targetBranch,
+      });
+    } finally {
+      void daemon.refreshGitStatus();
+      void daemon.refreshFiles();
+    }
+  };
+
+  const handlePublishBranch = async (thread: ThreadSummary, commitMessage?: string) => {
+    const dir = thread.workspacePath ?? thread.projectPath;
+    if (commitMessage) await invoke("git_commit", { dir, message: commitMessage });
+    const url = await invoke<string>("git_open_branch_pull_request", { dir });
+    await refreshPullRequest(thread);
+    if (thread.workspacePath) await refreshWorktreeStatus();
+    else void daemon.refreshGitStatus();
+    const { open } = await import("@tauri-apps/plugin-shell");
+    await open(url);
+  };
+
+  const handleRequestPullRequest = async (thread: ThreadSummary, status: GitStatus) => {
+    if (status.changes.some((change) => change.staged)) {
+      setPullRequestDraft(thread);
+      return;
+    }
+    if (status.changes.length) throw new Error("Stage changes from the Diff tab before committing");
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    if (
+      await ask(`Push ${status.branch} and open a pull request?`, { title: "Open pull request" })
+    ) {
+      await handlePublishBranch(thread);
+    }
+  };
+
+  const handleApplyRename = useCallback(
+    async (
+      node: FileNode,
+      newPath: string,
+      { updateReferences }: { updateReferences: boolean },
+    ) => {
+      const plan = renamePlanRef.current;
+      const projectPath = daemon.projectPath;
+      if (
+        !projectPath ||
+        (updateReferences &&
+          (!plan ||
+            plan.projectPath !== projectPath ||
+            plan.oldPath !== node.path ||
+            plan.newPath !== newPath))
+      ) {
+        throw new Error("Enter the name again to review updated references");
+      }
+      const updates = updateReferences ? plan?.updates : undefined;
+      const movedPath = (path: string) => {
+        if (pathsEqual(path, node.path)) return newPath;
+        if (
+          node.type === "directory" &&
+          path.length > node.path.length &&
+          pathsEqual(path.slice(0, node.path.length), node.path) &&
+          /[/\\]/.test(path[node.path.length] ?? "")
+        ) {
+          return pathSync.join(newPath, path.slice(node.path.length + 1));
+        }
+        return path;
+      };
+      const affected = (path: string) =>
+        movedPath(path) !== path ||
+        (updates?.some((update) => pathsEqual(update.path, path)) ?? false);
+      if (
+        [...Object.keys(failedSourceWrites), ...Object.values(pendingSourceWritesRef.current)].some(
+          (path) => path && affected(path),
+        )
+      ) {
+        throw new Error("Wait for the affected files to finish saving and try again");
+      }
+      shouldIgnoreRenameChangeRef.current = affected;
+      try {
+        await daemon.renamePath(node.path, newPath, updates);
+      } finally {
+        shouldIgnoreRenameChangeRef.current = null;
+      }
+      if (currentProjectRef.current !== projectPath) return;
+      renamePlanRef.current = null;
+      const records = texFiles.flatMap((oldPath) => {
+        const target = movedPath(oldPath);
+        return target === oldPath ? [] : [{ oldPath, newPath: target }];
+      });
+      setRecentRenames((previous) => [...records, ...previous].slice(0, 200));
+      const mainFile = latexSettings.settings.mainFile;
+      const nextMainFile = mainFile && movedPath(mainFile);
+      if (mainFile && movedPath(mainFile) !== mainFile) {
+        latexSettings.setMainFile(movedPath(mainFile));
+      }
+      setOpenTabs((tabs) => tabs.map(movedPath));
+      setSplitPane((pane) => {
+        if (!pane) return pane;
+        const current = pane.selectedFile;
+        const after = current && updates?.find((update) => pathsEqual(update.path, current))?.after;
+        const target = current && movedPath(current);
+        return {
+          ...pane,
+          openTabs: pane.openTabs.map(movedPath),
+          selectedFile: target,
+          content: after ?? pane.content,
+          binaryPreviewUrl:
+            target && target !== current && pane.binaryPreviewUrl
+              ? convertFileSrc(pathSync.join(projectPath, target))
+              : pane.binaryPreviewUrl,
+        };
+      });
+      const currentFile = selectedFileRef.current;
+      if (currentFile && affected(currentFile)) {
+        selectedFileRef.current = movedPath(currentFile);
+        await handleFileSelect(selectedFileRef.current);
+      }
+      if (nextMainFile && records.length && hasAnyCompiler) {
+        latexCompiler.scheduleAutoCompile({ directory: projectPath, mainFile: nextMainFile });
+      }
+    },
+    [
+      daemon.projectPath,
+      daemon.renamePath,
+      failedSourceWrites,
+      handleFileSelect,
+      hasAnyCompiler,
+      latexCompiler,
+      latexSettings,
+      texFiles,
+    ],
+  );
 
   const handleStageFile = useCallback(
     (path: string) => {
+      if (isViewingWorktreeHistory && activeHistoryDir) {
+        void invoke("git_add", { dir: activeHistoryDir, files: [path] })
+          .then(() => refreshWorktreeStatus())
+          .catch((error: unknown) => toast(String(error), "error"));
+        return;
+      }
       daemon.gitAdd([path]);
     },
-    [daemon],
+    [activeHistoryDir, daemon, isViewingWorktreeHistory, refreshWorktreeStatus, toast],
   );
-
-  const handleUnstageAll = useCallback(() => {
-    const stagedPaths = (daemon.gitStatus?.changes ?? [])
-      .filter((c: { staged: boolean }) => c.staged)
-      .map((c: { path: string }) => c.path);
-    if (stagedPaths.length > 0) {
-      daemon.gitUnstage(stagedPaths);
-    }
-  }, [daemon]);
 
   const handleUnstageFile = useCallback(
     (path: string) => {
-      daemon.gitUnstage([path]);
+      const originalPath = activeHistoryStagedChanges.find(
+        (change) => change.path === path,
+      )?.originalPath;
+      const files = originalPath ? [path, originalPath] : [path];
+      if (isViewingWorktreeHistory && activeHistoryDir) {
+        void invoke("git_unstage", { dir: activeHistoryDir, files })
+          .then(() => refreshWorktreeStatus())
+          .catch((error: unknown) => toast(String(error), "error"));
+        return;
+      }
+      daemon.gitUnstage(files);
     },
-    [daemon],
+    [
+      activeHistoryDir,
+      activeHistoryStagedChanges,
+      daemon,
+      isViewingWorktreeHistory,
+      refreshWorktreeStatus,
+      toast,
+    ],
   );
-
-  const handleRemoteSubmit = useCallback(() => {
-    const trimmed = remoteUrl.trim();
-    if (!trimmed) return;
-    daemon.gitAddRemote(trimmed);
-    setRemoteUrl("");
-    setShowRemoteInput(false);
-  }, [daemon, remoteUrl]);
 
   const handleGitPush = useCallback(async () => {
     const result = await daemon.gitPush();
@@ -1983,31 +2896,6 @@ export default function EditorPage() {
       toast(result.error || "Failed to pull changes", "error");
     }
   }, [daemon, toast]);
-
-  const handleRefreshGitStatus = useCallback(() => {
-    void daemon.refreshGitStatus(true);
-  }, [daemon]);
-
-  const handleDiscardAll = useCallback(async () => {
-    const result = await daemon.gitDiscardAll();
-    if (result.success) {
-      toast("All changes discarded", "success");
-    } else {
-      toast(result.error || "Failed to discard changes", "error");
-    }
-  }, [daemon, toast]);
-
-  const handleDiscardFile = useCallback(
-    async (path: string) => {
-      const result = await daemon.gitDiscardFile(path);
-      if (result.success) {
-        toast(`Discarded changes: ${path}`, "success");
-      } else {
-        toast(result.error || "Failed to discard file", "error");
-      }
-    },
-    [daemon, toast],
-  );
 
   const handlePublishToGitHub = useCallback(async () => {
     setGhPublishError(null);
@@ -2055,7 +2943,7 @@ export default function EditorPage() {
 
   const handleAskAgentSelection = useCallback(
     (selectionText: string, filePath: string, startLine: number, endLine: number) => {
-      setShowRightPanel(true);
+      openDockedAgentPanel();
       const loc =
         filePath && startLine > 0
           ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
@@ -2067,13 +2955,48 @@ export default function EditorPage() {
         contextChip: { label: loc, snippet },
       });
     },
-    [],
+    [openDockedAgentPanel],
+  );
+
+  const handleNewThreadFromSelection = useCallback(
+    (selectionText: string, filePath: string, startLine: number, endLine: number) => {
+      void agent.createThread().catch((error: unknown) => toast(String(error), "error"));
+      openDockedAgentPanel();
+      const loc =
+        filePath && startLine > 0
+          ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
+          : filePath || "current file";
+      const snippet = selectionText.trim();
+      setAgentDraftInjection({
+        id: Date.now(),
+        text: "",
+        contextChip: { label: loc, snippet },
+      });
+    },
+    [agent, openDockedAgentPanel, toast],
+  );
+
+  const handleExplainSelection = useCallback(
+    (selectionText: string, filePath: string, startLine: number, endLine: number) => {
+      openDockedAgentPanel();
+      const loc =
+        filePath && startLine > 0
+          ? `${filePath}:${startLine}${endLine > startLine ? `-${endLine}` : ""}`
+          : filePath || "current file";
+      const snippet = selectionText.trim();
+      setAgentDraftInjection({
+        id: Date.now(),
+        text: "Explain this selection.",
+        contextChip: { label: loc, snippet },
+      });
+    },
+    [openDockedAgentPanel],
   );
 
   const handleFixDiagnosticsWithAi = useCallback(
     (diags: LatexDiagnostic[]) => {
       if (diags.length === 0) return;
-      setShowRightPanel(true);
+      openDockedAgentPanel();
       const list = diags
         .slice(0, 12)
         .map(
@@ -2087,26 +3010,33 @@ export default function EditorPage() {
       const prompt = `Please fix these LaTeX compilation issues:\n\n${mainHint}${list}`;
       void agent.sendMessage(prompt);
     },
-    [agent, latexSettings.settings.mainFile],
+    [agent, latexSettings.settings.mainFile, openDockedAgentPanel],
   );
 
   const handleGenerateCommitMessageAI = useCallback(async () => {
-    if (!daemon.projectPath) {
+    if (!activeHistoryDir) {
       toast("Please open a project first.", "error");
       return;
     }
 
-    if (stagedChanges.length === 0) {
+    if (activeHistoryStagedChanges.length === 0) {
       toast("Stage files before generating commit message.", "error");
       return;
     }
 
-    setShowCommitInput(true);
     setIsGeneratingCommitMessageAI(true);
 
     try {
       const diffChunks: string[] = await Promise.all(
-        stagedChanges.map((change: { path: string }) => daemon.gitDiff(change.path, true)),
+        activeHistoryStagedChanges.map((change: { path: string }) =>
+          isViewingWorktreeHistory
+            ? invoke<string>("git_diff", {
+                dir: activeHistoryDir,
+                file: change.path,
+                staged: true,
+              })
+            : daemon.gitDiff(change.path, true),
+        ),
       );
       const mergedDiff = diffChunks
         .filter((chunk: string) => chunk.trim().length > 0)
@@ -2137,19 +3067,49 @@ export default function EditorPage() {
     } finally {
       setIsGeneratingCommitMessageAI(false);
     }
-  }, [agent, daemon, stagedChanges, toast]);
+  }, [
+    activeHistoryDir,
+    activeHistoryStagedChanges,
+    agent,
+    daemon,
+    isViewingWorktreeHistory,
+    toast,
+  ]);
 
-  const handleCommit = useCallback(async () => {
-    if (!commitMessage.trim()) return;
-    const result = await daemon.gitCommit(commitMessage.trim());
-    if (result.success) {
-      toast("Changes committed", "success");
-      setCommitMessage("");
-      setShowCommitInput(false);
-    } else {
+  const handleCommit = useCallback(
+    async (overrideMessage?: string): Promise<boolean> => {
+      const finalMessage = (overrideMessage ?? commitMessage).trim();
+      if (!finalMessage) return false;
+      if (isViewingWorktreeHistory && activeHistoryDir) {
+        try {
+          await invoke("git_commit", { dir: activeHistoryDir, message: finalMessage });
+          toast("Changes committed", "success");
+          setCommitMessage("");
+          await refreshWorktreeStatus();
+          return true;
+        } catch (error) {
+          toast(error instanceof Error ? error.message : String(error), "error");
+          return false;
+        }
+      }
+      const result = await daemon.gitCommit(finalMessage);
+      if (result.success) {
+        toast("Changes committed", "success");
+        setCommitMessage("");
+        return true;
+      }
       toast(result.error || "Failed to commit", "error");
-    }
-  }, [commitMessage, daemon, toast]);
+      return false;
+    },
+    [
+      activeHistoryDir,
+      commitMessage,
+      daemon,
+      isViewingWorktreeHistory,
+      refreshWorktreeStatus,
+      toast,
+    ],
+  );
 
   const validateFileName = useCallback((name: string): string | null => {
     if (!name.trim()) {
@@ -2212,12 +3172,13 @@ export default function EditorPage() {
       // Toggle Agent panel: Cmd/Ctrl+L
       if (isMod && !e.shiftKey && key === "l") {
         e.preventDefault();
-        setShowRightPanel((prev) => !prev);
+        handleToggleRightPanel();
         return;
       }
 
       // Command Palette: Cmd/Ctrl+K
       if (isMod && !e.shiftKey && key === "k") {
+        if (workspaceView === "agents" && !showHomeWorkspace && !showUsageDashboard) return;
         e.preventDefault();
         setShowCommandPalette((prev) => !prev);
         return;
@@ -2236,7 +3197,7 @@ export default function EditorPage() {
       if (isMod && !e.shiftKey && key === "p") {
         e.preventDefault();
         if (daemon.projectPath) {
-          setShowLivePreview((prev) => !prev);
+          togglePdfPreview();
         }
         return;
       }
@@ -2244,7 +3205,18 @@ export default function EditorPage() {
 
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
-  }, [daemon, handleOpenFolder, selectedFile, handleCloseTab, handleCompileWithDetection]);
+  }, [
+    daemon,
+    handleOpenFolder,
+    selectedFile,
+    handleCloseTab,
+    handleCompileWithDetection,
+    handleToggleRightPanel,
+    togglePdfPreview,
+    workspaceView,
+    showHomeWorkspace,
+    showUsageDashboard,
+  ]);
 
   const handleCompileShortcut = useCallback(() => {
     void handleCompileWithDetection();
@@ -2306,15 +3278,50 @@ export default function EditorPage() {
     },
     [handleFileSelect],
   );
-  const handleAgentRunTerminalCommand = useCallback((cmd: string) => {
-    setShowTerminal(true);
-    setPendingTerminalCommand({ id: Date.now(), command: cmd });
-  }, []);
+  const handleAgentRunTerminalCommand = useCallback(
+    (cmd: string) => {
+      setWorkspaceView("write");
+      openBuildActivity("terminal");
+      setPendingTerminalCommand({ id: Date.now(), command: cmd });
+    },
+    [openBuildActivity],
+  );
   const handleOpenAgentSettings = useCallback(() => {
     setSettingsInitialTab("agents");
     setShowLatexSettings(true);
   }, []);
   const handleCloseRightPanel = useCallback(() => setShowRightPanel(false), []);
+  const handleCloseAgentsView = useCallback(() => setWorkspaceView("write"), []);
+  const handleAgentsWorkspaceFileClick = useCallback(
+    (path: string) => {
+      setWorkspaceView("write");
+      handleAgentFileClick(path);
+    },
+    [handleAgentFileClick],
+  );
+  const handleSwitchDockedToPdf = useCallback(() => {
+    setShowRightPanel(false);
+    setShowLivePreview(true);
+  }, []);
+  const handleDockAgentInWrite = useCallback(() => {
+    setWorkspaceView("write");
+    openDockedAgentPanel();
+  }, [openDockedAgentPanel]);
+  const handleOpenAgentsWorkspace = useCallback(() => {
+    setShowHomeWorkspace(false);
+    setShowUsageDashboard(false);
+    setWorkspaceView("agents");
+  }, []);
+  const latestBuildLogExcerpt = useMemo(
+    () =>
+      latexCompiler.compileLog.length > 0
+        ? latexCompiler.compileLog
+            .slice(-5)
+            .map((entry) => entry.line)
+            .join("\n")
+        : null,
+    [latexCompiler.compileLog],
+  );
   const handleResetAgentBoundary = useCallback(() => {
     void agent.refreshProviders();
   }, [agent]);
@@ -2338,6 +3345,64 @@ export default function EditorPage() {
     return parseUnifiedDiffContent(gitDiffContent);
   }, [gitDiffContent]);
 
+  const historyDiffContent = historyDiffPreview?.content;
+  const parsedHistoryDiff = useMemo(() => {
+    if (!historyDiffContent) return null;
+    return parseUnifiedDiffContent(historyDiffContent);
+  }, [historyDiffContent]);
+
+  const renderGitDiffContent = (
+    preview: GitDiffPreviewState,
+    parsed: ReturnType<typeof parseUnifiedDiffContent> | null,
+  ) => {
+    if (preview.isLoading) {
+      return <EditorSkeleton className="h-full" />;
+    }
+    if (preview.error) {
+      return (
+        <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
+          Failed to load diff: {preview.error}
+        </div>
+      );
+    }
+    if (parsed?.isBinary) {
+      return (
+        <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
+          Binary file diff is not previewable in editor.
+        </div>
+      );
+    }
+    if (!preview.content.trim()) {
+      return (
+        <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
+          No textual diff available for this file.
+        </div>
+      );
+    }
+    if (parsed?.hasRenderableHunks) {
+      return (
+        <GitMonacoDiffEditor
+          original={parsed.original}
+          modified={parsed.modified}
+          filePath={preview.path}
+          editorSettings={editorSettings.settings}
+          className="h-full"
+        />
+      );
+    }
+    return (
+      <MonacoEditor
+        content={preview.content}
+        readOnly
+        onContentChange={() => {}}
+        language="diff"
+        editorSettings={editorSettings.settings}
+        editorTheme={editorSettings.editorTheme}
+        className="h-full"
+      />
+    );
+  };
+
   const primaryEditorPaneContent = (
     <div className="h-full min-h-0 flex flex-col overflow-hidden">
       {selectedFile && (
@@ -2357,6 +3422,116 @@ export default function EditorPage() {
         />
       )}
 
+      {selectedFile && /\.tex$/i.test(selectedFile) && !isShowingGitDiff && !binaryPreviewUrl && (
+        <div className="h-[34px] px-2 border-b border-border/70 flex items-center gap-1 bg-panel shrink-0">
+          <fieldset
+            aria-label="Editing mode"
+            className="inline-flex bg-sunken rounded-[7px] p-0.5 border-0"
+          >
+            <button
+              type="button"
+              className={`px-2.5 py-0.5 rounded-[5px] text-[12px] transition-colors ${
+                !visualMode
+                  ? "bg-panel text-foreground-strong font-medium ring-1 ring-border"
+                  : "text-muted hover:text-foreground"
+              }`}
+              aria-pressed={!visualMode}
+              onClick={() => setVisualMode(false)}
+            >
+              Code
+            </button>
+            <button
+              type="button"
+              className={`px-2.5 py-0.5 rounded-[5px] text-[12px] transition-colors ${
+                visualMode
+                  ? "bg-panel text-foreground-strong font-medium ring-1 ring-border"
+                  : "text-muted hover:text-foreground"
+              }`}
+              aria-pressed={visualMode}
+              onClick={() => setVisualMode(true)}
+            >
+              Visual
+            </button>
+          </fieldset>
+          <span className="w-px h-4 bg-border mx-1 shrink-0" aria-hidden="true" />
+          <button
+            type="button"
+            aria-label="Bold"
+            onClick={() => triggerLatexSnippet("\\textbf{", "}", "text")}
+            className="h-6 min-w-6 px-1.5 rounded-[5px] text-[13px] font-bold text-foreground hover:bg-subtle transition-colors"
+          >
+            B
+          </button>
+          <button
+            type="button"
+            aria-label="Italic"
+            onClick={() => triggerLatexSnippet("\\textit{", "}", "text")}
+            className="h-6 min-w-6 px-1.5 rounded-[5px] text-[14px] italic font-serif text-foreground hover:bg-subtle transition-colors"
+          >
+            I
+          </button>
+          <button
+            type="button"
+            aria-label="Insert reference"
+            onClick={() => triggerLatexSnippet("\\ref{", "}", "label")}
+            className="h-6 px-1.5 rounded-[5px] text-[12px] font-sans text-foreground hover:bg-subtle transition-colors"
+          >
+            \ref
+          </button>
+          <button
+            type="button"
+            aria-label="Insert citation"
+            onClick={() => triggerLatexSnippet("\\cite{", "}", "key")}
+            className="h-6 px-1.5 rounded-[5px] text-[12px] font-sans text-foreground hover:bg-subtle transition-colors"
+          >
+            \cite
+          </button>
+          <button
+            type="button"
+            aria-label="Insert math"
+            onClick={() => triggerLatexSnippet("$", "$", "x")}
+            className="h-6 px-1.5 rounded-[5px] text-[13px] italic font-serif text-foreground hover:bg-subtle transition-colors"
+          >
+            Σ
+          </button>
+          <button
+            type="button"
+            aria-label="Insert figure"
+            onClick={() =>
+              triggerLatexSnippet(
+                "\\begin{figure}[t]\n  \\centering\n  \\includegraphics[width=\\linewidth]{",
+                "}\n  \\caption{}\n  \\label{fig:}\n\\end{figure}",
+                "figure.pdf",
+              )
+            }
+            className="h-6 px-1.5 rounded-[5px] text-[12px] text-foreground hover:bg-subtle transition-colors"
+          >
+            Figure
+          </button>
+          <button
+            type="button"
+            aria-label="Insert table"
+            onClick={() =>
+              triggerLatexSnippet(
+                "\\begin{table}[t]\n  \\centering\n  \\begin{tabular}{cc}\n    ",
+                "\n  \\end{tabular}\n  \\caption{}\n  \\label{tab:}\n\\end{table}",
+                "a & b \\\\",
+              )
+            }
+            className="h-6 px-1.5 rounded-[5px] text-[12px] text-foreground hover:bg-subtle transition-colors"
+          >
+            Table
+          </button>
+          <span className="ml-auto font-mono text-[11.5px] text-muted truncate">
+            {(
+              (daemon.projectPath ? projectRelativePath(daemon.projectPath, selectedFile) : null) ??
+              selectedFile
+            )
+              .split("/")
+              .join(" / ")}
+          </span>
+        </div>
+      )}
       {selectedFile ? (
         isShowingGitDiff ? (
           <div className="flex-1 min-h-0 flex flex-col">
@@ -2395,39 +3570,7 @@ export default function EditorPage() {
             </div>
 
             <div className="flex-1 min-h-0">
-              {gitDiffPreview.isLoading ? (
-                <EditorSkeleton className="h-full" />
-              ) : gitDiffPreview.error ? (
-                <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
-                  Failed to load diff: {gitDiffPreview.error}
-                </div>
-              ) : parsedGitDiff?.isBinary ? (
-                <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
-                  Binary file diff is not previewable in editor.
-                </div>
-              ) : !gitDiffPreview.content.trim() ? (
-                <div className="h-full flex items-center justify-center px-6 text-sm text-muted">
-                  No textual diff available for this file.
-                </div>
-              ) : parsedGitDiff?.hasRenderableHunks ? (
-                <GitMonacoDiffEditor
-                  original={parsedGitDiff.original}
-                  modified={parsedGitDiff.modified}
-                  filePath={gitDiffPreview.path}
-                  editorSettings={editorSettings.settings}
-                  className="h-full"
-                />
-              ) : (
-                <MonacoEditor
-                  content={gitDiffPreview.content}
-                  readOnly
-                  onContentChange={() => {}}
-                  language="diff"
-                  editorSettings={editorSettings.settings}
-                  editorTheme={editorSettings.editorTheme}
-                  className="h-full"
-                />
-              )}
+              {renderGitDiffContent(gitDiffPreview, parsedGitDiff)}
             </div>
           </div>
         ) : binaryPreviewUrl ? (
@@ -2471,24 +3614,59 @@ export default function EditorPage() {
             className="flex-1 min-h-0"
           >
             <EditorErrorBoundary>
-              <MonacoEditor
-                content={fileContent}
-                readOnly={false}
-                onContentChange={handleContentChange}
-                language={getFileLanguage(selectedFile)}
-                filePath={selectedFile}
-                diagnostics={activeFileDiagnostics}
-                bibEntries={bibEntries}
-                texLabels={texLabels}
-                onCompileShortcut={handleCompileShortcut}
-                onForwardSync={handleEditorForwardSync}
-                onAskAgent={handleAskAgentSelection}
-                onCursorChange={setCursorPosition}
-                editorSettings={editorSettings.settings}
-                editorTheme={editorSettings.editorTheme}
-                goToLine={pendingGoToLine}
-                className="h-full"
-              />
+              {visualMode && /\.tex$/i.test(selectedFile) ? (
+                <VisualEditor
+                  value={fileContent}
+                  onChange={handleContentChange}
+                  filePath={selectedFile}
+                  className="h-full"
+                />
+              ) : (
+                <MonacoEditor
+                  content={fileContent}
+                  readOnly={false}
+                  onContentChange={handleContentChange}
+                  language={getFileLanguage(selectedFile)}
+                  filePath={selectedFile}
+                  attributedEdits={attributedEdits.filter(
+                    (edit) =>
+                      edit.status !== "rejected" &&
+                      edit.filePath === selectedFile &&
+                      edit.after === fileContent,
+                  )}
+                  onKeepEdit={keepAttributedEdit}
+                  onUndoEdit={undoAttributedEdit}
+                  diagnostics={activeFileDiagnostics}
+                  bibEntries={bibEntries}
+                  texLabels={texLabels}
+                  onCompileShortcut={handleCompileShortcut}
+                  onForwardSync={handleEditorForwardSync}
+                  onAskAgent={handleAskAgentSelection}
+                  onNewThreadFromSelection={handleNewThreadFromSelection}
+                  onExplainSelection={handleExplainSelection}
+                  activeProviderId={
+                    agent.activeProviderStatus?.id ?? agentSettings.settings.defaultProvider
+                  }
+                  activeProviderName={
+                    (agent.activeProviderStatus?.id ?? agentSettings.settings.defaultProvider) ===
+                    "claude"
+                      ? "Claude"
+                      : (agent.activeProviderStatus?.id ??
+                            agentSettings.settings.defaultProvider) === "codex"
+                        ? "Codex"
+                        : (agent.activeProviderStatus?.id ??
+                              agentSettings.settings.defaultProvider) === "antigravity"
+                          ? "Antigravity"
+                          : "Custom ACP"
+                  }
+                  onCursorChange={setCursorPosition}
+                  editorSettings={editorSettings.settings}
+                  editorTheme={editorSettings.editorTheme}
+                  goToLine={pendingGoToLine}
+                  pendingSnippet={pendingSnippet}
+                  className="h-full"
+                />
+              )}
             </EditorErrorBoundary>
           </motion.div>
         )
@@ -2527,176 +3705,356 @@ export default function EditorPage() {
     [daemon.files, daemon.projectPath],
   );
 
-  const handleCyclePalette = useCallback(() => {
-    const idx = UI_PALETTES.findIndex((p) => p.id === editorSettings.settings.uiPalette);
-    const next = UI_PALETTES[(idx + 1) % UI_PALETTES.length];
-    if (next) {
-      editorSettings.updateSettings({ uiPalette: next.id });
-      toast(`Theme: ${next.label}`, "info");
-    }
-  }, [editorSettings, toast]);
-
-  const activePaletteMeta =
-    UI_PALETTES.find((p) => p.id === editorSettings.settings.uiPalette) ?? UI_PALETTES[0];
-
-  const effectiveRightPanelWidth = agentExpanded ? Math.max(rightPanelWidth, 520) : rightPanelWidth;
+  const maxDockedWidth = Math.max(380, windowWidth - (showSidebar ? sidebarWidth : 0) - 420);
+  const effectiveRightPanelWidth = showLivePreviewEffective
+    ? threePaneAgentWidth
+    : Math.min(Math.max(rightPanelWidth, 560), maxDockedWidth);
+  const isHomeVisible = !showUsageDashboard && (!daemon.projectPath || showHomeWorkspace);
+  const isWorkspaceVisible = !showHomeWorkspace && !showUsageDashboard;
+  const activateWorkspaceTab = (view: (typeof WORKSPACE_VIEWS)[number]) => {
+    setShowHomeWorkspace(false);
+    setShowUsageDashboard(false);
+    setWorkspaceView(view);
+  };
 
   return (
     <div className="h-dvh flex flex-col bg-bg text-foreground">
-      {/* Borderless Top Bar on Warm Paper */}
-      <header className="h-11 shrink-0 px-3 flex items-center justify-between gap-3 select-none">
-        {/* Left: Brand + Breadcrumb */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => {
-              import("@tauri-apps/plugin-shell").then(({ open }) => {
-                open("https://github.com/sdotvenk/OrchestraTeX");
-              });
-            }}
-            className="inline-flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-subtle transition-colors shrink-0"
-            title="OrchestraTeX on GitHub"
-            aria-label="Open OrchestraTeX repository"
-          >
-            <span className="size-6 rounded-md bg-accent text-white font-display italic font-bold text-[13px] inline-flex items-center justify-center shrink-0">
-              O
-            </span>
-            <span className="text-[13.5px] font-semibold tracking-tight text-foreground-strong">
-              OrchestraTeX
-            </span>
-          </button>
+      <header className="h-10 shrink-0 px-3.5 flex items-center justify-between gap-3 border-b border-border bg-bg select-none">
+        {/* Left: Brand + Project Switcher + Branch */}
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          {!isHomeVisible && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowUsageDashboard(false);
+                setShowHomeWorkspace(true);
+              }}
+              className="inline-flex shrink-0 items-center rounded-lg px-1.5 py-1 transition-colors hover:bg-subtle focus:bg-subtle focus-visible:outline-2 focus-visible:outline-accent"
+              aria-label="Home"
+            >
+              <OrchestraTeXWordmark />
+            </button>
+          )}
 
-          {daemon.projectPath && (
-            <div className="flex items-center gap-1.5 min-w-0 text-[12.5px] text-muted">
-              <span className="text-border-dark select-none">/</span>
-              <button
-                type="button"
-                onClick={handleOpenFolder}
-                className="px-1.5 py-0.5 rounded-md font-medium text-foreground-strong hover:bg-subtle transition-colors truncate max-w-[180px]"
-                title={`${daemon.projectPath} — Click to switch folder`}
-              >
-                {pathSync.basename(daemon.projectPath)}
-              </button>
-              {selectedFile && (
-                <>
-                  <span className="text-border-dark select-none">›</span>
-                  <span className="font-mono text-[12px] text-muted truncate max-w-[180px]">
-                    {pathSync.basename(selectedFile)}
-                  </span>
-                </>
+          {showUsageDashboard ? (
+            <>
+              {!isHomeVisible && (
+                <span className="h-[18px] w-px bg-border-dark shrink-0" aria-hidden="true" />
               )}
-              {isSaving ? (
-                <span className="text-[11px] text-muted-foreground ml-1 shrink-0">Saving...</span>
-              ) : (
-                selectedFile && (
-                  <span className="text-[11px] text-muted-foreground ml-1 shrink-0 hidden lg:inline">
-                    Saved
+              <span className="font-medium text-[13px] text-foreground truncate">
+                Usage &amp; limits
+              </span>
+            </>
+          ) : (
+            daemon.projectPath && (
+              <>
+                {!isHomeVisible && (
+                  <span className="h-[18px] w-px bg-border-dark shrink-0" aria-hidden="true" />
+                )}
+                <ProjectSwitcher
+                  projectPath={daemon.projectPath}
+                  recentProjects={recentProjects.projects}
+                  onSelectProject={(path) => {
+                    void handleOpenRecentProject(path);
+                  }}
+                  onOpenFolder={handleOpenFolder}
+                />
+                {gitStatus?.branch && (
+                  <span
+                    className="hidden sm:inline-flex items-center gap-1 font-mono text-[11.5px] text-muted border border-border rounded-full px-2 py-0.5 min-w-0 max-w-[250px]"
+                    title={`Branch: ${gitStatus.branch}`}
+                  >
+                    <GitBranchIcon className="size-3 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{gitStatus.branch}</span>
+                    {(gitStatus.ahead > 0 || gitStatus.behind > 0) && (
+                      <span className="shrink-0 tabular-nums">
+                        {gitStatus.ahead > 0 ? ` ↑${gitStatus.ahead}` : ""}
+                        {gitStatus.behind > 0 ? ` ↓${gitStatus.behind}` : ""}
+                      </span>
+                    )}
                   </span>
-                )
-              )}
-            </div>
+                )}
+                {isSaving && (
+                  <span className="text-[11px] text-muted-foreground ml-1 shrink-0">Saving...</span>
+                )}
+              </>
+            )
           )}
         </div>
 
-        {/* Center: Unified Command Palette Pill (⌘K) */}
-        {daemon.projectPath && (
-          <button
-            type="button"
-            onClick={() => setShowCommandPalette(true)}
-            className="hidden md:inline-flex items-center gap-2 h-8 w-[280px] lg:w-[320px] px-3 rounded-full bg-subtle hover:bg-sunken text-muted text-[12.5px] transition-colors shrink-0"
-            title="Find files, sections, citations, or commands (Cmd+K)"
+        {/* Center: Write / Agents / History Navigation */}
+        {daemon.projectPath || showUsageDashboard ? (
+          <div
+            aria-label="Workspace"
+            role="tablist"
+            onKeyDown={(event) => {
+              if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+              const index = WORKSPACE_VIEWS.indexOf(workspaceView);
+              const nextIndex =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? WORKSPACE_VIEWS.length - 1
+                    : (index + (event.key === "ArrowLeft" ? -1 : 1) + WORKSPACE_VIEWS.length) %
+                      WORKSPACE_VIEWS.length;
+              const nextView = WORKSPACE_VIEWS[nextIndex];
+              if (!nextView) return;
+              event.preventDefault();
+              activateWorkspaceTab(nextView);
+              document.getElementById(`workspace-tab-${nextView}`)?.focus();
+            }}
+            className="inline-flex items-center bg-sunken rounded-[9px] p-[3px] gap-0.5 shrink-0"
           >
-            <MagnifyingGlassIcon className="size-3.5 text-muted-foreground shrink-0" />
-            <span className="truncate flex-1 text-left">Find files, \labels, @cites...</span>
-            <kbd className="bg-panel">⌘K</kbd>
-          </button>
+            <button
+              type="button"
+              role="tab"
+              id="workspace-tab-write"
+              aria-controls="workspace-panel-write"
+              tabIndex={workspaceView === "write" && !showUsageDashboard ? 0 : -1}
+              aria-selected={isWorkspaceVisible && workspaceView === "write"}
+              onClick={() => activateWorkspaceTab("write")}
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors whitespace-nowrap ${
+                isWorkspaceVisible && workspaceView === "write"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              Write
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="workspace-tab-agents"
+              aria-controls={workspaceView === "agents" ? "workspace-panel-agents" : undefined}
+              tabIndex={workspaceView === "agents" || showUsageDashboard ? 0 : -1}
+              aria-selected={
+                (isWorkspaceVisible && workspaceView === "agents") || showUsageDashboard
+              }
+              onClick={() => activateWorkspaceTab("agents")}
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                (isWorkspaceVisible && workspaceView === "agents") || showUsageDashboard
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              <span>Agents</span>
+              {waitingThreads > 0 && (
+                <span className="text-[10.5px] font-semibold bg-[var(--warn-badge-bg)] text-[var(--warn-badge-text)] rounded-full px-1.5 leading-4 tabular-nums">
+                  {waitingThreads}
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="workspace-tab-history"
+              aria-controls={workspaceView === "history" ? "workspace-panel-history" : undefined}
+              tabIndex={workspaceView === "history" && !showUsageDashboard ? 0 : -1}
+              aria-selected={isWorkspaceVisible && workspaceView === "history"}
+              onClick={() => activateWorkspaceTab("history")}
+              className={`px-3.5 py-1 rounded-[7px] text-[12.5px] transition-colors whitespace-nowrap ${
+                isWorkspaceVisible && workspaceView === "history"
+                  ? "bg-panel text-foreground-strong font-medium shadow-xs ring-1 ring-border/60"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              History
+            </button>
+          </div>
+        ) : (
+          <div className="flex-1" />
         )}
 
-        {/* Right: Quiet Workspace Controls + Single Primary Compile Action */}
-        <div className="flex items-center justify-end gap-1 flex-1 shrink-0">
-          {daemon.projectPath && (
-            <>
-              <button
-                type="button"
-                onClick={() => setShowSidebar((prev) => !prev)}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
-                  showSidebar
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Sidebar (Cmd+\)"
-                aria-label="Toggle Sidebar"
-              >
-                <SidebarSimpleIcon className="size-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowLivePreview((prev) => !prev)}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
-                  showLivePreview
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Live PDF Preview (Cmd+P)"
-                aria-label="Toggle Live PDF Preview"
-              >
-                <FilePdfIcon className="size-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowTerminal((prev) => !prev)}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
-                  showTerminal
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Terminal"
-                aria-label="Toggle Terminal"
-              >
-                <TerminalIcon className="size-4" />
-              </button>
-
-              <button
-                type="button"
-                onClick={handleToggleRightPanel}
-                className={`size-8 rounded-lg inline-flex items-center justify-center transition-colors ${
-                  showRightPanel
-                    ? "bg-accent-soft text-accent"
-                    : "text-muted hover:text-foreground hover:bg-subtle"
-                }`}
-                title="Toggle Agent Panel (Cmd+L)"
-                aria-label="Toggle Agent Panel"
-              >
-                <RobotIcon className="size-4" />
-              </button>
-            </>
+        {/* Right: Live Voice/Status + Panel Toggles */}
+        <div className="flex items-center justify-end gap-2 flex-1 shrink-0">
+          {isHomeVisible && !showUsageDashboard && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowUsageDashboard(true)}
+            >
+              Usage
+            </button>
           )}
 
-          <button
-            type="button"
-            onClick={handleCyclePalette}
-            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-            title={`Switch palette (${activePaletteMeta?.label ?? "Atelier"})`}
-            aria-label="Switch color palette"
-          >
-            <SwatchesIcon className="size-4" />
-          </button>
+          {daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard &&
+            workspaceView === "write" && (
+              <>
+                {projectThreads.length > 0 && (
+                  <div className="hidden lg:flex items-center -space-x-1.5">
+                    {Array.from(
+                      projectThreads
+                        .reduce(
+                          (map, thread) => {
+                            const existing = map.get(thread.providerId);
+                            const isActive = thread.status === "running";
+                            const isWaiting = thread.status === "waiting_input";
+                            if (!existing) {
+                              map.set(thread.providerId, {
+                                provider: thread.providerId,
+                                count: 1,
+                                active: isActive,
+                                waiting: isWaiting,
+                                threadId: thread.id,
+                              });
+                            } else {
+                              existing.count += 1;
+                              existing.active = existing.active || isActive;
+                              existing.waiting = existing.waiting || isWaiting;
+                              if (isWaiting) existing.threadId = thread.id;
+                            }
+                            return map;
+                          },
+                          new Map<
+                            (typeof agent.threads)[number]["providerId"],
+                            {
+                              provider: (typeof agent.threads)[number]["providerId"];
+                              count: number;
+                              active: boolean;
+                              waiting: boolean;
+                              threadId: string;
+                            }
+                          >(),
+                        )
+                        .values(),
+                    )
+                      .sort((a, b) => {
+                        const order: Record<string, number> = {
+                          claude: 0,
+                          codex: 1,
+                          antigravity: 2,
+                          "custom-acp": 3,
+                        };
+                        return (order[a.provider] ?? 9) - (order[b.provider] ?? 9);
+                      })
+                      .map((entry) => {
+                        const voice = VOICE_COLORS[entry.provider] ?? VOICE_COLORS["custom-acp"];
+                        const statusLabel = entry.waiting
+                          ? "waiting"
+                          : entry.active
+                            ? "running"
+                            : "idle";
+                        const name =
+                          agent.providers.find((provider) => provider.id === entry.provider)
+                            ?.name ??
+                          {
+                            claude: "Claude Code",
+                            codex: "Codex",
+                            antigravity: "Antigravity",
+                            "custom-acp": "Custom ACP",
+                          }[entry.provider];
+                        return (
+                          <button
+                            key={entry.provider}
+                            type="button"
+                            onClick={() => {
+                              void agent.loadThread(entry.threadId);
+                              activateWorkspaceTab("agents");
+                            }}
+                            title={`${name} (${entry.count} ${entry.count === 1 ? "thread" : "threads"}) · ${statusLabel}`}
+                            aria-label={`${name} ${statusLabel}`}
+                            style={{
+                              backgroundColor: voice.tint,
+                              color: voice.ink,
+                              borderColor: entry.active || entry.waiting ? voice.ink : "var(--bg)",
+                              borderStyle: entry.waiting ? "dashed" : "solid",
+                            }}
+                            className="size-[22px] rounded-full border-[1.5px] inline-flex items-center justify-center transition-transform hover:scale-105 hover:z-10"
+                          >
+                            <ProviderIcon providerId={entry.provider} className="size-3 shrink-0" />
+                          </button>
+                        );
+                      })}
+                  </div>
+                )}
 
-          <button
-            type="button"
-            onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
-            title="Toggle Light / Dark mode"
-            aria-label="Toggle Light or Dark mode"
-          >
-            {resolvedTheme === "dark" ? (
-              <SunIcon className="size-4" />
-            ) : (
-              <MoonIcon className="size-4" />
+                <span className="hidden xl:inline text-[12px] text-muted tabular-nums">
+                  {runningThreads === 0 && waitingThreads === 0
+                    ? "No agents running"
+                    : [
+                        runningThreads > 0 ? `${runningThreads} editing` : null,
+                        waitingThreads > 0 ? `${waitingThreads} waiting` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                </span>
+
+                <span className="h-[18px] w-px bg-border-dark shrink-0" aria-hidden="true" />
+
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowSidebar((prev) => !prev)}
+                    className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
+                      showSidebar
+                        ? "text-foreground bg-subtle/80"
+                        : "text-muted hover:text-foreground hover:bg-subtle"
+                    }`}
+                    title="Toggle Sidebar (Cmd+\)"
+                    aria-label="Toggle Sidebar"
+                    aria-pressed={showSidebar}
+                  >
+                    <SidebarSimpleIcon className="size-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setBuildActivityCollapsed((prev) => !prev)}
+                    className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
+                      !buildActivityCollapsed
+                        ? "text-foreground bg-subtle/80"
+                        : "text-muted hover:text-foreground hover:bg-subtle"
+                    }`}
+                    title="Toggle Bottom Drawer"
+                    aria-label="Toggle Bottom Drawer"
+                    aria-pressed={!buildActivityCollapsed}
+                  >
+                    <TerminalIcon className="size-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={togglePdfPreview}
+                    className={`size-7 rounded-[7px] inline-flex items-center justify-center transition-colors ${
+                      showLivePreviewEffective
+                        ? "text-foreground bg-subtle/80"
+                        : "text-muted hover:text-foreground hover:bg-subtle"
+                    }`}
+                    title="Toggle Preview Pane (Cmd+P)"
+                    aria-label="Toggle Preview Pane"
+                    aria-pressed={showLivePreviewEffective}
+                  >
+                    <FilePdfIcon className="size-4" />
+                  </button>
+                </div>
+              </>
             )}
-          </button>
+
+          {daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard &&
+            workspaceView === "agents" && (
+              <span className="hidden md:inline text-[12px] text-muted tabular-nums">
+                {runningThreads === 0 && waitingThreads === 0
+                  ? "No agents running"
+                  : `${runningThreads} running · ${waitingThreads} waiting`}
+              </span>
+            )}
+
+          {daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard &&
+            workspaceView === "history" && (
+              <span className="hidden md:inline text-[12px] text-muted tabular-nums">
+                {uniqueHistoryChangeCount > 0
+                  ? `${uniqueHistoryChangeCount} ${uniqueHistoryChangeCount === 1 ? "file" : "files"} changed`
+                  : "Working tree clean"}
+              </span>
+            )}
+
+          <ThemePicker open={showThemePicker} onOpenChange={setShowThemePicker} />
 
           <button
             type="button"
@@ -2704,533 +4062,1243 @@ export default function EditorPage() {
               setSettingsInitialTab("editor");
               setShowLatexSettings(true);
             }}
-            className="size-8 rounded-lg inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
+            className="size-7 rounded-[7px] inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors"
             title="Settings"
             aria-label="Settings"
           >
             <GearIcon className="size-4" />
           </button>
 
-          {daemon.projectPath && (
-            <div className="pl-1">
-              {latexCompiler.isCompiling ? (
-                <button
-                  type="button"
-                  onClick={handleStopCompile}
-                  className="h-8 px-3 rounded-lg bg-error-bg text-error hover:brightness-95 text-[12.5px] font-semibold inline-flex items-center gap-1.5 transition-all"
-                  title="Stop compilation"
-                >
-                  <StopIcon className="size-3.5" weight="fill" />
-                  <span>Stop</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleCompileWithDetection();
-                  }}
-                  disabled={latexSettings.isDetecting}
-                  className="btn btn-primary btn-sm h-8 px-3 text-[12.5px]"
-                  title="Compile LaTeX (Cmd/Ctrl+Shift+B)"
-                >
-                  {latexSettings.isDetecting ? (
-                    <SpinnerGapIcon className="size-3.5 animate-spin" />
-                  ) : (
-                    <PlayIcon className="size-3.5" weight="fill" />
-                  )}
-                  <span>Compile</span>
-                </button>
-              )}
+          {showUsageDashboard && usageTopBarState ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={usageTopBarState.onRefresh}
+                disabled={usageTopBarState.loading}
+                className="text-[12px] text-muted hover:text-foreground tabular-nums transition-colors disabled:opacity-50"
+                title="Click to refresh usage"
+              >
+                {usageTopBarState.loading
+                  ? "Refreshing…"
+                  : usageTopBarState.refreshedAt
+                    ? `Refreshed ${usageTopBarState.refreshedAt}`
+                    : "Refresh"}
+              </button>
+              <button
+                type="button"
+                onClick={usageTopBarState.onExportCsv}
+                disabled={!usageTopBarState.canExport}
+                className="btn btn-secondary btn-sm disabled:opacity-50"
+              >
+                {usageTopBarState.exportStatus ?? "Export CSV"}
+              </button>
             </div>
+          ) : (
+            daemon.projectPath &&
+            !isHomeVisible &&
+            !showUsageDashboard && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!latexCompiler.pdfPath) {
+                    toast("Compile the document before exporting PDF", "info");
+                    return;
+                  }
+                  void (async () => {
+                    const { save } = await import("@tauri-apps/plugin-dialog");
+                    const dest = await save({
+                      title: "Export PDF",
+                      defaultPath: latexCompiler.pdfPath?.split("/").pop() ?? "document.pdf",
+                      filters: [{ name: "PDF", extensions: ["pdf"] }],
+                    });
+                    if (!dest || !latexCompiler.pdfPath) return;
+                    try {
+                      const bytes = await invoke<number[]>("read_file_bytes", {
+                        path: latexCompiler.pdfPath,
+                      });
+                      await invoke("write_file_bytes", { path: dest, bytes });
+                      toast("Exported PDF", "success");
+                    } catch {
+                      toast("Failed to export PDF", "error");
+                    }
+                  })();
+                }}
+                className="btn btn-secondary btn-sm"
+              >
+                Export
+              </button>
+            )
           )}
         </div>
       </header>
 
       {/* Main Workspace Area: Rail on Warm Paper + White Inset Frames */}
-      <main className="flex-1 min-h-0 flex relative overflow-hidden px-2 pb-2 gap-2">
-        {/* Overleaf-style Project Sidebar (or Home Rail when no project is open) */}
-        {!daemon.projectPath ? (
-          <aside className="hidden md:flex w-[224px] flex-col shrink-0 justify-between px-1 pb-1">
-            <div className="space-y-4 pt-1">
-              <div className="space-y-1">
-                <button
-                  type="button"
-                  onClick={handleOpenFolder}
-                  className="w-full h-9 px-3 rounded-lg bg-accent-soft text-accent font-medium text-[13px] flex items-center gap-2.5 text-left transition-colors"
-                >
-                  <FolderOpenIcon className="size-4 shrink-0" />
-                  <span>Open folder</span>
-                </button>
-              </div>
-
-              <div className="space-y-1.5 px-1">
-                <div className="text-[11px] font-medium text-muted px-2">Theme palette</div>
-                <div className="space-y-1">
-                  {UI_PALETTES.map((p) => {
-                    const active = editorSettings.settings.uiPalette === p.id;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => editorSettings.updateSettings({ uiPalette: p.id })}
-                        className={`w-full h-8 px-2.5 rounded-lg flex items-center gap-2.5 text-[12.5px] transition-colors ${
-                          active
-                            ? "bg-panel text-foreground-strong font-medium border border-border shadow-xs"
-                            : "text-muted hover:text-foreground hover:bg-subtle"
-                        }`}
-                      >
-                        <span className="inline-flex items-center gap-1 shrink-0">
-                          <span
-                            className="size-2.5 rounded-full border border-black/15"
-                            style={{ backgroundColor: p.swatches[1] }}
-                          />
-                          <span
-                            className="size-2.5 rounded-full border border-black/15"
-                            style={{ backgroundColor: p.swatches[2] }}
-                          />
-                        </span>
-                        <span>{p.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <AgentStatusCard
+      <main
+        className={
+          isHomeVisible
+            ? "flex-1 min-h-0 flex relative overflow-hidden"
+            : "flex-1 min-h-0 flex relative overflow-hidden px-2 pt-2 pb-2 gap-2"
+        }
+      >
+        {showUsageDashboard ? (
+          <div className="min-w-0 flex-1 overflow-auto">
+            <UsageDashboard
               providers={agent.providers}
-              loading={agent.loadingProviders}
+              currentProjectPath={daemon.projectPath}
+              recentProjects={recentProjects.projects}
+              threadTitles={Object.fromEntries(
+                mergedOrchestrationThreads.map((thread) => [thread.id, thread.title]),
+              )}
+              onTopBarStateChange={setUsageTopBarState}
+            />
+          </div>
+        ) : isHomeVisible ? (
+          <div className="min-w-0 flex-1">
+            <HomeWorkspace
+              recentProjects={recentProjects.projects}
+              threadCounts={threadCountsByProject}
+              compilersStatus={latexCompiler.compilersStatus}
+              providers={agent.providers}
+              providersLoading={agent.loadingProviders}
+              onOpenProject={handleOpenRecentProject}
+              onRemoveProject={recentProjects.removeProject}
+              onClearProjects={recentProjects.clearAll}
+              onOpenFolder={handleOpenFolder}
+              onNewProject={() => void handleNewLatexProject()}
+              onCloneFromGit={() => setShowCloneDialog(true)}
+              onRefreshCompilers={latexCompiler.detectCompilers}
               onRefreshProviders={agent.refreshProviders}
               onRefreshRateLimits={agent.refreshRateLimits}
-              onOpenSettings={handleOpenAgentSettings}
+              onOpenAgentSettings={handleOpenAgentSettings}
             />
-          </aside>
-        ) : (
-          <AnimatePresence mode="wait">
-            {showSidebar && (
-              <motion.div
-                key="sidebar-container"
-                initial={prefersReducedMotion ? { opacity: 1 } : { x: -24, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={prefersReducedMotion ? { opacity: 0 } : { x: -24, opacity: 0 }}
-                transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
-                className="flex flex-shrink-0"
-              >
-                <aside
-                  style={{
-                    width: resizing === "sidebar" ? "var(--sidebar-width)" : sidebarWidth,
-                    willChange: resizing === "sidebar" ? "width" : undefined,
-                  }}
-                  className="flex flex-col flex-shrink-0 overflow-hidden bg-bg pr-1"
-                >
-                  <TabBar
-                    tabs={sidebarTabs}
-                    activeTab={sidebarTab}
-                    onTabSelect={(id) => setSidebarTab(id as "files" | "outline" | "git")}
-                    variant="sidebar"
-                  />
+          </div>
+        ) : null}
+        {(() => {
+          const isWriteView = Boolean(
+            daemon.projectPath &&
+              workspaceView === "write" &&
+              !showUsageDashboard &&
+              !showHomeWorkspace,
+          );
+          const isAgentsView = Boolean(
+            daemon.projectPath &&
+              workspaceView === "agents" &&
+              !showUsageDashboard &&
+              !showHomeWorkspace,
+          );
+          const isDockedVisible = isWriteView && showRightPanel;
+          const isAgentVisible = isAgentsView || isDockedVisible;
+          const isMainWorkspaceVisible = isWriteView || isAgentsView;
+          const inspectorGitStatus = activeWorktreePath ? worktreeGitStatus : gitStatus;
+          const checkoutPath = activeWorktreePath ?? daemon.projectPath;
 
-                  <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                    {sidebarTab === "files" && (
-                      <FileSidebarPanel
-                        projectPath={daemon.projectPath}
-                        files={daemon.files}
-                        selectedFile={selectedFile}
-                        highlightedFile={highlightedFile}
-                        onFileSelect={handleFileSelect}
-                        onCreateFile={() => setCreateDialog({ type: "file" })}
-                        onCreateDirectory={() => setCreateDialog({ type: "directory" })}
-                        onRefreshFiles={daemon.refreshFiles}
-                        fileOperations={{
-                          createFile: daemon.createFile,
-                          createDirectory: daemon.createDirectory,
-                          renamePath: daemon.renamePath,
-                          deletePath: daemon.deletePath,
+          return (
+            <div
+              id={isAgentsView ? "workspace-panel-agents" : "workspace-panel-write"}
+              {...(daemon.projectPath &&
+                isMainWorkspaceVisible && {
+                  role: "tabpanel",
+                  "aria-labelledby": isAgentsView ? "workspace-tab-agents" : "workspace-tab-write",
+                })}
+              className={
+                isMainWorkspaceVisible
+                  ? "flex-1 min-w-0 min-h-0 flex relative overflow-hidden gap-2"
+                  : "hidden"
+              }
+            >
+              {isWriteView && daemon.projectPath && (
+                <AnimatePresence mode="wait">
+                  {showSidebar && (
+                    <motion.div
+                      key="sidebar-container"
+                      initial={prefersReducedMotion ? { opacity: 1 } : { x: -24, opacity: 0 }}
+                      animate={{ x: 0, opacity: 1 }}
+                      exit={prefersReducedMotion ? { opacity: 0 } : { x: -24, opacity: 0 }}
+                      transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
+                      className="flex flex-shrink-0"
+                    >
+                      <aside
+                        style={{
+                          width: resizing === "sidebar" ? "var(--sidebar-width)" : sidebarWidth,
+                          willChange: resizing === "sidebar" ? "width" : undefined,
                         }}
-                      />
-                    )}
+                        className="flex flex-col flex-shrink-0 overflow-hidden bg-bg px-2 pt-2.5 pb-2 gap-1"
+                      >
+                        {/* 1. FILES */}
+                        <div className="flex-1 min-h-[120px] flex flex-col overflow-hidden">
+                          <FileSidebarPanel
+                            projectPath={daemon.projectPath}
+                            files={daemon.files}
+                            selectedFile={selectedFile}
+                            highlightedFile={highlightedFile}
+                            onFileSelect={handleFileSelect}
+                            onCreateFile={() => setCreateDialog({ type: "file" })}
+                            onCreateDirectory={() => setCreateDialog({ type: "directory" })}
+                            onRefreshFiles={daemon.refreshFiles}
+                            fileVoiceDots={fileVoiceDots}
+                            mainFile={latexSettings.settings.mainFile}
+                            gitStatusByPath={gitStatusByPath}
+                            errorCountByPath={errorCountByPath}
+                            activeProviderId={agent.activeProviderStatus?.id}
+                            onPlanRename={handlePlanRename}
+                            onApplyRename={handleApplyRename}
+                            onSetMainFile={(node) => void latexSettings.setMainFile(node.path)}
+                            onAskAgentOpening={(node) => {
+                              openDockedAgentPanel();
+                              setAgentDraftInjection({ id: Date.now(), text: `@${node.path} ` });
+                            }}
+                            fileOperations={{
+                              createFile: daemon.createFile,
+                              createDirectory: daemon.createDirectory,
+                              renamePath: daemon.renamePath,
+                              deletePath: daemon.deletePath,
+                              duplicateFile: daemon.duplicateFile,
+                            }}
+                          />
+                        </div>
 
-                    {sidebarTab === "outline" && (
-                      <SidebarOutlinePanel
-                        activeFile={selectedFile ?? null}
-                        content={outlineContent}
-                        onJumpToLine={handleOutlineJumpToLine}
-                        onOpenInputFile={handleOutlineOpenInputFile}
-                      />
-                    )}
+                        {/* 2. OUTLINE */}
+                        {selectedFile && /\.tex$/i.test(selectedFile) && (
+                          <>
+                            <div className="h-px bg-border mx-1.5 my-1.5 shrink-0" />
+                            <div className="max-h-[160px] flex flex-col min-h-0 overflow-hidden">
+                              <SidebarOutlinePanel
+                                compact
+                                cursorLine={cursorPosition.line}
+                                activeFile={selectedFile}
+                                content={outlineContent}
+                                onJumpToLine={handleOutlineJumpToLine}
+                                onOpenInputFile={handleOutlineOpenInputFile}
+                              />
+                            </div>
+                          </>
+                        )}
 
-                    {sidebarTab === "git" && (
-                      <div className="flex-1 flex flex-col overflow-hidden">
-                        <GitSidebarPanel
-                          projectPath={daemon.projectPath}
-                          gitStatus={gitStatus}
-                          gitGraph={daemon.gitGraph}
-                          gitLogEntries={daemon.gitLogEntries}
-                          stagedChanges={stagedChanges}
-                          unstagedChanges={unstagedChanges}
-                          showRemoteInput={showRemoteInput}
-                          remoteUrl={remoteUrl}
-                          onRemoteUrlChange={(value) => setRemoteUrl(value)}
-                          onShowRemoteInput={() => setShowRemoteInput(true)}
-                          onHideRemoteInput={() => setShowRemoteInput(false)}
-                          onSubmitRemote={handleRemoteSubmit}
-                          onInitGit={daemon.gitInit}
-                          isInitializingGit={daemon.isInitializingGit}
-                          onRefreshStatus={handleRefreshGitStatus}
-                          onStageAll={handleStageAll}
-                          onDiscardAll={handleDiscardAll}
-                          onDiscardFile={handleDiscardFile}
-                          onStageFile={handleStageFile}
-                          onUnstageFile={handleUnstageFile}
-                          onUnstageAll={handleUnstageAll}
-                          showCommitInput={showCommitInput}
-                          commitMessage={commitMessage}
-                          onCommitMessageChange={(value) => setCommitMessage(value)}
-                          onShowCommitInput={() => setShowCommitInput(true)}
-                          onHideCommitInput={() => setShowCommitInput(false)}
-                          onCommit={handleCommit}
-                          onPush={handleGitPush}
-                          onPull={handleGitPull}
-                          onPreviewDiff={handlePreviewGitDiff}
-                          onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
-                          onOpenFile={(path) => {
-                            void handleFileSelect(path);
-                          }}
-                          onPublishToGitHub={handlePublishToGitHub}
-                          isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
-                          isPushing={daemon.isPushing}
-                          isPulling={daemon.isPulling}
-                          isAuthenticatingGh={daemon.isAuthenticatingGh}
+                        {/* 3. THREADS */}
+                        <div className="h-px bg-border mx-1.5 my-1.5 shrink-0" />
+                        <div className="flex flex-col min-h-0 shrink-0">
+                          <div className="h-7 px-1 pl-2 flex items-center">
+                            <span className="ox-sec">Threads</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                agent.createThread();
+                                openDockedAgentPanel();
+                              }}
+                              className="ml-auto text-[12px] text-foreground hover:bg-subtle px-1.5 py-0.5 rounded-md transition-colors"
+                            >
+                              + New
+                            </button>
+                          </div>
+                          <div className="max-h-[210px] overflow-y-auto space-y-0.5">
+                            {projectThreads.length === 0 ? (
+                              <div className="text-[12px] text-muted px-2 py-2 text-center">
+                                No threads yet
+                              </div>
+                            ) : (
+                              projectThreads.map((thread) => {
+                                const isActive = thread.id === agent.activeThread?.summary.id;
+                                const voice =
+                                  VOICE_COLORS[thread.providerId] ?? VOICE_COLORS["custom-acp"];
+                                const ageMin = Math.max(
+                                  1,
+                                  Math.round((Date.now() - thread.updatedAt) / 60000),
+                                );
+                                const ageLabel =
+                                  ageMin < 60
+                                    ? `${ageMin}m`
+                                    : ageMin < 1440
+                                      ? `${Math.floor(ageMin / 60)}h`
+                                      : `${Math.floor(ageMin / 1440)}d`;
+                                const stateLabel =
+                                  thread.status === "running"
+                                    ? "editing"
+                                    : thread.status === "waiting_input"
+                                      ? "waiting"
+                                      : isActive && showRightPanel
+                                        ? "docked →"
+                                        : "done";
+
+                                return (
+                                  <button
+                                    key={thread.id}
+                                    type="button"
+                                    onClick={() => {
+                                      void agent.loadThread(thread.id);
+                                      openDockedAgentPanel();
+                                    }}
+                                    className={`w-full text-left px-2 py-1.5 rounded-[8px] flex gap-2.5 transition-colors ${
+                                      isActive
+                                        ? "bg-panel ring-1 ring-border shadow-xs"
+                                        : "hover:bg-subtle"
+                                    }`}
+                                  >
+                                    <span
+                                      className="w-[3px] rounded-[2px] shrink-0"
+                                      style={{
+                                        backgroundColor: voice.ink,
+                                        opacity: thread.status === "idle" && !isActive ? 0.45 : 1,
+                                      }}
+                                      aria-hidden="true"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-medium text-[12.5px] text-foreground truncate">
+                                          {thread.title || "Untitled thread"}
+                                        </span>
+                                        {thread.status === "running" ? (
+                                          <span
+                                            className="ml-auto flex items-center gap-1 text-[11px] shrink-0"
+                                            style={{ color: voice.text }}
+                                          >
+                                            <span
+                                              className="size-1.5 rounded-full"
+                                              style={{ backgroundColor: voice.ink }}
+                                              aria-hidden="true"
+                                            />
+                                            live
+                                          </span>
+                                        ) : thread.status === "waiting_input" ? (
+                                          <span className="ml-auto bg-warn-bg border border-[var(--warn-line)] text-warn rounded-full px-1.5 text-[10.5px] font-semibold leading-4 shrink-0">
+                                            Approve
+                                          </span>
+                                        ) : (
+                                          <span className="ml-auto text-[11px] text-muted shrink-0">
+                                            {ageLabel}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11.5px] text-muted mt-0.5 flex items-center gap-1 truncate">
+                                        <ProviderIcon
+                                          providerId={thread.providerId}
+                                          className="size-3 shrink-0"
+                                        />
+                                        <span className="truncate">
+                                          {formatProviderDisplayName(thread.providerId)} ·{" "}
+                                          {stateLabel}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            )}
+
+                            {(() => {
+                              const archivedThreads = agent.threads.filter((t) => t.archived);
+                              if (archivedThreads.length === 0) return null;
+                              return (
+                                <div className="pt-0.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowSettledThreads((prev) => !prev)}
+                                    className="w-full h-[26px] px-2 rounded-[6px] flex items-center text-[12px] text-muted hover:bg-subtle transition-colors"
+                                  >
+                                    <span className="mr-1.5 text-[10px]" aria-hidden="true">
+                                      {showSettledThreads ? "▾" : "▸"}
+                                    </span>
+                                    <span>Settled</span>
+                                    <span className="ml-auto font-mono text-[11px]">
+                                      {archivedThreads.length}
+                                    </span>
+                                  </button>
+                                  {showSettledThreads && (
+                                    <div className="space-y-0.5 mt-0.5 pl-2">
+                                      {archivedThreads.map((t) => (
+                                        <button
+                                          key={t.id}
+                                          type="button"
+                                          onClick={() => {
+                                            void agent.loadThread(t.id);
+                                            openDockedAgentPanel();
+                                          }}
+                                          className="w-full text-left px-2 py-1 rounded-[6px] text-[12px] text-muted hover:text-foreground hover:bg-subtle truncate"
+                                        >
+                                          {t.title || "Untitled thread"}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+
+                        {/* 4. Sidebar Footer */}
+                        <div className="mt-auto pt-1.5 flex items-center gap-2 px-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowLatexSettings(true)}
+                            className="size-7 rounded-[7px] inline-flex items-center justify-center text-muted hover:text-foreground hover:bg-subtle transition-colors shrink-0"
+                            title="Settings"
+                            aria-label="Settings"
+                          >
+                            <GearIcon className="size-4" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowUsageDashboard(true)}
+                            className="flex-1 min-w-0 text-left rounded-[8px] px-2 py-1 hover:bg-subtle transition-colors"
+                          >
+                            <div className="flex items-center text-[11.5px] text-muted">
+                              <span>Usage today</span>
+                              {todayUsageByProvider.length > 0 && (
+                                <span className="font-mono text-[11px] text-muted ml-auto">
+                                  {(() => {
+                                    const total = todayUsageByProvider.reduce(
+                                      (sum, p) => sum + p.tokens,
+                                      0,
+                                    );
+                                    return total >= 1000
+                                      ? `${(total / 1000).toFixed(1)}k`
+                                      : `${total}`;
+                                  })()}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex gap-0.5 mt-1 h-[5px]" aria-hidden="true">
+                              {todayUsageByProvider.length === 0 ? (
+                                <span className="flex-1 rounded-[2px] bg-border" />
+                              ) : (
+                                todayUsageByProvider.map((entry) => {
+                                  const voice =
+                                    VOICE_COLORS[entry.providerId] ?? VOICE_COLORS["custom-acp"];
+                                  return (
+                                    <span
+                                      key={entry.providerId}
+                                      className="rounded-[2px]"
+                                      style={{
+                                        flex: entry.tokens,
+                                        backgroundColor: voice.ink,
+                                      }}
+                                    />
+                                  );
+                                })
+                              )}
+                            </div>
+                          </button>
+                        </div>
+                      </aside>
+
+                      <div className="relative group w-1.5 flex-shrink-0 -mx-0.5">
+                        <motion.div
+                          drag="x"
+                          dragConstraints={{ left: 0, right: 0 }}
+                          dragElastic={0}
+                          dragMomentum={false}
+                          onDragStart={() => startResize("sidebar")}
+                          onDrag={(_event, info) => handleResizeDrag("sidebar", info)}
+                          onDragEnd={endResize}
+                          className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                          style={{ x: 0 }}
+                        />
+                        <div
+                          className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
+                            resizing === "sidebar" ? "bg-accent" : "group-hover:bg-border-dark"
+                          }`}
                         />
                       </div>
-                    )}
-                  </div>
-
-                  {/* Silkscreen-style Agent Tools status card pinned to rail footer */}
-                  <div className="pt-2 px-1 shrink-0">
-                    <AgentStatusCard
-                      providers={agent.providers}
-                      loading={agent.loadingProviders}
-                      onRefreshProviders={agent.refreshProviders}
-                      onRefreshRateLimits={agent.refreshRateLimits}
-                      onOpenSettings={handleOpenAgentSettings}
-                    />
-                  </div>
-                </aside>
-
-                <div className="relative group w-1.5 flex-shrink-0 -mx-0.5">
-                  <motion.div
-                    drag="x"
-                    dragConstraints={{ left: 0, right: 0 }}
-                    dragElastic={0}
-                    dragMomentum={false}
-                    onDragStart={() => startResize("sidebar")}
-                    onDrag={(_event, info) => handleResizeDrag("sidebar", info)}
-                    onDragEnd={endResize}
-                    className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                    style={{ x: 0 }}
-                  />
-                  <div
-                    className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
-                      resizing === "sidebar" ? "bg-accent" : "group-hover:bg-border-dark"
-                    }`}
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
-
-        {/* Primary Inset Frame: Home OR Unified Editor + Live PDF */}
-        <div className="flex-1 min-w-0 w-0 flex flex-col ox-frame">
-          <div className="flex-1 min-h-0 flex overflow-hidden">
-            <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-              {daemon.projectPath && editorPanelItems.length > 0 ? (
-                <div ref={editorWorkspaceRef} className="relative flex-1 min-h-0">
-                  {splitDropHint && (
-                    <div className="pointer-events-none absolute inset-0 z-10">
-                      <div
-                        className={`absolute inset-y-0 w-1/2 transition-opacity duration-100 ${
-                          splitDropHint === "left"
-                            ? "left-0 border-r border-accent/40 bg-accent-soft/40"
-                            : "right-0 border-l border-accent/40 bg-accent-soft/40"
-                        }`}
-                      />
-                    </div>
+                    </motion.div>
                   )}
+                </AnimatePresence>
+              )}
 
-                  <DockviewPanelLayout
-                    panels={editorPanelItems}
-                    className="dockview-editor-layout"
+              {isAgentsView && (
+                <div className="w-[284px] max-xl:w-[248px] shrink-0 overflow-hidden">
+                  <OrchestrationSidebar
+                    threads={mergedOrchestrationThreads}
+                    activeThreadId={activeWorkspaceThread?.id}
+                    activeProjectPath={daemon.projectPath}
+                    prByThreadId={orchestration.pullRequests}
+                    onOpenThread={(thread) =>
+                      void handleOpenOrchestrationThread(thread).catch((error: unknown) =>
+                        toast(String(error), "error"),
+                      )
+                    }
+                    onNewThread={() =>
+                      void agent
+                        .createThread()
+                        .catch((error: unknown) => toast(String(error), "error"))
+                    }
+                    onOpenUsage={() => setShowUsageDashboard(true)}
+                    todayUsageByProvider={todayUsageByProvider}
                   />
                 </div>
-              ) : (
-                <div className="flex-1 min-h-0 overflow-y-auto relative ox-home-grid">
-                  {daemon.projectPath ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center px-6 space-y-2 relative z-10">
-                      <div className="text-[15px] font-semibold text-foreground-strong">
-                        No file open
+              )}
+
+              {/* Primary Content Column: Top Row (Source | Docked Agent | PDF or Agents | Inspector) + Full-Width BuildActivityDrawer */}
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden">
+                <div className="flex-1 min-h-0 min-w-0 flex gap-2 relative overflow-hidden">
+                  <div
+                    className={
+                      isWriteView
+                        ? "flex-1 min-w-[360px] w-0 flex flex-col overflow-hidden ox-frame"
+                        : "hidden"
+                    }
+                  >
+                    {daemon.projectPath && editorPanelItems.length > 0 ? (
+                      <div ref={editorWorkspaceRef} className="relative flex-1 min-h-0">
+                        {splitDropHint && (
+                          <div className="pointer-events-none absolute inset-0 z-10">
+                            <div
+                              className={`absolute inset-y-0 w-1/2 transition-opacity duration-100 ${
+                                splitDropHint === "left"
+                                  ? "left-0 border-r border-accent/40 bg-accent-soft/40"
+                                  : "right-0 border-l border-accent/40 bg-accent-soft/40"
+                              }`}
+                            />
+                          </div>
+                        )}
+
+                        <DockviewPanelLayout
+                          panels={editorPanelItems}
+                          className="dockview-editor-layout"
+                        />
                       </div>
-                      <p className="text-[13px] text-muted max-w-sm">
-                        Select a <code className="font-mono">.tex</code> file from the sidebar,
-                        press <kbd>⌘K</kbd> to jump anywhere, or ask the Agent.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="min-h-full flex flex-col items-center justify-center px-6 py-12 relative z-10 space-y-10">
-                      <div className="flex flex-col items-center text-center space-y-5 max-w-xl w-full">
-                        <h1 className="font-display text-3xl sm:text-[36px] font-semibold tracking-tight text-foreground-strong leading-tight">
-                          What are we writing today?
-                        </h1>
-
-                        <div className="flex flex-wrap items-center justify-center gap-2.5">
+                    ) : (
+                      <div className="flex-1 min-h-0 overflow-y-auto relative ox-home-grid">
+                        <div className="h-full flex flex-col items-center justify-center text-center px-6 space-y-2 relative z-10">
+                          <div className="text-[15px] font-semibold text-foreground-strong">
+                            No file open
+                          </div>
                           <button
                             type="button"
-                            onClick={handleOpenFolder}
-                            className="btn btn-primary h-10 px-5 rounded-full text-[13.5px]"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setShowCommandPalette(true)}
                           >
-                            <FolderOpenIcon className="size-4" />
-                            <span>Open paper folder</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSettingsInitialTab("agents");
-                              setShowLatexSettings(true);
-                            }}
-                            className="btn btn-secondary h-10 px-4 rounded-full text-[13px]"
-                          >
-                            <GearIcon className="size-4 text-muted" />
-                            <span>Configure LaTeX &amp; Agents</span>
+                            <MagnifyingGlassIcon className="size-4" />
+                            Find a file
                           </button>
                         </div>
                       </div>
+                    )}
+                  </div>
 
-                      <RecentProjects
-                        projects={recentProjects.projects}
-                        onSelect={handleOpenRecentProject}
-                        onRemove={recentProjects.removeProject}
-                        onClearAll={recentProjects.clearAll}
+                  {/* Single persistent AgentPanel across Write (docked), Agents (full), and History (hidden) */}
+                  <div
+                    aria-hidden={!isAgentVisible}
+                    className={
+                      isAgentsView
+                        ? "flex-1 min-w-0 min-h-0 flex overflow-hidden"
+                        : isDockedVisible
+                          ? "flex flex-shrink-0 overflow-hidden max-[1100px]:absolute max-[1100px]:inset-y-0 max-[1100px]:right-0 max-[1100px]:z-20"
+                          : "hidden"
+                    }
+                    style={
+                      isDockedVisible
+                        ? {
+                            width:
+                              resizing === "right"
+                                ? `calc(var(--right-panel-width) + 6px)`
+                                : effectiveRightPanelWidth + 6,
+                          }
+                        : undefined
+                    }
+                  >
+                    {isDockedVisible && (
+                      <div className="relative group w-1.5 flex-shrink-0 mr-0.5">
+                        <motion.div
+                          drag="x"
+                          dragConstraints={{ left: 0, right: 0 }}
+                          dragElastic={0}
+                          dragMomentum={false}
+                          onDragStart={() => startResize("right")}
+                          onDrag={(_event, info) => handleResizeDrag("right", info)}
+                          onDragEnd={endResize}
+                          className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                          style={{ x: 0 }}
+                        />
+                        <div
+                          className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
+                            resizing === "right" ? "bg-accent" : "group-hover:bg-border-dark"
+                          }`}
+                        />
+                      </div>
+                    )}
+                    <aside
+                      style={
+                        isDockedVisible
+                          ? {
+                              width:
+                                resizing === "right"
+                                  ? "var(--right-panel-width)"
+                                  : effectiveRightPanelWidth,
+                              willChange: resizing === "right" ? "width" : undefined,
+                            }
+                          : undefined
+                      }
+                      className={
+                        isAgentsView
+                          ? "ox-frame flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden"
+                          : "ox-frame flex flex-col flex-shrink-0 max-[1100px]:shadow-md"
+                      }
+                    >
+                      <AgentErrorBoundary onReset={handleResetAgentBoundary}>
+                        <AgentPanel
+                          agent={agent}
+                          agentSettings={agentSettings.settings}
+                          onUpdateAgentSettings={agentSettings.updateSettings}
+                          onSetDefaultModel={agentSettings.setDefaultModel}
+                          onSetDefaultEffort={agentSettings.setDefaultEffort}
+                          projectPath={daemon.projectPath}
+                          files={daemon.files}
+                          activeFile={selectedFile ?? null}
+                          usageOpen={agentUsageOpen}
+                          onUsageOpenChange={setAgentUsageOpen}
+                          draftInjection={agentDraftInjection}
+                          onDraftConsumed={handleAgentDraftConsumed}
+                          onFileClick={
+                            isAgentsView ? handleAgentsWorkspaceFileClick : handleAgentFileClick
+                          }
+                          onRunTerminalCommand={handleAgentRunTerminalCommand}
+                          onApproveInteraction={score.approveWait}
+                          onOpenAgentSettings={handleOpenAgentSettings}
+                          onOpenWorkspace={
+                            daemon.projectPath ? handleOpenAgentsWorkspace : undefined
+                          }
+                          mode={isAgentsView ? "workspace" : "docked"}
+                          threePane={
+                            workspaceView === "write" &&
+                            showRightPanel &&
+                            Boolean(daemon.projectPath && showLivePreviewEffective)
+                          }
+                          onSwitchToPdf={handleSwitchDockedToPdf}
+                          onDockInWrite={handleDockAgentInWrite}
+                          latestBuildLogExcerpt={latestBuildLogExcerpt}
+                          onClose={isAgentsView ? handleCloseAgentsView : handleCloseRightPanel}
+                        />
+                      </AgentErrorBoundary>
+                    </aside>
+                  </div>
+
+                  {isWriteView && daemon.projectPath && showLivePreviewEffective && (
+                    <>
+                      <div className="relative group w-1 flex-shrink-0 -mx-1">
+                        <motion.div
+                          drag="x"
+                          dragConstraints={{ left: 0, right: 0 }}
+                          dragElastic={0}
+                          dragMomentum={false}
+                          onDragStart={() => startResize("preview")}
+                          onDrag={(_event, info) => handleResizeDrag("preview", info)}
+                          onDragEnd={endResize}
+                          className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
+                          style={{ x: 0 }}
+                        />
+                        <div
+                          className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
+                            resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
+                          }`}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          width:
+                            resizing === "preview"
+                              ? "var(--preview-panel-width)"
+                              : showRightPanel
+                                ? threePanePdfWidth
+                                : livePreviewWidth,
+                        }}
+                        className="flex-shrink-0 min-w-0 max-w-[55%] h-full rounded-[10px] border border-border bg-stage overflow-hidden shadow-[var(--frame-shadow)]"
+                      >
+                        <LivePdfPreview
+                          projectPath={daemon.projectPath}
+                          mainFile={latexSettings.settings.mainFile}
+                          pdfPath={latexCompiler.pdfPath}
+                          pdfVersion={latexCompiler.pdfVersion}
+                          compileStatus={latexCompiler.compileStatus}
+                          compileLog={latexCompiler.compileLog}
+                          diagnostics={latexCompiler.diagnostics}
+                          lastResult={latexCompiler.lastResult}
+                          lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
+                          autoCompile={latexSettings.settings.autoCompile}
+                          staleAgentEdits={staleAgentEdits}
+                          compiler={latexSettings.settings.compiler}
+                          compilersStatus={latexCompiler.compilersStatus}
+                          shellEscape={latexSettings.settings.shellEscape}
+                          highlightTarget={pdfHighlightTarget}
+                          onCompile={handleCompileShortcut}
+                          onStopCompile={handleStopCompile}
+                          onToggleAutoCompile={handleToggleAutoCompile}
+                          onChangeCompiler={(nextCompiler) => {
+                            void latexSettings.updateSettings({ compiler: nextCompiler });
+                          }}
+                          onToggleShellEscape={() => {
+                            void latexSettings.updateSettings({
+                              shellEscape: !latexSettings.settings.shellEscape,
+                            });
+                          }}
+                          onOpenBuildSettings={() => {
+                            setSettingsInitialTab("build");
+                            setShowLatexSettings(true);
+                          }}
+                          onSelectMainFile={() => setShowMainFileDialog(true)}
+                          onCleanAuxFiles={handleCleanAuxFiles}
+                          onForwardSync={handleLivePreviewForwardSync}
+                          onSynctexClick={handleLivePreviewSynctexClick}
+                          onJumpToDiagnostic={handleJumpToDiagnostic}
+                          onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
+                          onOpenBuildActivity={openBuildActivity}
+                          onClose={handleCloseLivePreview}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {isAgentsView && (
+                    <div className="w-[308px] max-xl:w-[264px] shrink-0 overflow-hidden">
+                      <ProjectInspector
+                        key={activeWorkspaceThread?.id ?? daemon.projectPath}
+                        projectPath={daemon.projectPath}
+                        workspacePath={activeWorktreePath}
+                        workspaceBranch={activeThreadBranch}
+                        gitStatus={inspectorGitStatus?.isRepo ? inspectorGitStatus : null}
+                        branchPr={
+                          activeWorkspaceThread
+                            ? orchestration.pullRequests[activeWorkspaceThread.id]
+                            : null
+                        }
+                        activeThread={activeWorkspaceThread}
+                        threads={mergedOrchestrationThreads}
+                        error={orchestration.error}
+                        onOpenThread={(thread) =>
+                          void handleOpenOrchestrationThread(thread).catch((error: unknown) =>
+                            toast(String(error), "error"),
+                          )
+                        }
+                        onDelegate={activeWorkspaceThread ? handleDelegateTask : undefined}
+                        onSchedule={handleScheduleThread}
+                        onCancelSchedule={
+                          activeWorkspaceThread?.schedule
+                            ? async () => {
+                                await invoke("agent_set_thread_schedule", {
+                                  projectPath: activeWorkspaceThread.projectPath,
+                                  threadId: activeWorkspaceThread.id,
+                                  schedule: null,
+                                });
+                              }
+                            : undefined
+                        }
+                        onCreateWorktree={
+                          gitStatus?.hasCommits &&
+                          activeWorkspaceThread &&
+                          !activeWorktreePath &&
+                          !activeWorkspaceThread.providerSessionId &&
+                          activeWorkspaceThread.messageCount === 0
+                            ? handleCreateThreadWorktree
+                            : undefined
+                        }
+                        onMergeWorktree={
+                          activeWorktreePath && gitStatus?.branch
+                            ? handleMergeThreadWorktree
+                            : undefined
+                        }
+                        onCommitAndPr={
+                          inspectorGitStatus?.remote && activeWorkspaceThread
+                            ? () =>
+                                handleRequestPullRequest(activeWorkspaceThread, inspectorGitStatus)
+                            : undefined
+                        }
+                        onReviewChanges={
+                          !activeWorktreePath && gitStatus?.isRepo
+                            ? () => setWorkspaceView("history")
+                            : undefined
+                        }
+                        onPull={
+                          !activeWorktreePath && gitStatus?.remote ? handleGitPull : undefined
+                        }
+                        onPush={
+                          !activeWorktreePath && gitStatus?.remote ? handleGitPush : undefined
+                        }
+                        lastBuild={{
+                          mainFile: latexSettings.settings.mainFile,
+                          durationMs: latexCompiler.lastCompileDurationMs,
+                          builtAt: latexCompiler.lastPdfBuildStartedAt,
+                          status: latexCompiler.compileStatus,
+                          staleAgentEdits,
+                          errorCount: latexCompiler.diagnostics.filter(
+                            (d) => d.severity === "error",
+                          ).length,
+                        }}
+                        fileVoiceByPath={fileVoiceByPath}
+                        diffPanel={
+                          checkoutPath && inspectorGitStatus?.isRepo ? (
+                            <WorkspaceChanges
+                              key={checkoutPath}
+                              directory={checkoutPath}
+                              status={inspectorGitStatus}
+                              onChanged={
+                                activeWorktreePath ? refreshWorktreeStatus : daemon.refreshGitStatus
+                              }
+                            />
+                          ) : undefined
+                        }
+                        pdfPanel={
+                          !activeWorktreePath && latexCompiler.pdfPath ? (
+                            <PdfViewer
+                              src={convertFileSrc(latexCompiler.pdfPath)}
+                              refreshKey={latexCompiler.pdfVersion}
+                            />
+                          ) : undefined
+                        }
+                        terminalPanel={
+                          <TerminalPanel
+                            embedded
+                            open
+                            projectPath={activeWorktreePath ?? daemon.projectPath}
+                            shellMode={editorSettings.settings.terminalShellMode}
+                            customShell={editorSettings.settings.terminalShellPath}
+                            fontFamily={editorSettings.settings.terminalFontFamily}
+                            fontSize={editorSettings.settings.terminalFontSize}
+                            lineHeight={editorSettings.settings.terminalLineHeight}
+                            prefersReducedMotion={Boolean(prefersReducedMotion)}
+                            onClose={() => setWorkspaceView("write")}
+                          />
+                        }
                       />
+                    </div>
+                  )}
+                </div>
+
+                {/* LaTeX Install Prompt */}
+                {isWriteView &&
+                  daemon.projectPath &&
+                  latexCompiler.compilersStatus &&
+                  !hasAnyCompiler &&
+                  !latexCompiler.isDetecting && (
+                    <div className="border-t border-border">
+                      <LaTeXInstallPrompt onRefreshCompilers={latexCompiler.detectCompilers} />
+                    </div>
+                  )}
+
+                {isWriteView &&
+                  Object.entries(failedSourceWrites).map(([path, content]) => (
+                    <div
+                      key={path}
+                      className="flex items-center justify-between gap-2 rounded border border-error bg-error-bg px-3 py-1 text-xs text-error"
+                    >
+                      <span role="status">
+                        Could not save <span className="font-mono">{path}</span>
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => void retrySourceSave(path, content)}
+                      >
+                        Retry save
+                      </button>
+                    </div>
+                  ))}
+                {isWriteView && daemon.projectPath && (
+                  <BuildActivityDrawer
+                    activeTab={buildActivityTab}
+                    onChange={openBuildActivity}
+                    collapsed={buildActivityCollapsed}
+                    onToggle={() => setBuildActivityCollapsed((p) => !p)}
+                    scorePanel={
+                      <ScoreDrawer
+                        lanes={score.lanes}
+                        start={score.start}
+                        end={score.end}
+                        onMark={(mark: ScoreMark) => {
+                          if (mark.kind === "compile") {
+                            openBuildActivity("build-log");
+                            return;
+                          }
+                          const path = mark.filePath
+                            ? projectRelativePath(mark.projectPath, mark.filePath)
+                            : null;
+                          if (path) {
+                            handleAgentFileClick(path);
+                          }
+                          if (mark.threadId) {
+                            void agent.loadThread(mark.threadId);
+                            openDockedAgentPanel();
+                          }
+                        }}
+                      />
+                    }
+                    terminalPanel={
+                      <TerminalPanel
+                        embedded
+                        projectPath={daemon.projectPath}
+                        open={terminalMounted}
+                        shellMode={editorSettings.settings.terminalShellMode}
+                        customShell={editorSettings.settings.terminalShellPath}
+                        fontFamily={editorSettings.settings.terminalFontFamily}
+                        fontSize={editorSettings.settings.terminalFontSize}
+                        lineHeight={editorSettings.settings.terminalLineHeight}
+                        prefersReducedMotion={Boolean(prefersReducedMotion)}
+                        onClose={() => setBuildActivityCollapsed(true)}
+                        pendingCommand={pendingTerminalCommand}
+                        onPendingCommandSent={() => setPendingTerminalCommand(null)}
+                      />
+                    }
+                    diagnostics={latexCompiler.diagnostics}
+                    threadStatuses={agent.threads
+                      .filter((t) => !t.archived)
+                      .slice(0, 3)
+                      .map((t) => {
+                        const name =
+                          t.providerId === "claude"
+                            ? "Claude"
+                            : t.providerId === "codex"
+                              ? "Codex"
+                              : t.providerId === "antigravity"
+                                ? "Antigravity"
+                                : "Custom ACP";
+                        const state =
+                          t.status === "running"
+                            ? "editing"
+                            : t.status === "waiting_input"
+                              ? "waiting"
+                              : t.status === "error"
+                                ? "error"
+                                : t.messageCount > 0
+                                  ? "done"
+                                  : "idle";
+                        return {
+                          id: t.id,
+                          providerId: t.providerId,
+                          label: `${name} ${state}`,
+                        };
+                      })}
+                    buildSummary={
+                      latexCompiler.lastCompileDurationMs != null
+                        ? `${latexCompiler.lastResult?.compiler ?? latexSettings.settings.compiler} · ${latexCompiler.compileStatus === "error" ? "failed after " : ""}${latexCompiler.lastCompileDurationMs} ms`
+                        : undefined
+                    }
+                    mainFileLogName={
+                      latexSettings.settings.mainFile
+                        ? `${
+                            latexSettings.settings.mainFile
+                              .split("/")
+                              .pop()
+                              ?.replace(/\.tex$/i, "") ?? "main"
+                          }.log`
+                        : "main.log"
+                    }
+                    log={latexCompiler.compileLog}
+                    onJumpToDiagnostic={handleJumpToDiagnostic}
+                    onFixDiagnostics={handleFixDiagnosticsWithAi}
+                    fixLabel={
+                      agent.activeProviderStatus
+                        ? `Fix with ${
+                            agent.activeProviderStatus.id === "claude"
+                              ? "Claude"
+                              : agent.activeProviderStatus.id === "codex"
+                                ? "Codex"
+                                : agent.activeProviderStatus.id === "antigravity"
+                                  ? "Antigravity"
+                                  : "Custom ACP"
+                          }`
+                        : undefined
+                    }
+                    fixProviders={agent.providers
+                      .filter((p) => p.installed)
+                      .map((p) => ({
+                        id: p.id,
+                        label:
+                          p.id === "claude"
+                            ? "Claude"
+                            : p.id === "codex"
+                              ? "Codex"
+                              : p.id === "antigravity"
+                                ? "Antigravity"
+                                : "Custom ACP",
+                      }))}
+                    onSelectFixProvider={(providerId, diags) => {
+                      agentSettings.updateSettings({ defaultProvider: providerId });
+                      handleFixDiagnosticsWithAi(diags);
+                    }}
+                    diagnosticSuggestion={(diagnostic) => {
+                      const file = projectRelativePath(daemon.projectPath ?? "", diagnostic.file);
+                      const isCurrentFile = file === selectedFile;
+                      const suggestion = findMissingFileSuggestion({
+                        diagnostic,
+                        projectFiles: texFiles,
+                        projectRoot: daemon.projectPath ?? undefined,
+                        sourceContent: isCurrentFile ? fileContent : undefined,
+                        recentRenames,
+                      });
+                      if (!suggestion) return null;
+                      const { startOffset, endOffset, before, after } = suggestion;
+                      const action =
+                        isCurrentFile &&
+                        startOffset !== undefined &&
+                        endOffset !== undefined &&
+                        before !== undefined &&
+                        after !== undefined &&
+                        fileContent.slice(startOffset, endOffset) === before
+                          ? () =>
+                              handleContentChange(
+                                fileContent.slice(0, startOffset) +
+                                  after +
+                                  fileContent.slice(endOffset),
+                              )
+                          : () => handleJumpToDiagnostic(diagnostic);
+                      return (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm mt-1"
+                          onClick={action}
+                        >
+                          <span>
+                            Did you mean{" "}
+                            <code className="font-mono">{suggestion.suggestedArg}</code>?
+                          </span>
+                        </button>
+                      );
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
+        {daemon.projectPath &&
+          workspaceView === "history" &&
+          !showUsageDashboard &&
+          !showHomeWorkspace && (
+            <div
+              id="workspace-panel-history"
+              aria-labelledby="workspace-tab-history"
+              role="tabpanel"
+              className="flex-1 min-w-0 min-h-0 flex flex-col gap-2 overflow-hidden"
+            >
+              {activeWorktreePath && (
+                <div className="relative flex items-center gap-2 px-1 shrink-0">
+                  <span className="text-[11.5px] text-muted">Checkout</span>
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutMenuOpen((prev) => !prev)}
+                    className="btn btn-secondary btn-sm h-7 px-2.5 text-[12px] inline-flex items-center gap-1.5"
+                    aria-expanded={checkoutMenuOpen}
+                  >
+                    <span className="truncate max-w-[180px]">
+                      {showThreadHistory ? (activeThreadBranch ?? "Thread worktree") : "Project"}
+                    </span>
+                    <span className="text-[10px] text-muted" aria-hidden="true">
+                      ▾
+                    </span>
+                  </button>
+                  {checkoutMenuOpen && (
+                    <div className="absolute left-14 top-8 z-40 min-w-[190px] ox-popover p-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowThreadHistory(false);
+                          setCheckoutMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-[6px] text-[12px] text-left transition-colors ${
+                          !showThreadHistory
+                            ? "bg-subtle text-foreground-strong font-medium"
+                            : "text-foreground hover:bg-subtle"
+                        }`}
+                      >
+                        <span>Project</span>
+                        {!showThreadHistory && <span aria-hidden="true">✓</span>}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowThreadHistory(true);
+                          setCheckoutMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-[6px] text-[12px] text-left transition-colors ${
+                          showThreadHistory
+                            ? "bg-subtle text-foreground-strong font-medium"
+                            : "text-foreground hover:bg-subtle"
+                        }`}
+                      >
+                        <span className="truncate">{activeThreadBranch ?? "Thread worktree"}</span>
+                        {showThreadHistory && <span aria-hidden="true">✓</span>}
+                      </button>
                     </div>
                   )}
                 </div>
               )}
-            </div>
-
-            {daemon.projectPath && showLivePreview && (
-              <>
-                <div className="relative group w-1 flex-shrink-0">
-                  <motion.div
-                    drag="x"
-                    dragConstraints={{ left: 0, right: 0 }}
-                    dragElastic={0}
-                    dragMomentum={false}
-                    onDragStart={() => startResize("preview")}
-                    onDrag={(_event, info) => handleResizeDrag("preview", info)}
-                    onDragEnd={endResize}
-                    className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                    style={{ x: 0 }}
-                  />
-                  <div
-                    className={`w-full h-full transition-colors ${
-                      resizing === "preview" ? "bg-accent" : "group-hover:bg-border-dark"
-                    }`}
-                  />
-                </div>
-                <div
-                  style={{
-                    width: resizing === "preview" ? "var(--preview-panel-width)" : livePreviewWidth,
-                  }}
-                  className="flex-shrink-0 min-w-0 h-full overflow-hidden"
-                >
-                  <LivePdfPreview
-                    projectPath={daemon.projectPath}
-                    mainFile={latexSettings.settings.mainFile}
-                    pdfPath={latexCompiler.pdfPath}
-                    pdfVersion={latexCompiler.pdfVersion}
-                    compileStatus={latexCompiler.compileStatus}
-                    compileLog={latexCompiler.compileLog}
-                    diagnostics={latexCompiler.diagnostics}
-                    lastResult={latexCompiler.lastResult}
-                    lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
-                    autoCompile={latexSettings.settings.autoCompile}
-                    highlightTarget={pdfHighlightTarget}
-                    onCompile={handleCompileShortcut}
-                    onStopCompile={handleStopCompile}
-                    onToggleAutoCompile={handleToggleAutoCompile}
-                    onCleanAuxFiles={handleCleanAuxFiles}
-                    onForwardSync={handleLivePreviewForwardSync}
-                    onSynctexClick={handleLivePreviewSynctexClick}
-                    onJumpToDiagnostic={handleJumpToDiagnostic}
-                    onFixDiagnosticsWithAi={handleFixDiagnosticsWithAi}
-                    onClose={handleCloseLivePreview}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Quiet Hairline Footer inside the Workspace Inset Frame */}
-          {daemon.projectPath && (
-            <div className="h-7 px-3 border-t border-border bg-panel flex items-center justify-between gap-3 text-[11.5px] text-muted shrink-0">
-              <div className="flex items-center gap-3 min-w-0">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!daemon.projectPath) return;
-                    const res = await latexSettings.detectMainFile(daemon.projectPath);
-                    if (res && res.tex_files.length > 0) {
-                      setMainFileDetectionResult(res);
-                      setShowMainFileDialog(true);
-                    }
-                  }}
-                  className="hover:text-foreground transition-colors truncate font-mono text-[11px]"
-                  title="Select main .tex file"
-                >
-                  main: {latexSettings.settings.mainFile ?? "unset"}
-                </button>
-                {selectedFile && /\.tex$/i.test(selectedFile) && (
-                  <>
-                    <span className="text-border-dark">·</span>
-                    <span className="tabular-nums">{wordCount.words.toLocaleString()} words</span>
-                    <span className="text-border-dark">·</span>
-                    <span className="font-mono text-[11px] tabular-nums">
-                      Ln {cursorPosition.line}, Col {cursorPosition.column}
-                    </span>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                {selectedFile && /\.tex$/i.test(selectedFile) && latexCompiler.pdfPath && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleForwardSync();
-                    }}
-                    className="text-accent hover:underline font-medium"
-                    title="Jump from current line to PDF"
-                  >
-                    Sync → PDF
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowLivePreview((p) => !p)}
-                  className="hover:text-foreground transition-colors tabular-nums"
-                >
-                  {latexCompiler.isCompiling
-                    ? "Compiling..."
-                    : latexCompiler.compileStatus === "success"
-                      ? `PDF ready${latexCompiler.lastCompileDurationMs != null ? ` (${(latexCompiler.lastCompileDurationMs / 1000).toFixed(1)}s)` : ""}`
-                      : latexCompiler.compileStatus === "error"
-                        ? "Build error"
-                        : "PDF preview"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* LaTeX Install Prompt */}
-          {daemon.projectPath &&
-            latexCompiler.compilersStatus &&
-            !hasAnyCompiler &&
-            !latexCompiler.isDetecting && (
-              <div className="border-t border-border">
-                <LaTeXInstallPrompt onRefreshCompilers={latexCompiler.detectCompilers} />
-              </div>
-            )}
-
-          <TerminalPanel
-            projectPath={daemon.projectPath}
-            open={showTerminal}
-            shellMode={editorSettings.settings.terminalShellMode}
-            customShell={editorSettings.settings.terminalShellPath}
-            fontFamily={editorSettings.settings.terminalFontFamily}
-            fontSize={editorSettings.settings.terminalFontSize}
-            lineHeight={editorSettings.settings.terminalLineHeight}
-            prefersReducedMotion={Boolean(prefersReducedMotion)}
-            onClose={() => setShowTerminal(false)}
-            pendingCommand={pendingTerminalCommand}
-            onPendingCommandSent={() => setPendingTerminalCommand(null)}
-          />
-        </div>
-
-        {/* Adjacent White Inset Frame: Agent Pane */}
-        <AnimatePresence>
-          {showRightPanel && (
-            <motion.div
-              key="right-panel-container"
-              initial={prefersReducedMotion ? { opacity: 1, width: 0 } : { opacity: 0, width: 0 }}
-              animate={{
-                opacity: 1,
-                width:
-                  resizing === "right"
-                    ? `calc(var(--right-panel-width) + 6px)`
-                    : effectiveRightPanelWidth + 6,
-              }}
-              exit={prefersReducedMotion ? { opacity: 0, width: 0 } : { opacity: 0, width: 0 }}
-              transition={prefersReducedMotion ? INSTANT_TRANSITION : PANEL_SPRING}
-              className="flex flex-shrink-0 overflow-hidden"
-              style={{
-                willChange: prefersReducedMotion ? undefined : "width, opacity",
-              }}
-            >
-              <div className="relative group w-1.5 flex-shrink-0 mr-0.5">
-                <motion.div
-                  drag="x"
-                  dragConstraints={{ left: 0, right: 0 }}
-                  dragElastic={0}
-                  dragMomentum={false}
-                  onDragStart={() => startResize("right")}
-                  onDrag={(_event, info) => handleResizeDrag("right", info)}
-                  onDragEnd={endResize}
-                  className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize z-10"
-                  style={{ x: 0 }}
-                />
-                <div
-                  className={`w-[2px] mx-auto h-full rounded-full transition-colors ${
-                    resizing === "right" ? "bg-accent" : "group-hover:bg-border-dark"
-                  }`}
-                />
-              </div>
-              <aside
-                style={{
-                  width:
-                    resizing === "right" ? "var(--right-panel-width)" : effectiveRightPanelWidth,
-                  willChange: resizing === "right" ? "width" : undefined,
+              <HistoryWorkspace
+                key={activeHistoryDir ?? daemon.projectPath}
+                className="flex-1"
+                projectDir={activeHistoryDir ?? daemon.projectPath}
+                gitStatus={activeHistoryGitStatus}
+                gitLogEntries={isViewingWorktreeHistory ? worktreeGitLog : daemon.gitLogEntries}
+                selectedCommitHash={selectedHistoryCommit?.hash ?? null}
+                onSelectCommit={(entry) => void handleSelectHistoryCommit(entry)}
+                stagedChanges={activeHistoryStagedChanges}
+                unstagedChanges={activeHistoryUnstagedChanges}
+                fileVoiceByPath={isViewingWorktreeHistory ? undefined : fileVoiceByPath}
+                commitMessage={commitMessage}
+                onCommitMessageChange={setCommitMessage}
+                onStageFile={handleStageFile}
+                onUnstageFile={handleUnstageFile}
+                onCommit={async (message) => {
+                  await handleCommit(message);
                 }}
-                className="ox-frame flex flex-col flex-shrink-0"
-              >
-                <AgentErrorBoundary onReset={handleResetAgentBoundary}>
-                  <AgentPanel
-                    agent={agent}
-                    agentSettings={agentSettings.settings}
-                    onUpdateAgentSettings={agentSettings.updateSettings}
-                    onSetDefaultModel={agentSettings.setDefaultModel}
-                    onSetDefaultEffort={agentSettings.setDefaultEffort}
-                    projectPath={daemon.projectPath}
-                    files={daemon.files}
-                    activeFile={selectedFile ?? null}
-                    usageOpen={agentUsageOpen}
-                    onUsageOpenChange={setAgentUsageOpen}
-                    draftInjection={agentDraftInjection}
-                    onDraftConsumed={handleAgentDraftConsumed}
-                    onFileClick={handleAgentFileClick}
-                    onRunTerminalCommand={handleAgentRunTerminalCommand}
-                    onOpenAgentSettings={handleOpenAgentSettings}
-                    isExpanded={agentExpanded}
-                    onToggleExpand={() => setAgentExpanded((p) => !p)}
-                    onClose={handleCloseRightPanel}
-                  />
-                </AgentErrorBoundary>
-              </aside>
-            </motion.div>
+                onCommitAndPush={
+                  !isViewingWorktreeHistory && activeHistoryGitStatus?.remote
+                    ? async (message) => {
+                        if (await handleCommit(message)) {
+                          await handleGitPush();
+                        }
+                      }
+                    : undefined
+                }
+                onGenerateCommitMessageAI={handleGenerateCommitMessageAI}
+                isGeneratingCommitMessageAI={isGeneratingCommitMessageAI}
+                onPreviewGitFileDiff={(path, staged) =>
+                  void handlePreviewHistoryFileDiff(path, staged)
+                }
+                onPublishToGitHub={
+                  !isViewingWorktreeHistory ? () => void handlePublishToGitHub() : undefined
+                }
+                onOpenThread={(id) => {
+                  const thread = orchestration.threads.find((item) => item.id === id);
+                  if (thread)
+                    void handleOpenOrchestrationThread(thread).catch((error: unknown) =>
+                      toast(String(error), "error"),
+                    );
+                }}
+                beforeMutation={() => {
+                  const checkout = activeHistoryDir ?? daemon.projectPath;
+                  if (
+                    checkout === daemon.projectPath &&
+                    (Object.values(pendingSourceWritesRef.current).some(Boolean) ||
+                      Object.keys(failedSourceWrites).length)
+                  ) {
+                    throw new Error("Wait for the editor to finish saving");
+                  }
+                  if (
+                    projectThreads.some(
+                      (thread) =>
+                        (thread.workspacePath ?? thread.projectPath) === checkout &&
+                        (thread.status === "running" || thread.status === "waiting_input"),
+                    )
+                  ) {
+                    throw new Error("Wait for active agent turns in this checkout to finish");
+                  }
+                }}
+                onFilesChanged={() => {
+                  if (!isViewingWorktreeHistory) {
+                    void daemon.refreshFiles();
+                    void daemon.refreshGitStatus();
+                  } else {
+                    void refreshWorktreeStatus().catch((error: unknown) =>
+                      toast(String(error), "error"),
+                    );
+                  }
+                }}
+                commitDiffPanel={
+                  <div className="flex-1 min-w-0 min-h-0 flex flex-col ox-frame overflow-hidden bg-panel">
+                    {historyDiffPreview ? (
+                      <>
+                        <div className="h-10 px-4 border-b border-border flex items-center justify-between gap-2 shrink-0">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span className="text-[12.5px] font-mono font-medium truncate">
+                              {historyDiffPreview.path}
+                            </span>
+                            <span className="text-[11px] text-muted shrink-0">
+                              {historyDiffPreview.staged ? "Staged" : "Working tree"}
+                            </span>
+                          </div>
+                          {!isViewingWorktreeHistory && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWorkspaceView("write");
+                                void handleFileSelect(historyDiffPreview.path);
+                              }}
+                              className="btn btn-secondary btn-sm h-7 px-2.5 text-[11.5px] shrink-0"
+                            >
+                              Open in Write
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                          {renderGitDiffContent(historyDiffPreview, parsedHistoryDiff)}
+                        </div>
+                      </>
+                    ) : historyCommitDiff ? (
+                      <>
+                        <div className="px-4 py-2.5 border-b border-border flex items-center justify-between gap-3 shrink-0">
+                          <div className="min-w-0">
+                            <div className="text-[14px] font-semibold text-foreground truncate">
+                              {historyCommitDiff.entry.message}
+                            </div>
+                            <div className="text-[11.5px] font-mono text-muted truncate mt-0.5">
+                              {historyCommitDiff.entry.shortHash} · {historyCommitDiff.entry.author}{" "}
+                              · {formatCheckpointTime(historyCommitDiff.entry.date)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex-1 min-h-0 overflow-hidden">
+                          {historyCommitDiff.isLoading ? (
+                            <EditorSkeleton className="h-full" />
+                          ) : historyCommitDiff.error ? (
+                            <div className="h-full flex items-center justify-center px-6 text-xs text-muted">
+                              Failed to load commit diff: {historyCommitDiff.error}
+                            </div>
+                          ) : !historyCommitDiff.content.trim() ? (
+                            <div className="h-full flex items-center justify-center px-6 text-xs text-muted">
+                              No textual diff available for this commit.
+                            </div>
+                          ) : (
+                            <MonacoEditor
+                              content={historyCommitDiff.content}
+                              readOnly
+                              onContentChange={() => {}}
+                              language="diff"
+                              editorSettings={editorSettings.settings}
+                              editorTheme={editorSettings.editorTheme}
+                              className="h-full"
+                            />
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-xs text-muted">
+                        Select a commit or changed file to inspect its diff.
+                      </div>
+                    )}
+                  </div>
+                }
+              />
+            </div>
           )}
-        </AnimatePresence>
       </main>
+
+      {daemon.projectPath && !showUsageDashboard && !showHomeWorkspace && (
+        <StatusBar
+          workspaceView={workspaceView}
+          gitStatus={gitStatus}
+          compileStatus={latexCompiler.compileStatus}
+          lastCompileDurationMs={latexCompiler.lastCompileDurationMs}
+          compiler={
+            latexCompiler.compileStatus === "idle"
+              ? latexSettings.settings.compiler
+              : (latexCompiler.lastResult?.compiler ?? latexSettings.settings.compiler)
+          }
+          errorCount={latexCompiler.diagnostics.filter((d) => d.severity === "error").length}
+          warningCount={latexCompiler.diagnostics.filter((d) => d.severity !== "error").length}
+          selectedFile={selectedFile}
+          isTextFile={workspaceView === "write" && Boolean(selectedFile) && !binaryPreviewUrl}
+          cursorPosition={cursorPosition}
+          wordCount={wordCount.words}
+          agentSummary={{
+            total: projectThreads.length,
+            running: runningThreads,
+            waiting: waitingThreads,
+            scheduled: 0,
+          }}
+          cacheSummaryLabel={
+            todayCachePercent != null ? `Cache ${todayCachePercent}% of input today` : null
+          }
+        />
+      )}
 
       <CommandPalette
         open={showCommandPalette}
@@ -3240,21 +5308,47 @@ export default function EditorPage() {
         bibEntries={bibEntries}
         diagnostics={latexCompiler.diagnostics}
         onOpenFile={(filePath, line) => {
+          activateWorkspaceTab("write");
           void handleFileSelect(filePath).then(() => {
             if (line && line > 0) setPendingGoToLine(line);
           });
         }}
         onCompile={handleCompileShortcut}
         onToggleSidebar={() => setShowSidebar((p) => !p)}
-        onTogglePdf={() => setShowLivePreview((p) => !p)}
+        onTogglePdf={togglePdfPreview}
         onToggleAgent={handleToggleRightPanel}
-        onToggleTerminal={() => setShowTerminal((p) => !p)}
+        onToggleTerminal={toggleTerminal}
         onOpenSettings={() => {
           setSettingsInitialTab("editor");
           setShowLatexSettings(true);
         }}
-        onCyclePalette={handleCyclePalette}
+        onOpenThemePicker={() => setShowThemePicker(true)}
       />
+
+      {showCloneDialog && (
+        <InputDialog
+          title="Clone from Git"
+          placeholder="Repository URL"
+          onConfirm={(url) => void handleCloneProject(url)}
+          onCancel={() => setShowCloneDialog(false)}
+          validator={(url) => (url.trim() ? null : "Enter a repository URL")}
+        />
+      )}
+
+      {pullRequestDraft && (
+        <InputDialog
+          title="Commit staged changes and open a pull request"
+          placeholder="Commit message"
+          onConfirm={(message) => {
+            setPullRequestDraft(null);
+            void handlePublishBranch(pullRequestDraft, message.trim()).catch((error: unknown) =>
+              toast(String(error), "error"),
+            );
+          }}
+          onCancel={() => setPullRequestDraft(null)}
+          validator={(message) => (message.trim() ? null : "Enter a commit message")}
+        />
+      )}
 
       {createDialog && (
         <InputDialog
@@ -3300,15 +5394,6 @@ export default function EditorPage() {
           onCancel={handleMainFileDialogCancel}
         />
       )}
-
-      <SynctexInstallDialog
-        open={showSynctexInstallDialog}
-        onClose={() => {
-          setShowSynctexInstallDialog(false);
-          pendingSynctexRetryRef.current = null;
-        }}
-        onInstallComplete={handleSynctexInstallComplete}
-      />
 
       {showGitHubPublishDialog && (
         <GitHubPublishDialog
