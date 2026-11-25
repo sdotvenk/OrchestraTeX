@@ -1130,10 +1130,8 @@ export function LaTeXSettingsDialog({
               <div className="flex items-center justify-between py-2">
                 <div className="flex items-center gap-3">
                   <div
-                    className={`w-8 h-8 border flex items-center justify-center transition-colors ${
-                      editorSettings.gitAutoFetchEnabled
-                        ? "bg-foreground border-foreground"
-                        : "bg-accent-hover border-border"
+                    className={`size-8 rounded-lg flex items-center justify-center transition-colors ${
+                      editorSettings.gitAutoFetchEnabled ? "bg-accent-soft" : "bg-subtle"
                     }`}
                   >
                     <svg
@@ -1142,11 +1140,7 @@ export function LaTeXSettingsDialog({
                       height="14"
                       viewBox="0 0 16 16"
                       fill="none"
-                      className={
-                        editorSettings.gitAutoFetchEnabled
-                          ? "text-background"
-                          : "text-muted-foreground"
-                      }
+                      className={editorSettings.gitAutoFetchEnabled ? "text-accent" : "text-muted"}
                     >
                       <path
                         d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 2.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5ZM4.5 8a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Zm7 0a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z"
@@ -1164,10 +1158,10 @@ export function LaTeXSettingsDialog({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-foreground-secondary">
-                        Auto Fetch
+                        Auto fetch
                       </span>
                       {editorSettings.gitAutoFetchEnabled && (
-                        <span className="text-[10px] px-1.5 py-0.5 border border-emerald-300 text-emerald-600 font-medium uppercase tracking-wider bg-emerald-50">
+                        <span className="shrink-0 rounded-full bg-success-bg px-2 py-0.5 text-[11px] font-medium text-success">
                           Active
                         </span>
                       )}
