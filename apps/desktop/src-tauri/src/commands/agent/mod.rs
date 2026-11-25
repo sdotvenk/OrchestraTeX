@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod antigravity_usage;
 pub mod binary;
 pub mod claude;
 pub mod codex;

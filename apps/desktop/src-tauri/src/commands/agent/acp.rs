@@ -3,8 +3,8 @@ use super::store::ThreadStore;
 use super::types::{
     now_millis, AgentMessage, AgentPart, AgentProviderId, AgentStreamEvent, AgentThread,
     AttachmentInput, InteractionMode, InteractionResponse, ModelInfo, PendingInteraction,
-    PermissionOption, PlanTaskItem, ProviderCustomConfig, ProviderStatus, RateLimitsSnapshot,
-    SlashCommandInfo, TokenUsageSnapshot,
+    PermissionOption, PlanTaskItem, ProviderCustomConfig, ProviderStatus, SlashCommandInfo,
+    TokenUsageSnapshot,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -903,13 +903,10 @@ pub async fn probe_acp(
     }
 
     let rate_limits = if provider_id == AgentProviderId::Antigravity {
-        Some(RateLimitsSnapshot {
-            provider_id,
-            updated_at: now_millis(),
-            plan_type: None,
-            windows: Vec::new(),
-            credits_balance: None,
-            note: Some("Session context usage only".to_string()),
+        Some(if authenticated {
+            super::antigravity_usage::status_snapshot().await
+        } else {
+            super::antigravity_usage::ProbeOutcome::NoSignIn.into_snapshot(now_millis())
         })
     } else {
         None
