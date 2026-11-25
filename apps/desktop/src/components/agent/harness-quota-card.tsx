@@ -19,6 +19,13 @@ export function HarnessQuotaCard({
   const hasQuota = usedPct !== null && usedPct !== undefined;
   const isInstalled = Boolean(provider?.installed);
   const resetText = formatResetCountdown(primaryWindow?.resetsAt);
+  const hasSecondary =
+    secondaryWindow?.usedPercent !== null && secondaryWindow?.usedPercent !== undefined;
+  const footerText = hasQuota
+    ? (resetText ?? primaryWindow?.status ?? "Active")
+    : isInstalled
+      ? (provider?.rateLimits?.note ?? "Token counts only")
+      : "Configure in Settings → Agents";
 
   return (
     <div
@@ -77,14 +84,13 @@ export function HarnessQuotaCard({
       </div>
 
       <div className="mt-2 flex items-center text-[11.5px] text-muted gap-2">
-        <span className="truncate shrink-0 max-w-[50%]">
-          {hasQuota
-            ? (resetText ?? primaryWindow?.status ?? "Active")
-            : isInstalled
-              ? (provider?.rateLimits?.note ?? "Token counts only")
-              : "Configure in Settings → Agents"}
+        <span
+          className={hasSecondary ? "truncate shrink-0 max-w-[50%]" : "truncate min-w-0"}
+          title={footerText}
+        >
+          {footerText}
         </span>
-        {secondaryWindow?.usedPercent !== null && secondaryWindow?.usedPercent !== undefined && (
+        {hasSecondary && secondaryWindow?.usedPercent != null && (
           <span
             className="ml-auto flex min-w-0 items-baseline gap-1"
             title={`${secondaryWindow.label} ${Math.round(secondaryWindow.usedPercent)}%`}

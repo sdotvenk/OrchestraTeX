@@ -663,7 +663,7 @@ async fn fetch_windows(
     };
     let (daily, prod) = tokio::join!(call(DAILY_ENDPOINT), call(PROD_ENDPOINT));
     let err = match (&daily, &prod) {
-        (Err(e), Err(_)) => Some(e.clone()),
+        (Err(d), Err(p)) => Some(if prod_first { p } else { d }.clone()),
         _ => None,
     };
     let (daily, prod) = (daily.unwrap_or_default(), prod.unwrap_or_default());
@@ -733,7 +733,7 @@ async fn probe_uncached() -> ProbeOutcome {
 }
 
 struct Cache {
-    at: i64,
+    at: std::time::Instant,
     outcome: ProbeOutcome,
 }
 
@@ -745,12 +745,13 @@ fn cache() -> &'static Mutex<Option<Cache>> {
 /// Unknown/no-sign-in results are kept only briefly, so a renewed sign-in shows up quickly.
 const ERROR_CACHE_TTL_MS: i64 = 5_000;
 
-fn cache_fresh(c: &Cache, now: i64) -> bool {
+/// Monotonic, so a wall-clock step backwards can't keep a stale result alive.
+fn cache_fresh(c: &Cache) -> bool {
     let ttl = match c.outcome {
         ProbeOutcome::Windows(_) => CACHE_TTL_MS,
         _ => ERROR_CACHE_TTL_MS,
     };
-    now - c.at < ttl
+    c.at.elapsed() < Duration::from_millis(ttl as u64)
 }
 
 /// Probes Antigravity quota, reusing a recent result unless `force`. Concurrent callers
@@ -758,7 +759,7 @@ fn cache_fresh(c: &Cache, now: i64) -> bool {
 pub async fn probe(force: bool) -> ProbeOutcome {
     let mut guard = cache().lock().await;
     if let Some(c) = guard.as_ref() {
-        if !force && cache_fresh(c, now_ms()) {
+        if !force && cache_fresh(c) {
             return c.outcome.clone();
         }
     }
@@ -766,7 +767,7 @@ pub async fn probe(force: bool) -> ProbeOutcome {
         .await
         .unwrap_or_else(|_| ProbeOutcome::Unknown("quota request timed out".into()));
     *guard = Some(Cache {
-        at: now_ms(),
+        at: std::time::Instant::now(),
         outcome: outcome.clone(),
     });
     outcome
