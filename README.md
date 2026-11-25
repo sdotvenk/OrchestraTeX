@@ -5,9 +5,9 @@
 **Local-first LaTeX editor with Overleaf-style live preview and a multi-agent workspace**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-f0c000?style=flat-square)](LICENSE)
-[![macOS](https://img.shields.io/badge/-macOS-111111?style=flat-square&logo=apple&logoColor=white)](#release-builds)
-[![Windows](https://img.shields.io/badge/-Windows-0078D4?style=flat-square&logo=windows11&logoColor=white)](#release-builds)
-[![Linux](https://img.shields.io/badge/-Linux-333333?style=flat-square&logo=linux&logoColor=white)](#release-builds)
+[![macOS](https://img.shields.io/badge/-macOS-111111?style=flat-square&logo=apple&logoColor=white)](https://github.com/sdotvenk/OrchestraTeX/releases)
+[![Windows](https://img.shields.io/badge/-Windows-0078D4?style=flat-square&logo=windows11&logoColor=white)](https://github.com/sdotvenk/OrchestraTeX/releases)
+[![Linux](https://img.shields.io/badge/-Linux-333333?style=flat-square&logo=linux&logoColor=white)](https://github.com/sdotvenk/OrchestraTeX/releases)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8D8?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Rust](https://img.shields.io/badge/Rust-2021-DEA584?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -115,43 +115,20 @@ pnpm tauri:dev
 2. Install a TeX engine from Home if none is detected. Tectonic is the smallest and fetches packages on demand.
 3. Open a LaTeX folder. `Cmd/Ctrl+Enter` compiles, `Cmd/Ctrl+P` toggles the PDF, and `Cmd/Ctrl+L` opens the agent panel.
 
-## Release builds
+## Build from source
 
-Tauri builds for the platform it runs on, so build each OS on that OS (or let CI do it, below).
+Installers are on the [Releases](https://github.com/sdotvenk/OrchestraTeX/releases) page. To build your own, use Node.js 24+, pnpm and stable Rust, plus:
 
-**All platforms:** Node.js 24+, pnpm, and stable Rust (`rustup`).
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`)
+- **Windows:** Visual Studio Build Tools with "Desktop development with C++", and WebView2 (included in Windows 11)
+- **Linux:** `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf` (Debian/Ubuntu names)
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm version:set 0.2.0          # optional: sets the version in package.json, Cargo.toml and tauri.conf.json
+pnpm install
 pnpm tauri:build
 ```
 
-Bundles land in `apps/desktop/src-tauri/target/release/bundle/` (or `target/<triple>/release/bundle/` with `--target`).
-
-| Platform | Extra requirements | Command | Output |
-| --- | --- | --- | --- |
-| macOS, Apple Silicon | Xcode Command Line Tools | `pnpm tauri:build` | `bundle/macos/OrchestraTeX.app`, `bundle/dmg/*.dmg` |
-| macOS, Intel | `rustup target add x86_64-apple-darwin` | `pnpm --filter @orchestratex/desktop tauri build --target x86_64-apple-darwin` | same, under `target/x86_64-apple-darwin/` |
-| macOS, universal | both Apple targets | `pnpm --filter @orchestratex/desktop tauri build --target universal-apple-darwin` | same, under `target/universal-apple-darwin/` |
-| macOS `.pkg` | after a macOS build | `./scripts/build-pkg.sh` | `bundle/pkg/*.pkg` |
-| Windows | Visual Studio Build Tools (C++ workload), WebView2 | `pnpm tauri:build`, or `./scripts/build-windows.ps1 -Arch x64` | `bundle/nsis/*-setup.exe`, `bundle/msi/*.msi` |
-| Linux | `libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf` | `pnpm tauri:build` | `bundle/appimage/*.AppImage`, `bundle/deb/*.deb`, `bundle/rpm/*.rpm` |
-
-**Signing.** Builds are unsigned unless you configure it. On macOS, set `APPLE_SIGNING_IDENTITY` (and `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` for notarization) before building; otherwise users need to right-click → Open the first time. On Windows, configure `bundle.windows.certificateThumbprint` or users will see a SmartScreen prompt.
-
-**CI.** Pushing a `v*` tag runs `.github/workflows/build.yml`, which syncs the version from the tag, builds Linux, macOS (ARM64 and x64) and Windows, and uploads the bundles as workflow artifacts. Download them and attach them to a release:
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-# when the Release workflow finishes:
-gh run download --dir release-artifacts      # pick the Release run
-find release-artifacts -type f \( -name '*.dmg' -o -name '*.pkg' -o -name '*-setup.exe' \
-  -o -name '*.msi' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -print0 \
-  | xargs -0 gh release create v0.2.0 --title "OrchestraTeX v0.2.0" --generate-notes
-```
-
-For a local macOS build, `./scripts/upload-to-github-release.sh --create` uploads the DMG and PKG from `target/release/bundle/`.
+The app and installers for your platform are written to `apps/desktop/src-tauri/target/release/bundle/`: `.app` and `.dmg` on macOS, `-setup.exe` and `.msi` on Windows, `.AppImage`, `.deb` and `.rpm` on Linux. Local builds are unsigned, so macOS asks you to right-click → Open the first time.
 
 See **[docs/dev.md](docs/dev.md)** for architecture, the Rust IPC command reference and verification commands.
 
