@@ -85,14 +85,17 @@ export function UsageDashboard({
         setProjectMenuOpen(false);
       }
     };
+    // Capture phase + preventDefault, so Escape closes only this menu, not the whole Usage view.
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setProjectMenuOpen(false);
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setProjectMenuOpen(false);
     };
     document.addEventListener("mousedown", handleOutside);
-    window.addEventListener("keydown", handleEsc);
+    window.addEventListener("keydown", handleEsc, true);
     return () => {
       document.removeEventListener("mousedown", handleOutside);
-      window.removeEventListener("keydown", handleEsc);
+      window.removeEventListener("keydown", handleEsc, true);
     };
   }, [projectMenuOpen]);
 

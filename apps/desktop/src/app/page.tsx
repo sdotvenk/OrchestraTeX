@@ -108,6 +108,7 @@ import {
   MagnifyingGlassIcon,
   SidebarSimpleIcon,
   TerminalIcon,
+  XIcon,
 } from "@phosphor-icons/react";
 
 type EditorViewMode = "file" | "git-diff";
@@ -3218,6 +3219,19 @@ export default function EditorPage() {
     showUsageDashboard,
   ]);
 
+  // Escape leaves Usage & limits, returning to Home or the workspace it was opened from.
+  useEffect(() => {
+    if (!showUsageDashboard) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest('[role="dialog"], [role="menu"], [role="listbox"]')) return;
+      setShowUsageDashboard(false);
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [showUsageDashboard]);
+
   const handleCompileShortcut = useCallback(() => {
     void handleCompileWithDetection();
   }, [handleCompileWithDetection]);
@@ -4091,6 +4105,15 @@ export default function EditorPage() {
                 className="btn btn-secondary btn-sm disabled:opacity-50"
               >
                 {usageTopBarState.exportStatus ?? "Export CSV"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowUsageDashboard(false)}
+                className="inline-flex size-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-subtle hover:text-foreground focus-visible:outline-2 focus-visible:outline-accent"
+                aria-label="Close usage and limits"
+                title="Close (Esc)"
+              >
+                <XIcon className="size-4" aria-hidden="true" />
               </button>
             </div>
           ) : (
