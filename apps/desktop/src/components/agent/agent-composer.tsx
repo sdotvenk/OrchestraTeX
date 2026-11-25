@@ -946,7 +946,7 @@ export function AgentComposer({
               aria-controls={settingsOpen ? menuId : undefined}
               aria-expanded={settingsOpen}
               onClick={() => setSettingsOpen((open) => !open)}
-              className={`h-7 px-2.5 rounded-[7px] bg-subtle inline-flex items-baseline gap-1.5 text-[12px] transition-colors min-w-0 ${
+              className={`h-7 px-2.5 rounded-[7px] bg-subtle inline-flex items-center gap-1.5 text-[12px] transition-colors min-w-0 ${
                 settingsOpen ? "ring-[1.5px] ring-foreground" : "hover:bg-sunken"
               }`}
               title={`${providerObj?.name ?? currentProviderId} · ${modelLabel}${currentEffort ? ` · ${currentEffort}` : ""} · ${interactionMode === "plan" ? "Plan" : "Build"} · ${runtimeLabel}`}
@@ -958,20 +958,23 @@ export function AgentComposer({
               >
                 <ProviderIcon providerId={currentProviderId} className="size-3.5" />
               </span>
-              <span className="min-w-0 truncate max-w-[180px] font-medium text-foreground">
-                {modelLabel}
+              {/* Text shares a baseline; the group is centred with the icon and caret. */}
+              <span className="inline-flex min-w-0 items-baseline gap-1.5">
+                <span className="min-w-0 truncate max-w-[180px] font-medium text-foreground">
+                  {modelLabel}
+                </span>
+                {currentEffort && (
+                  <>
+                    <span className="text-muted shrink-0" aria-hidden="true">
+                      ·
+                    </span>
+                    <span className="shrink-0 whitespace-nowrap text-[11.5px] text-muted capitalize">
+                      {currentEffort === "medium" ? "Med" : currentEffort}
+                    </span>
+                  </>
+                )}
               </span>
-              {currentEffort && (
-                <>
-                  <span className="text-muted shrink-0" aria-hidden="true">
-                    ·
-                  </span>
-                  <span className="shrink-0 whitespace-nowrap text-[11.5px] text-muted capitalize">
-                    {currentEffort === "medium" ? "Med" : currentEffort}
-                  </span>
-                </>
-              )}
-              <CaretDown className="size-2.5 opacity-75 shrink-0 self-center" aria-hidden="true" />
+              <CaretDown className="size-2.5 opacity-75 shrink-0" aria-hidden="true" />
             </button>
 
             <input
