@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod antigravity_usage;
 pub mod binary;
 pub mod claude;
 pub mod codex;
@@ -185,6 +186,17 @@ pub async fn agent_refresh_rate_limits(
                 "agent-event",
                 AgentStreamEvent::RateLimitsUpdated {
                     provider_id: AgentProviderId::Codex,
+                    rate_limits: snap.clone(),
+                },
+            );
+            Ok(Some(snap))
+        }
+        AgentProviderId::Antigravity => {
+            let snap = antigravity_usage::status_snapshot(true).await;
+            let _ = app.emit(
+                "agent-event",
+                AgentStreamEvent::RateLimitsUpdated {
+                    provider_id: AgentProviderId::Antigravity,
                     rate_limits: snap.clone(),
                 },
             );
