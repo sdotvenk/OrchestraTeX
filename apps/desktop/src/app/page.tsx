@@ -1256,6 +1256,28 @@ export default function EditorPage() {
     [daemon, failedSourceWrites, getFileType, rememberAgentEditFile, resolveSelectablePath, toast],
   );
 
+  // Open the main .tex file once per project, when the project opens with nothing selected.
+  // The project-change effect above clears tabs, so state read in the same pass is stale.
+  const autoOpenedMainFileProjectRef = useRef<string | null>(null);
+  const mainFileSeenProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const projectPath = daemon.projectPath;
+    const projectJustChanged = mainFileSeenProjectRef.current !== projectPath;
+    mainFileSeenProjectRef.current = projectPath;
+    const mainFile = latexSettings.settings.mainFile;
+    if (!projectPath || autoOpenedMainFileProjectRef.current === projectPath) return;
+    if (!mainFile || !texFiles.some((path) => pathsEqual(path, mainFile))) return;
+    autoOpenedMainFileProjectRef.current = projectPath;
+    if (!projectJustChanged && (selectedFileRef.current || openTabs.length > 0)) return;
+    void handleFileSelect(mainFile);
+  }, [
+    daemon.projectPath,
+    handleFileSelect,
+    latexSettings.settings.mainFile,
+    openTabs.length,
+    texFiles,
+  ]);
+
   const runInverseSynctex = useCallback(
     async (pdfPath: string, page: number, x: number, y: number) => {
       if (!daemon.projectPath) return;

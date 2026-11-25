@@ -828,6 +828,7 @@ pub async fn spawn_claude_session(
         let mut last_usage = TokenUsageSnapshot::default();
         let mut step_seq: usize = 0;
         let mut current_step_key = String::from("s0");
+        let mut streamed_parts = StreamedParts::default();
 
         while let Ok(Some(line)) = reader.next_line().await {
             let trimmed = line.trim();
@@ -947,6 +948,7 @@ pub async fn spawn_claude_session(
                                 .map(|s| s.to_string())
                                 .unwrap_or_else(|| format!("s{}", step_seq));
                             active_blocks.clear();
+                            streamed_parts.start_step(&current_step_key);
                             if let Some(u) = ev.get("message").and_then(|m| m.get("usage")) {
                                 apply_claude_usage(&mut last_usage, u);
                                 let _ = app_out.emit(
@@ -977,6 +979,7 @@ pub async fn spawn_claude_session(
                                             .unwrap_or("")
                                             .to_string(),
                                     };
+                                    streamed_parts.record(&current_step_key, "text", &pid);
                                     active_blocks.insert(
                                         idx,
                                         ActiveStreamBlock {
@@ -1008,6 +1011,7 @@ pub async fn spawn_claude_session(
                                             .unwrap_or("")
                                             .to_string(),
                                     };
+                                    streamed_parts.record(&current_step_key, "reasoning", &pid);
                                     active_blocks.insert(
                                         idx,
                                         ActiveStreamBlock {
@@ -1289,8 +1293,14 @@ pub async fn spawn_claude_session(
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        let pid =
-                                            format!("txt_{}_{}_{}", msg_id, envelope_step_key, idx);
+                                        let pid = streamed_parts
+                                            .claim(&envelope_step_key, "text")
+                                            .unwrap_or_else(|| {
+                                                format!(
+                                                    "txt_{}_{}_{}",
+                                                    msg_id, envelope_step_key, idx
+                                                )
+                                            });
                                         parts_to_upsert.push(AgentPart::Text { id: pid, text });
                                     }
                                     "thinking" => {
@@ -1299,8 +1309,14 @@ pub async fn spawn_claude_session(
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        let pid =
-                                            format!("thk_{}_{}_{}", msg_id, envelope_step_key, idx);
+                                        let pid = streamed_parts
+                                            .claim(&envelope_step_key, "reasoning")
+                                            .unwrap_or_else(|| {
+                                                format!(
+                                                    "thk_{}_{}_{}",
+                                                    msg_id, envelope_step_key, idx
+                                                )
+                                            });
                                         parts_to_upsert
                                             .push(AgentPart::Reasoning { id: pid, text });
                                     }
@@ -1704,6 +1720,46 @@ pub async fn spawn_claude_session(
     });
 
     Ok(handle)
+}
+
+/// Part ids of text/thinking blocks already streamed for the current step.
+///
+/// Claude Code streams each block via `stream_event`, then repeats it in an
+/// `assistant` envelope that usually carries only that block, so the envelope's
+/// content index (0) does not match the stream index (e.g. 1 after a thinking
+/// block). Envelopes arrive in stream order, so the n-th text (or thinking)
+/// block of an envelope for a step reuses the n-th streamed part id instead of
+/// creating a duplicate part.
+#[derive(Default)]
+struct StreamedParts {
+    step: String,
+    parts: Vec<(&'static str, String, bool)>,
+}
+
+impl StreamedParts {
+    fn start_step(&mut self, step: &str) {
+        self.step = step.to_string();
+        self.parts.clear();
+    }
+
+    fn record(&mut self, step: &str, kind: &'static str, part_id: &str) {
+        if self.step != step {
+            self.start_step(step);
+        }
+        self.parts.push((kind, part_id.to_string(), false));
+    }
+
+    fn claim(&mut self, step: &str, kind: &str) -> Option<String> {
+        if self.step != step {
+            return None;
+        }
+        let entry = self
+            .parts
+            .iter_mut()
+            .find(|(k, _, claimed)| *k == kind && !*claimed)?;
+        entry.2 = true;
+        Some(entry.1.clone())
+    }
 }
 
 struct ActiveStreamBlock {
@@ -2166,6 +2222,33 @@ pub async fn run_claude_one_shot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_block_envelopes_reuse_streamed_part_ids() {
+        let mut parts = StreamedParts::default();
+        parts.start_step("msg_1");
+        parts.record("msg_1", "reasoning", "thk_a_msg_1_0");
+        parts.record("msg_1", "text", "txt_a_msg_1_1");
+        parts.record("msg_1", "text", "txt_a_msg_1_3");
+
+        assert_eq!(
+            parts.claim("msg_1", "reasoning").as_deref(),
+            Some("thk_a_msg_1_0")
+        );
+        assert_eq!(
+            parts.claim("msg_1", "text").as_deref(),
+            Some("txt_a_msg_1_1")
+        );
+        assert_eq!(
+            parts.claim("msg_1", "text").as_deref(),
+            Some("txt_a_msg_1_3")
+        );
+        assert_eq!(parts.claim("msg_1", "text"), None);
+        assert_eq!(parts.claim("msg_2", "reasoning"), None);
+
+        parts.start_step("msg_2");
+        assert_eq!(parts.claim("msg_1", "reasoning"), None);
+    }
 
     #[test]
     fn parses_claude_ask_user_question_control_request() {
