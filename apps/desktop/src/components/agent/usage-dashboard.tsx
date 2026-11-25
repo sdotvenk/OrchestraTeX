@@ -15,8 +15,9 @@ import {
   type UsageProjectOption,
   VOICE_TOKENS,
 } from "@/lib/agent/usage-dashboard";
+import { HarnessQuotaCard } from "./harness-quota-card";
 import { ProviderIcon } from "./icons";
-import { formatResetCountdown, formatTokenCount } from "./utils";
+import { formatTokenCount } from "./utils";
 
 export interface UsageDashboardTopBarState {
   refreshedAt: string | null;
@@ -383,90 +384,9 @@ export function UsageDashboard({
 
       {/* 4 Harness Quota Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {orderedProviders.map(({ id, provider }) => {
-          const voice = VOICE_TOKENS[id];
-          const primaryWindow = provider?.rateLimits?.windows[0] ?? null;
-          const secondaryWindow = provider?.rateLimits?.windows[1] ?? null;
-          const usedPct = primaryWindow?.usedPercent;
-          const hasQuota = usedPct !== null && usedPct !== undefined;
-          const isInstalled = Boolean(provider?.installed);
-          const resetText = formatResetCountdown(primaryWindow?.resetsAt);
-
-          return (
-            <div
-              key={id}
-              className="ox-frame p-3.5 flex flex-col"
-              style={{ borderTopWidth: "3px", borderTopColor: voice.ink }}
-            >
-              <div className="flex items-center gap-2 text-[13px] font-semibold">
-                <span style={{ color: voice.ink }} className="inline-flex shrink-0">
-                  <ProviderIcon providerId={id} className="size-3.5 shrink-0" />
-                </span>
-                <span className="truncate">{provider?.name || voice.label}</span>
-                <span className="ml-auto text-[11.5px] font-normal text-muted truncate">
-                  {provider?.account?.planType ??
-                    provider?.rateLimits?.planType ??
-                    (isInstalled ? (provider?.transport ?? "ACP") : null)}
-                </span>
-              </div>
-
-              <div className="mt-3 flex items-baseline gap-1.5">
-                <span
-                  className={`text-[28px] leading-none font-semibold tracking-tight tabular-nums ${
-                    hasQuota ? "text-foreground" : "text-muted"
-                  }`}
-                >
-                  {hasQuota ? `${Math.round(usedPct)}%` : "—"}
-                </span>
-                <span className="text-[12px] text-muted truncate">
-                  {hasQuota
-                    ? `of ${primaryWindow?.label ?? "5-hour window"}`
-                    : isInstalled
-                      ? "quota not reported"
-                      : "not configured"}
-                </span>
-              </div>
-
-              <div
-                className="mt-2 h-2 rounded-[4px] bg-sunken overflow-hidden relative"
-                style={
-                  !hasQuota
-                    ? {
-                        backgroundImage:
-                          "repeating-linear-gradient(135deg, var(--hatch-a) 0 4px, var(--hatch-b) 4px 8px)",
-                      }
-                    : undefined
-                }
-              >
-                {hasQuota && (
-                  <span
-                    className="absolute inset-y-0 left-0 rounded-[4px]"
-                    style={{
-                      width: `${Math.min(100, Math.max(0, usedPct))}%`,
-                      backgroundColor: voice.ink,
-                    }}
-                  />
-                )}
-              </div>
-
-              <div className="mt-2 flex items-center text-[11.5px] text-muted gap-2">
-                <span className="truncate">
-                  {hasQuota
-                    ? (resetText ?? primaryWindow?.status ?? "Active")
-                    : isInstalled
-                      ? (provider?.rateLimits?.note ?? "Token counts only")
-                      : "Configure in Settings → Agents"}
-                </span>
-                {secondaryWindow?.usedPercent !== null &&
-                  secondaryWindow?.usedPercent !== undefined && (
-                    <span className="ml-auto font-mono tabular-nums shrink-0">
-                      {secondaryWindow.label} {Math.round(secondaryWindow.usedPercent)}%
-                    </span>
-                  )}
-              </div>
-            </div>
-          );
-        })}
+        {orderedProviders.map(({ id, provider }) => (
+          <HarnessQuotaCard key={id} providerId={id} provider={provider} />
+        ))}
       </div>
 
       {/* Bottom 2-column Grid */}
