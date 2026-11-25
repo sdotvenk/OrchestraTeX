@@ -1532,6 +1532,7 @@ pub async fn spawn_claude_session(
                             .lock()
                             .await
                             .insert(AgentProviderId::Claude, snapshot.clone());
+                        save_claude_rate_limits(&app_out, &snapshot).await;
                         let _ = app_out.emit(
                             "agent-event",
                             AgentStreamEvent::RateLimitsUpdated {
@@ -1978,61 +1979,122 @@ pub fn parse_claude_rate_limit(
     existing: Option<&RateLimitsSnapshot>,
 ) -> Option<RateLimitsSnapshot> {
     let info = val.get("rate_limit_info")?;
-    let rate_limit_type = info
-        .get("rateLimitType")
-        .and_then(|v| v.as_str())
-        .unwrap_or("five_hour")
-        .to_string();
-    let label = match rate_limit_type.as_str() {
-        "five_hour" => "5-hour window".to_string(),
-        "seven_day" => "Weekly limit".to_string(),
-        other => other.replace('_', " "),
-    };
-    let duration_mins = match rate_limit_type.as_str() {
-        "five_hour" => Some(300),
-        "seven_day" => Some(10080),
-        _ => None,
-    };
-    let status = info
-        .get("status")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let resets_at = info.get("resetsAt").and_then(|v| v.as_i64());
-    let used_percent =
-        info.get("utilization")
-            .and_then(|v| v.as_f64())
-            .map(|u| if u <= 1.0 { u * 100.0 } else { u });
-
     let mut windows = existing.map(|e| e.windows.clone()).unwrap_or_default();
-    let new_win = RateLimitWindow {
-        id: rate_limit_type.clone(),
-        label,
-        used_percent,
-        status,
-        window_duration_mins: duration_mins,
-        resets_at,
+    let mut upsert = |win: RateLimitWindow| {
+        if let Some(pos) = windows.iter().position(|w| w.id == win.id) {
+            windows[pos] = win;
+        } else {
+            windows.push(win);
+        }
     };
-    if let Some(pos) = windows.iter().position(|w| w.id == rate_limit_type) {
-        windows[pos] = new_win;
+
+    // Current Claude Code reports every window under `unifiedWindows`, e.g.
+    // {"five_hour": {"utilization": 0.28, "resetsAt": .., "status": "allowed"}, "seven_day": {..}}.
+    let unified = info.get("unifiedWindows").and_then(|v| v.as_object());
+    if let Some(unified) = unified.filter(|u| !u.is_empty()) {
+        for (id, w) in unified {
+            upsert(claude_rate_window(id, w));
+        }
     } else {
-        windows.push(new_win);
+        // Older builds: one window per event, with `utilization` only near thresholds.
+        let id = info
+            .get("rateLimitType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("five_hour");
+        upsert(claude_rate_window(id, info));
     }
 
+    let any_percent = windows.iter().any(|w| w.used_percent.is_some());
     Some(RateLimitsSnapshot {
         provider_id: AgentProviderId::Claude,
         updated_at: now_millis(),
         plan_type: existing.and_then(|e| e.plan_type.clone()),
         windows,
         credits_balance: None,
-        note: if used_percent.is_none() {
+        note: if any_percent {
+            None
+        } else {
             Some(
                 "Claude Code reports exact utilization once usage nears window thresholds."
                     .to_string(),
             )
-        } else {
-            None
         },
     })
+}
+
+const CLAUDE_RATE_LIMITS_FILE: &str = "claude_rate_limits.json";
+
+/// Claude Code only reports limits during a turn, so keep the last reading across restarts.
+async fn save_claude_rate_limits(app: &AppHandle, snapshot: &RateLimitsSnapshot) {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let Ok(json) = serde_json::to_vec(snapshot) else {
+        return;
+    };
+    let _ = tokio::fs::create_dir_all(&dir).await;
+    let _ = tokio::fs::write(dir.join(CLAUDE_RATE_LIMITS_FILE), json).await;
+}
+
+/// Last saved Claude reading, minus windows that have reset since (their usage is unknown).
+pub async fn load_claude_rate_limits(app: &AppHandle) -> Option<RateLimitsSnapshot> {
+    let dir = app.path().app_data_dir().ok()?;
+    let bytes = tokio::fs::read(dir.join(CLAUDE_RATE_LIMITS_FILE))
+        .await
+        .ok()?;
+    let snapshot: RateLimitsSnapshot = serde_json::from_slice(&bytes).ok()?;
+    drop_reset_claude_windows(snapshot, now_millis() / 1000)
+}
+
+fn drop_reset_claude_windows(
+    mut snapshot: RateLimitsSnapshot,
+    now_secs: i64,
+) -> Option<RateLimitsSnapshot> {
+    snapshot
+        .windows
+        .retain(|w| w.resets_at.is_some_and(|reset| reset > now_secs));
+    if snapshot.windows.iter().any(|w| w.used_percent.is_some()) {
+        Some(snapshot)
+    } else {
+        None
+    }
+}
+
+fn claude_rate_window(id: &str, w: &Value) -> RateLimitWindow {
+    let (label, duration_mins) = if id == "five_hour" {
+        ("5-hour window".to_string(), Some(300))
+    } else if id == "seven_day" {
+        ("Weekly limit".to_string(), Some(10080))
+    } else if let Some(model) = id.strip_prefix("seven_day_") {
+        (format!("Weekly limit · {}", capitalize(model)), Some(10080))
+    } else {
+        (id.replace('_', " "), None)
+    };
+    RateLimitWindow {
+        id: id.to_string(),
+        label,
+        used_percent: w.get("utilization").and_then(|v| v.as_f64()).map(|u| {
+            if u <= 1.0 {
+                u * 100.0
+            } else {
+                u
+            }
+        }),
+        status: w
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        window_duration_mins: duration_mins,
+        resets_at: w.get("resetsAt").and_then(|v| v.as_i64()),
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
 }
 
 pub fn parse_claude_control_request(val: &Value, thread_id: &str) -> Option<PendingClaudeControl> {
@@ -2281,6 +2343,37 @@ mod tests {
             }
             _ => panic!("expected Question interaction"),
         }
+    }
+
+    #[test]
+    fn parses_claude_unified_rate_limit_windows() {
+        let rl = json!({
+            "type": "rate_limit_event",
+            "rate_limit_info": {
+                "status": "allowed",
+                "resetsAt": 1795640400,
+                "rateLimitType": "five_hour",
+                "unifiedWindows": {
+                    "five_hour": {"utilization": 0.28, "resetsAt": 1795640400, "status": "allowed"},
+                    "seven_day": {"utilization": 0.73, "resetsAt": 1795716000, "status": "allowed"}
+                }
+            }
+        });
+        let snap = parse_claude_rate_limit(&rl, None).unwrap();
+        assert!(snap.note.is_none());
+        let five = snap.windows.iter().find(|w| w.id == "five_hour").unwrap();
+        assert!((five.used_percent.unwrap() - 28.0).abs() < 0.01);
+        assert_eq!(five.window_duration_mins, Some(300));
+        assert_eq!(five.resets_at, Some(1795640400));
+        let week = snap.windows.iter().find(|w| w.id == "seven_day").unwrap();
+        assert!((week.used_percent.unwrap() - 73.0).abs() < 0.01);
+        assert_eq!(week.window_duration_mins, Some(10080));
+        assert_eq!(week.label, "Weekly limit");
+
+        let kept = drop_reset_claude_windows(snap.clone(), 1795700000).unwrap();
+        assert_eq!(kept.windows.len(), 1);
+        assert_eq!(kept.windows[0].id, "seven_day");
+        assert!(drop_reset_claude_windows(snap, 1795800000).is_none());
     }
 
     #[test]

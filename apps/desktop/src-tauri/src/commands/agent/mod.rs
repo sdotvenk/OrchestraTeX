@@ -64,6 +64,26 @@ impl AgentManagerState {
         Ok(created)
     }
 
+    /// Claude limits from this session, or the last saved reading after a restart.
+    async fn claude_rate_limits(&self, app: &AppHandle) -> Option<RateLimitsSnapshot> {
+        if let Some(snapshot) = self
+            .rate_limit_cache
+            .lock()
+            .await
+            .get(&AgentProviderId::Claude)
+            .cloned()
+        {
+            return Some(snapshot);
+        }
+        let saved = claude::load_claude_rate_limits(app).await?;
+        self.rate_limit_cache
+            .lock()
+            .await
+            .entry(AgentProviderId::Claude)
+            .or_insert_with(|| saved.clone());
+        Some(saved)
+    }
+
     pub async fn get_usage_log(
         &self,
         app: &AppHandle,
@@ -128,12 +148,7 @@ pub async fn agent_list_providers(
     let agy_cfg = find_custom_config(&configs, AgentProviderId::Antigravity);
     let custom_acp_cfg = find_custom_config(&configs, AgentProviderId::CustomAcp);
 
-    let cached_claude = state
-        .rate_limit_cache
-        .lock()
-        .await
-        .get(&AgentProviderId::Claude)
-        .cloned();
+    let cached_claude = state.claude_rate_limits(&app).await;
 
     let (claude_st, codex_st, agy_st, custom_st) = tokio::join!(
         probe_claude(claude_custom, cached_claude),
@@ -202,6 +217,7 @@ pub async fn agent_refresh_rate_limits(
             );
             Ok(Some(snap))
         }
+        AgentProviderId::Claude => Ok(state.claude_rate_limits(&app).await),
         _ => Ok(state
             .rate_limit_cache
             .lock()
