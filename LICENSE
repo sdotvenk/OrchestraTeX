@@ -1,6 +1,12 @@
 MIT License
 
+Copyright (c) 2026 OrchestraTeX contributors
 Copyright (c) 2026 LMMs-Lab
+
+OrchestraTeX is derived from LMMs-Lab Writer
+(https://github.com/EvolvingLMMs-Lab/lmms-lab-writer) by LMMs-Lab, which is
+licensed under the MIT License. Portions of this software remain copyright
+LMMs-Lab. The upstream README is preserved in archive/lmms-lab-writer/.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
