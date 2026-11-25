@@ -89,17 +89,26 @@ const TRANSPORT_LABELS: Partial<Record<string, string>> = {
   acp: "ACP",
 };
 
+const SELECT_TRIGGER =
+  "h-8 min-w-0 rounded-lg border-border-dark bg-panel text-xs hover:bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 const AGENT_HEADING = "text-sm font-semibold text-foreground-strong";
 const AGENT_INPUT =
   "h-8 w-full min-w-0 rounded-lg border border-border-dark bg-panel px-2.5 text-xs text-foreground outline-none placeholder:text-muted focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent";
 
-// Section header component for visual grouping - editorial style
+const ROW_LABEL = "text-[13px] font-medium text-foreground-strong";
+const ROW_HINT = "mt-0.5 text-xs text-muted";
+const STEPPER =
+  "flex h-8 items-center overflow-hidden rounded-lg border border-border-dark bg-panel transition-colors focus-within:border-accent focus-within:ring-1 focus-within:ring-accent";
+const STEPPER_BUTTON =
+  "flex h-full w-8 items-center justify-center text-muted transition-colors hover:bg-subtle hover:text-foreground";
+const STEPPER_INPUT =
+  "h-full w-12 border-0 bg-transparent text-center font-mono text-xs text-foreground outline-none";
+
+// Section header: matches the Agents tab headings, with a hairline divider between sections.
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="pt-6 pb-2 border-t border-border mt-4 first:mt-0 first:border-t-0 first:pt-2">
-      <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-        {children}
-      </h3>
+    <div className="mt-3 border-t border-border pt-4 pb-1 first:mt-0 first:border-t-0 first:pt-1">
+      <h3 className={AGENT_HEADING}>{children}</h3>
     </div>
   );
 }
@@ -113,7 +122,7 @@ function CheckboxItem({
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
-  description: string;
+  description?: string;
 }) {
   const checkboxId = useId();
 
@@ -126,10 +135,8 @@ function CheckboxItem({
         className="mt-0.5"
       />
       <div className="flex-1">
-        <span className="text-sm font-medium text-foreground-secondary group-hover:text-foreground transition-colors">
-          {label}
-        </span>
-        <p className="text-xs text-muted mt-0.5">{description}</p>
+        <span className={ROW_LABEL}>{label}</span>
+        {description && <p className={ROW_HINT}>{description}</p>}
       </div>
     </label>
   );
@@ -141,45 +148,30 @@ function SelectField({
   onChange,
   options,
   description,
-  inset = false,
 }: {
   label: string;
   value: string | number;
   onChange: (value: string) => void;
   options: { value: string | number; label: string; disabled?: boolean }[];
   description?: string;
-  inset?: boolean;
 }) {
   return (
-    <div
-      className={
-        inset
-          ? "grid grid-cols-[1fr_minmax(0,14rem)] items-center gap-3"
-          : "flex items-center justify-between py-2 gap-8"
-      }
-    >
-      <div className={inset ? "min-w-0" : "shrink-0"}>
-        <span className="text-sm font-medium text-foreground-secondary block">{label}</span>
-        {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
+    <div className="grid grid-cols-[1fr_minmax(0,14rem)] items-center gap-3 py-1.5">
+      <div className="min-w-0">
+        <span className={`${ROW_LABEL} block`}>{label}</span>
+        {description && <p className={ROW_HINT}>{description}</p>}
       </div>
       <Select value={String(value)} onValueChange={onChange}>
-        <SelectTrigger
-          aria-label={label}
-          className={
-            inset
-              ? "h-[28px] min-w-0 rounded-lg border-border-dark hover:bg-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-              : undefined
-          }
-        >
+        <SelectTrigger aria-label={label} className={SELECT_TRIGGER}>
           <SelectValue />
         </SelectTrigger>
-        <SelectContent className={inset ? "rounded-lg shadow-[var(--shadow-2)]" : undefined}>
+        <SelectContent className="rounded-lg shadow-[var(--shadow-2)]">
           {options.map((opt) => (
             <SelectItem
               key={opt.value}
               value={String(opt.value)}
               disabled={opt.disabled}
-              className={inset ? "rounded-md" : undefined}
+              className="rounded-md"
             >
               {opt.label}
             </SelectItem>
@@ -269,35 +261,29 @@ export function LaTeXSettingsDialog({
             {/* ===== EDITOR TAB ===== */}
             <Tabs.Content
               value="editor"
-              className="flex-1 overflow-y-auto border-y border-border bg-panel px-5 py-4 space-y-1"
+              className="flex-1 overflow-y-auto border-y border-border bg-panel px-5 py-3"
             >
               <SectionHeader>Keybindings</SectionHeader>
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between gap-4 py-2">
                 <div className="flex items-center gap-3">
                   <div
-                    className={`w-8 h-8 border flex items-center justify-center font-mono text-xs font-bold tracking-tight transition-colors ${
-                      editorSettings.vimMode
-                        ? "bg-foreground border-foreground text-background"
-                        : "bg-accent-hover border-border text-muted-foreground"
+                    className={`flex size-8 items-center justify-center rounded-lg font-mono text-xs font-semibold transition-colors ${
+                      editorSettings.vimMode ? "bg-accent-soft text-accent" : "bg-subtle text-muted"
                     }`}
                   >
                     Vi
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground-secondary">
-                        Vim Mode
-                      </span>
+                      <span className={ROW_LABEL}>Vim mode</span>
                       {editorSettings.vimMode && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-foreground text-background font-mono font-bold tracking-wider">
+                        <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 font-mono text-[11px] font-medium text-accent">
                           NORMAL
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted mt-0.5">
-                      Modal Vim-style keybindings in editor
-                    </p>
+                    <p className={ROW_HINT}>Modal Vim keybindings</p>
                   </div>
                 </div>
                 <Switch
@@ -309,11 +295,8 @@ export function LaTeXSettingsDialog({
               <SectionHeader>Display</SectionHeader>
 
               <div className="flex items-center justify-between py-2 gap-4">
-                <label
-                  htmlFor="editor-font-family"
-                  className="text-sm font-medium text-foreground-secondary shrink-0"
-                >
-                  Font Family
+                <label htmlFor="editor-font-family" className={`${ROW_LABEL} shrink-0`}>
+                  Font family
                 </label>
                 <input
                   id="editor-font-family"
@@ -325,18 +308,15 @@ export function LaTeXSettingsDialog({
                     })
                   }
                   placeholder="Default monospace stack"
-                  className="w-full max-w-sm px-3 py-2 text-sm border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono bg-background"
+                  className={`${AGENT_INPUT} font-mono max-w-sm`}
                 />
               </div>
 
-              <div className="flex items-center justify-between py-2">
-                <label
-                  htmlFor="editor-font-size"
-                  className="text-sm font-medium text-foreground-secondary"
-                >
-                  Font Size
+              <div className="flex items-center justify-between gap-4 py-2">
+                <label htmlFor="editor-font-size" className={ROW_LABEL}>
+                  Font size
                 </label>
-                <div className="flex items-center border border-border hover:border-border-dark transition-colors">
+                <div className={STEPPER}>
                   <button
                     type="button"
                     onClick={() =>
@@ -344,10 +324,10 @@ export function LaTeXSettingsDialog({
                         fontSize: Math.max(8, editorSettings.fontSize - 1),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-r border-border"
+                    className={`${STEPPER_BUTTON} border-r border-border`}
                     aria-label="Decrease font size"
                   >
-                    <MinusIcon className="size-3" />
+                    <MinusIcon className="size-3" aria-hidden="true" />
                   </button>
                   <input
                     id="editor-font-size"
@@ -360,7 +340,7 @@ export function LaTeXSettingsDialog({
                         fontSize: Math.min(32, Math.max(8, parseInt(e.target.value, 10) || 14)),
                       })
                     }
-                    className="w-12 h-8 text-sm text-center border-0 focus:outline-none focus:ring-0 font-mono bg-transparent"
+                    className={STEPPER_INPUT}
                   />
                   <button
                     type="button"
@@ -369,25 +349,22 @@ export function LaTeXSettingsDialog({
                         fontSize: Math.min(32, editorSettings.fontSize + 1),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-l border-border"
+                    className={`${STEPPER_BUTTON} border-l border-border`}
                     aria-label="Increase font size"
                   >
-                    <PlusIcon className="size-3" />
+                    <PlusIcon className="size-3" aria-hidden="true" />
                   </button>
-                  <span className="text-xs text-muted-foreground px-2 border-l border-border">
+                  <span className="flex h-full items-center border-l border-border px-2 text-xs text-muted">
                     px
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between py-2">
-                <label
-                  htmlFor="editor-line-height"
-                  className="text-sm font-medium text-foreground-secondary"
-                >
-                  Line Height
+              <div className="flex items-center justify-between gap-4 py-2">
+                <label htmlFor="editor-line-height" className={ROW_LABEL}>
+                  Line height
                 </label>
-                <div className="flex items-center border border-border hover:border-border-dark transition-colors">
+                <div className={STEPPER}>
                   <button
                     type="button"
                     onClick={() =>
@@ -398,10 +375,10 @@ export function LaTeXSettingsDialog({
                         ),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-r border-border"
+                    className={`${STEPPER_BUTTON} border-r border-border`}
                     aria-label="Decrease line height"
                   >
-                    <MinusIcon className="size-3" />
+                    <MinusIcon className="size-3" aria-hidden="true" />
                   </button>
                   <input
                     id="editor-line-height"
@@ -415,7 +392,7 @@ export function LaTeXSettingsDialog({
                         lineHeight: Math.min(3.0, Math.max(1.0, parseFloat(e.target.value) || 1.6)),
                       })
                     }
-                    className="w-12 h-8 text-sm text-center border-0 focus:outline-none focus:ring-0 font-mono bg-transparent"
+                    className={STEPPER_INPUT}
                   />
                   <button
                     type="button"
@@ -427,16 +404,16 @@ export function LaTeXSettingsDialog({
                         ),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-l border-border"
+                    className={`${STEPPER_BUTTON} border-l border-border`}
                     aria-label="Increase line height"
                   >
-                    <PlusIcon className="size-3" />
+                    <PlusIcon className="size-3" aria-hidden="true" />
                   </button>
                 </div>
               </div>
 
               <SelectField
-                label="Line Numbers"
+                label="Line numbers"
                 value={editorSettings.lineNumbers}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -447,12 +424,12 @@ export function LaTeXSettingsDialog({
                   { value: "on", label: "On" },
                   { value: "off", label: "Off" },
                   { value: "relative", label: "Relative" },
-                  { value: "interval", label: "Interval (every 10)" },
+                  { value: "interval", label: "Every 10 lines" },
                 ]}
               />
 
               <SelectField
-                label="Render Whitespace"
+                label="Render whitespace"
                 value={editorSettings.renderWhitespace}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -468,28 +445,24 @@ export function LaTeXSettingsDialog({
                 ]}
               />
 
-              <div className="space-y-3 pt-1">
+              <div>
                 <CheckboxItem
                   checked={editorSettings.smoothScrolling}
                   onChange={(v) => onUpdateEditorSettings({ smoothScrolling: v })}
-                  label="Smooth Scrolling"
-                  description="Enable smooth scroll animation"
+                  label="Smooth scrolling"
                 />
               </div>
 
               <SectionHeader>Minimap</SectionHeader>
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between gap-4 py-2">
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-foreground-secondary">
-                      Enable Minimap
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 border border-border text-muted font-medium uppercase tracking-wider">
+                    <span className={ROW_LABEL}>Minimap</span>
+                    <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-[11px] font-medium text-muted">
                       Preview
                     </span>
                   </div>
-                  <p className="text-xs text-muted mt-0.5">Code overview panel</p>
                 </div>
                 <Switch
                   checked={editorSettings.minimap.enabled}
@@ -505,11 +478,11 @@ export function LaTeXSettingsDialog({
               </div>
 
               {editorSettings.minimap.enabled && (
-                <div className="space-y-1 pl-4 border-l-2 border-border ml-1">
-                  <div className="flex items-center justify-between py-2">
-                    <span className="text-sm font-medium text-foreground-secondary">Position</span>
-                    <div className="flex">
-                      {(["left", "right"] as const).map((side, index) => (
+                <div className="space-y-1 ml-1 border-l border-border pl-4">
+                  <div className="flex items-center justify-between gap-4 py-2">
+                    <span className={ROW_LABEL}>Position</span>
+                    <div className="flex gap-0.5 rounded-lg border border-border bg-sunken p-0.5">
+                      {(["left", "right"] as const).map((side) => (
                         <button
                           type="button"
                           key={side}
@@ -521,11 +494,12 @@ export function LaTeXSettingsDialog({
                               },
                             })
                           }
-                          className={`px-4 py-1.5 text-sm border transition-all ${
+                          aria-pressed={editorSettings.minimap.side === side}
+                          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-accent ${
                             editorSettings.minimap.side === side
-                              ? "bg-foreground text-background border-foreground"
-                              : "bg-background text-muted border-border hover:border-border-dark"
-                          } ${index === 0 ? "" : "-ml-px"}`}
+                              ? "bg-panel text-foreground-strong shadow-xs"
+                              : "text-muted hover:text-foreground"
+                          }`}
                         >
                           {side === "left" ? "Left" : "Right"}
                         </button>
@@ -535,7 +509,7 @@ export function LaTeXSettingsDialog({
 
                   {/* Size Mode */}
                   <SelectField
-                    label="Size Mode"
+                    label="Size mode"
                     value={editorSettings.minimap.size}
                     onChange={(v) =>
                       onUpdateEditorSettings({
@@ -550,12 +524,11 @@ export function LaTeXSettingsDialog({
                       { value: "fill", label: "Fill" },
                       { value: "fit", label: "Fit" },
                     ]}
-                    description="How the minimap scales relative to content"
                   />
 
                   {/* Show Slider */}
                   <SelectField
-                    label="Show Slider"
+                    label="Show slider"
                     value={editorSettings.minimap.showSlider}
                     onChange={(v) =>
                       onUpdateEditorSettings({
@@ -566,10 +539,9 @@ export function LaTeXSettingsDialog({
                       })
                     }
                     options={[
-                      { value: "mouseover", label: "On Hover" },
+                      { value: "mouseover", label: "On hover" },
                       { value: "always", label: "Always" },
                     ]}
-                    description="When to show the viewport indicator"
                   />
 
                   {/* Render Characters */}
@@ -584,7 +556,7 @@ export function LaTeXSettingsDialog({
                           },
                         })
                       }
-                      label="Render Characters"
+                      label="Render characters"
                       description="Show actual characters instead of blocks"
                     />
                   </div>
@@ -594,7 +566,7 @@ export function LaTeXSettingsDialog({
               <SectionHeader>Cursor</SectionHeader>
 
               <SelectField
-                label="Cursor Style"
+                label="Cursor style"
                 value={editorSettings.cursorStyle}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -603,16 +575,16 @@ export function LaTeXSettingsDialog({
                 }
                 options={[
                   { value: "line", label: "Line" },
-                  { value: "line-thin", label: "Line (Thin)" },
+                  { value: "line-thin", label: "Thin line" },
                   { value: "block", label: "Block" },
-                  { value: "block-outline", label: "Block Outline" },
+                  { value: "block-outline", label: "Block outline" },
                   { value: "underline", label: "Underline" },
-                  { value: "underline-thin", label: "Underline (Thin)" },
+                  { value: "underline-thin", label: "Thin underline" },
                 ]}
               />
 
               <SelectField
-                label="Cursor Blinking"
+                label="Cursor blinking"
                 value={editorSettings.cursorBlinking}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -631,7 +603,7 @@ export function LaTeXSettingsDialog({
               <SectionHeader>Editing</SectionHeader>
 
               <SelectField
-                label="Tab Size"
+                label="Tab size"
                 value={editorSettings.tabSize}
                 onChange={(v) => onUpdateEditorSettings({ tabSize: parseInt(v, 10) })}
                 options={[
@@ -642,7 +614,7 @@ export function LaTeXSettingsDialog({
               />
 
               <SelectField
-                label="Word Wrap"
+                label="Word wrap"
                 value={editorSettings.wordWrap}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -652,19 +624,16 @@ export function LaTeXSettingsDialog({
                 options={[
                   { value: "off", label: "Off" },
                   { value: "on", label: "On" },
-                  { value: "wordWrapColumn", label: "Wrap at Column" },
+                  { value: "wordWrapColumn", label: "Wrap at column" },
                   { value: "bounded", label: "Bounded" },
                 ]}
               />
 
               {editorSettings.wordWrap === "wordWrapColumn" && (
-                <div className="pl-4 border-l-2 border-border ml-1 py-2">
+                <div className="ml-1 border-l border-border pl-4 py-2">
                   <div className="flex items-center justify-between">
-                    <label
-                      htmlFor="editor-word-wrap-column"
-                      className="text-sm font-medium text-foreground-secondary"
-                    >
-                      Wrap Column
+                    <label htmlFor="editor-word-wrap-column" className={ROW_LABEL}>
+                      Wrap column
                     </label>
                     <input
                       id="editor-word-wrap-column"
@@ -677,14 +646,14 @@ export function LaTeXSettingsDialog({
                           wordWrapColumn: parseInt(e.target.value, 10) || 80,
                         })
                       }
-                      className="w-20 px-3 py-2 text-sm text-center border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono"
+                      className={`${AGENT_INPUT} w-20 text-center font-mono`}
                     />
                   </div>
                 </div>
               )}
 
               <SelectField
-                label="Auto-close Brackets"
+                label="Auto-close brackets"
                 value={editorSettings.autoClosingBrackets}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -693,17 +662,17 @@ export function LaTeXSettingsDialog({
                 }
                 options={[
                   { value: "always", label: "Always" },
-                  { value: "languageDefined", label: "Language Defined" },
+                  { value: "languageDefined", label: "Language defined" },
                   {
                     value: "beforeWhitespace",
-                    label: "Before Whitespace",
+                    label: "Before whitespace",
                   },
                   { value: "never", label: "Never" },
                 ]}
               />
 
               <SelectField
-                label="Auto-close Quotes"
+                label="Auto-close quotes"
                 value={editorSettings.autoClosingQuotes}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -712,49 +681,43 @@ export function LaTeXSettingsDialog({
                 }
                 options={[
                   { value: "always", label: "Always" },
-                  { value: "languageDefined", label: "Language Defined" },
+                  { value: "languageDefined", label: "Language defined" },
                   {
                     value: "beforeWhitespace",
-                    label: "Before Whitespace",
+                    label: "Before whitespace",
                   },
                   { value: "never", label: "Never" },
                 ]}
               />
 
-              <div className="space-y-3 pt-1">
+              <div>
                 <CheckboxItem
                   checked={editorSettings.insertSpaces}
                   onChange={(v) => onUpdateEditorSettings({ insertSpaces: v })}
-                  label="Insert Spaces"
-                  description="Use spaces instead of tabs for indentation"
+                  label="Insert spaces"
                 />
               </div>
 
               <SectionHeader>Formatting</SectionHeader>
 
-              <div className="space-y-3">
+              <div>
                 <CheckboxItem
                   checked={editorSettings.formatOnSave}
                   onChange={(v) => onUpdateEditorSettings({ formatOnSave: v })}
-                  label="Format on Save"
-                  description="Automatically format code when saving"
+                  label="Format on save"
                 />
                 <CheckboxItem
                   checked={editorSettings.formatOnPaste}
                   onChange={(v) => onUpdateEditorSettings({ formatOnPaste: v })}
-                  label="Format on Paste"
-                  description="Automatically format pasted code"
+                  label="Format on paste"
                 />
               </div>
 
               <SectionHeader>Terminal</SectionHeader>
 
               <div className="flex items-center justify-between py-2 gap-4">
-                <label
-                  htmlFor="editor-terminal-font-family"
-                  className="text-sm font-medium text-foreground-secondary shrink-0"
-                >
-                  Font Family
+                <label htmlFor="editor-terminal-font-family" className={`${ROW_LABEL} shrink-0`}>
+                  Font family
                 </label>
                 <input
                   id="editor-terminal-font-family"
@@ -766,18 +729,15 @@ export function LaTeXSettingsDialog({
                     })
                   }
                   placeholder="Default monospace stack"
-                  className="w-full max-w-sm px-3 py-2 text-sm border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono bg-background"
+                  className={`${AGENT_INPUT} font-mono max-w-sm`}
                 />
               </div>
 
-              <div className="flex items-center justify-between py-2">
-                <label
-                  htmlFor="editor-terminal-font-size"
-                  className="text-sm font-medium text-foreground-secondary"
-                >
-                  Font Size
+              <div className="flex items-center justify-between gap-4 py-2">
+                <label htmlFor="editor-terminal-font-size" className={ROW_LABEL}>
+                  Font size
                 </label>
-                <div className="flex items-center border border-border hover:border-border-dark transition-colors">
+                <div className={STEPPER}>
                   <button
                     type="button"
                     onClick={() =>
@@ -785,10 +745,10 @@ export function LaTeXSettingsDialog({
                         terminalFontSize: Math.max(8, editorSettings.terminalFontSize - 1),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-r border-border"
+                    className={`${STEPPER_BUTTON} border-r border-border`}
                     aria-label="Decrease terminal font size"
                   >
-                    <MinusIcon className="size-3" />
+                    <MinusIcon className="size-3" aria-hidden="true" />
                   </button>
                   <input
                     id="editor-terminal-font-size"
@@ -804,7 +764,7 @@ export function LaTeXSettingsDialog({
                         ),
                       })
                     }
-                    className="w-12 h-8 text-sm text-center border-0 focus:outline-none focus:ring-0 font-mono bg-transparent"
+                    className={STEPPER_INPUT}
                   />
                   <button
                     type="button"
@@ -813,25 +773,22 @@ export function LaTeXSettingsDialog({
                         terminalFontSize: Math.min(32, editorSettings.terminalFontSize + 1),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-l border-border"
+                    className={`${STEPPER_BUTTON} border-l border-border`}
                     aria-label="Increase terminal font size"
                   >
-                    <PlusIcon className="size-3" />
+                    <PlusIcon className="size-3" aria-hidden="true" />
                   </button>
-                  <span className="text-xs text-muted-foreground px-2 border-l border-border">
+                  <span className="flex h-full items-center border-l border-border px-2 text-xs text-muted">
                     px
                   </span>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between py-2">
-                <label
-                  htmlFor="editor-terminal-line-height"
-                  className="text-sm font-medium text-foreground-secondary"
-                >
-                  Line Height
+              <div className="flex items-center justify-between gap-4 py-2">
+                <label htmlFor="editor-terminal-line-height" className={ROW_LABEL}>
+                  Line height
                 </label>
-                <div className="flex items-center border border-border hover:border-border-dark transition-colors">
+                <div className={STEPPER}>
                   <button
                     type="button"
                     onClick={() =>
@@ -842,10 +799,10 @@ export function LaTeXSettingsDialog({
                         ),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-r border-border"
+                    className={`${STEPPER_BUTTON} border-r border-border`}
                     aria-label="Decrease terminal line height"
                   >
-                    <MinusIcon className="size-3" />
+                    <MinusIcon className="size-3" aria-hidden="true" />
                   </button>
                   <input
                     id="editor-terminal-line-height"
@@ -862,7 +819,7 @@ export function LaTeXSettingsDialog({
                         ),
                       })
                     }
-                    className="w-12 h-8 text-sm text-center border-0 focus:outline-none focus:ring-0 font-mono bg-transparent"
+                    className={STEPPER_INPUT}
                   />
                   <button
                     type="button"
@@ -874,16 +831,16 @@ export function LaTeXSettingsDialog({
                         ),
                       })
                     }
-                    className="w-8 h-8 flex items-center justify-center text-muted hover:text-foreground hover:bg-accent-hover transition-colors border-l border-border"
+                    className={`${STEPPER_BUTTON} border-l border-border`}
                     aria-label="Increase terminal line height"
                   >
-                    <PlusIcon className="size-3" />
+                    <PlusIcon className="size-3" aria-hidden="true" />
                   </button>
                 </div>
               </div>
 
               <SelectField
-                label="Shell Selection"
+                label="Shell"
                 value={editorSettings.terminalShellMode}
                 onChange={(v) =>
                   onUpdateEditorSettings({
@@ -891,20 +848,16 @@ export function LaTeXSettingsDialog({
                   })
                 }
                 options={[
-                  { value: "auto", label: "Auto Detect" },
+                  { value: "auto", label: "Auto detect" },
                   { value: "custom", label: "Custom" },
                 ]}
-                description="Auto mode chooses shell per OS fallback rules"
               />
 
               {editorSettings.terminalShellMode === "custom" && (
-                <div className="pl-4 border-l-2 border-border ml-1 py-2">
+                <div className="ml-1 border-l border-border pl-4 py-2">
                   <div className="flex items-center justify-between gap-4">
-                    <label
-                      htmlFor="editor-terminal-shell-path"
-                      className="text-sm font-medium text-foreground-secondary shrink-0"
-                    >
-                      Shell Command
+                    <label htmlFor="editor-terminal-shell-path" className={`${ROW_LABEL} shrink-0`}>
+                      Shell command
                     </label>
                     <input
                       id="editor-terminal-shell-path"
@@ -916,12 +869,10 @@ export function LaTeXSettingsDialog({
                         })
                       }
                       placeholder="powershell.exe / pwsh / /bin/zsh"
-                      className="w-full px-3 py-2 text-sm border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono bg-background"
+                      className={`${AGENT_INPUT} font-mono`}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1.5">
-                    Leave empty to fall back to auto detection.
-                  </p>
+                  <p className={ROW_HINT}>Leave empty to auto detect.</p>
                 </div>
               )}
             </Tabs.Content>
@@ -929,47 +880,42 @@ export function LaTeXSettingsDialog({
             {/* ===== BUILD TAB ===== */}
             <Tabs.Content
               value="build"
-              className="flex-1 overflow-y-auto border-y border-border bg-panel px-5 py-4 space-y-1"
+              className="flex-1 overflow-y-auto border-y border-border bg-panel px-5 py-3"
             >
-              <SectionHeader>Main File</SectionHeader>
+              <SectionHeader>Main file</SectionHeader>
 
               <div className="py-2">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-foreground-secondary">
-                    Main .tex File
-                  </span>
+                  <span className={ROW_LABEL}>Main .tex file</span>
                 </div>
                 {texFiles.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-2">
-                    No .tex files found in project
-                  </p>
+                  <p className="py-1 text-xs text-muted">No .tex files in this project</p>
                 ) : (
                   <Select
                     value={settings.mainFile || ""}
                     onValueChange={(v) => onUpdateSettings({ mainFile: v || null })}
                   >
-                    <SelectTrigger className="w-full" aria-label="Main .tex file">
-                      <SelectValue placeholder="Select main .tex file..." />
+                    <SelectTrigger
+                      className={`${SELECT_TRIGGER} w-full font-mono`}
+                      aria-label="Main .tex file"
+                    >
+                      <SelectValue placeholder="Select main .tex file…" />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent className="rounded-lg shadow-[var(--shadow-2)]">
                       {texFiles.map((file) => (
-                        <SelectItem key={file} value={file}>
+                        <SelectItem key={file} value={file} className="rounded-md font-mono">
                           {file}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 )}
-                <p className="text-xs text-muted-foreground mt-1.5">
-                  The entry point for LaTeX compilation
-                </p>
               </div>
 
-              <SectionHeader>Compiler & Live Preview</SectionHeader>
+              <SectionHeader>Compiler and live preview</SectionHeader>
 
               <SelectField
                 label="Compiler"
-                description="Engine used when building your document"
                 value={settings.compiler}
                 onChange={(v) => onUpdateSettings({ compiler: v as LaTeXCompiler })}
                 options={(
@@ -982,8 +928,8 @@ export function LaTeXSettingsDialog({
                       ? ""
                       : statusInfo
                         ? statusInfo.available
-                          ? " (Installed)"
-                          : " (Not found)"
+                          ? " · installed"
+                          : " · not found"
                         : "";
                   return {
                     value: c,
@@ -995,8 +941,7 @@ export function LaTeXSettingsDialog({
 
               {(settings.compiler === "latexmk" || settings.compiler === "auto") && (
                 <SelectField
-                  label="Latexmk Engine"
-                  description="Underlying engine passed to latexmk"
+                  label="latexmk engine"
                   value={settings.latexmkEngine}
                   onChange={(v) => onUpdateSettings({ latexmkEngine: v as LatexmkEngine })}
                   options={[
@@ -1007,14 +952,10 @@ export function LaTeXSettingsDialog({
                 />
               )}
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between gap-4 py-2">
                 <div>
-                  <span className="text-sm font-medium text-foreground-secondary">
-                    Auto-Compile Live Preview
-                  </span>
-                  <p className="text-xs text-muted mt-0.5">
-                    Automatically recompile after edits or AI modifications
-                  </p>
+                  <span className={ROW_LABEL}>Auto-compile live preview</span>
+                  <p className={ROW_HINT}>Recompile after your edits and agent changes</p>
                 </div>
                 <Switch
                   checked={settings.autoCompile}
@@ -1024,7 +965,7 @@ export function LaTeXSettingsDialog({
 
               {settings.autoCompile && (
                 <SelectField
-                  label="Auto-Compile Delay"
+                  label="Auto-compile delay"
                   value={settings.autoCompileDelayMs}
                   onChange={(v) =>
                     onUpdateSettings({
@@ -1040,13 +981,12 @@ export function LaTeXSettingsDialog({
                 />
               )}
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between gap-4 py-2">
                 <div>
-                  <span className="text-sm font-medium text-foreground-secondary">
-                    Shell Escape (-shell-escape)
-                  </span>
-                  <p className="text-xs text-muted mt-0.5">
-                    Required for packages like minted or external tools (use on trusted repos)
+                  <span className={ROW_LABEL}>Shell escape</span>
+                  <p className={ROW_HINT}>
+                    <code className="font-mono">-shell-escape</code>, needed for minted and similar
+                    packages. Enable only for trusted projects.
                   </p>
                 </div>
                 <Switch
@@ -1055,12 +995,9 @@ export function LaTeXSettingsDialog({
                 />
               </div>
 
-              <div className="py-2 space-y-1.5">
-                <label
-                  htmlFor="latex-custom-args"
-                  className="text-sm font-medium text-foreground-secondary block"
-                >
-                  Extra Compiler Arguments
+              <div className="space-y-1.5 py-2">
+                <label htmlFor="latex-custom-args" className={`${ROW_LABEL} block`}>
+                  Extra compiler arguments
                 </label>
                 <input
                   id="latex-custom-args"
@@ -1072,16 +1009,13 @@ export function LaTeXSettingsDialog({
                     })
                   }
                   placeholder="-halt-on-error"
-                  className="w-full px-3 py-2 text-sm border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono bg-background"
+                  className={`${AGENT_INPUT} font-mono`}
                 />
               </div>
 
-              <div className="py-2 space-y-1.5">
-                <label
-                  htmlFor="latex-custom-path"
-                  className="text-sm font-medium text-foreground-secondary block"
-                >
-                  Custom Compiler Binary Path (optional)
+              <div className="space-y-1.5 py-2">
+                <label htmlFor="latex-custom-path" className={`${ROW_LABEL} block`}>
+                  Custom compiler path
                 </label>
                 <input
                   id="latex-custom-path"
@@ -1093,17 +1027,15 @@ export function LaTeXSettingsDialog({
                     })
                   }
                   placeholder="/Library/TeX/texbin/latexmk"
-                  className="w-full px-3 py-2 text-sm border border-border hover:border-border-dark focus:outline-none focus:border-foreground font-mono bg-background"
+                  className={`${AGENT_INPUT} font-mono`}
                 />
               </div>
 
               {onCleanAuxFiles && (
-                <div className="py-2 flex items-center justify-between border-t border-border mt-2 pt-3">
+                <div className="flex items-center justify-between gap-4 py-2">
                   <div>
-                    <span className="text-sm font-medium text-foreground-secondary">
-                      Auxiliary Files
-                    </span>
-                    <p className="text-xs text-muted mt-0.5">
+                    <span className={ROW_LABEL}>Auxiliary files</span>
+                    <p className={ROW_HINT}>
                       Remove .aux, .log, .fls, .fdb_latexmk, .toc, .bbl, etc.
                     </p>
                   </div>
@@ -1118,16 +1050,16 @@ export function LaTeXSettingsDialog({
                         setCleaningAux(false);
                       }
                     }}
-                    className="btn btn-outline btn-sm"
+                    className="btn btn-secondary btn-sm shrink-0"
                   >
-                    {cleaningAux ? "Cleaning..." : "Clean Aux Files"}
+                    {cleaningAux ? "Cleaning…" : "Clean aux files"}
                   </button>
                 </div>
               )}
 
               <SectionHeader>Git</SectionHeader>
 
-              <div className="flex items-center justify-between py-2">
+              <div className="flex items-center justify-between gap-4 py-2">
                 <div className="flex items-center gap-3">
                   <div
                     className={`size-8 rounded-lg flex items-center justify-center transition-colors ${
@@ -1157,18 +1089,14 @@ export function LaTeXSettingsDialog({
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground-secondary">
-                        Auto fetch
-                      </span>
+                      <span className={ROW_LABEL}>Auto fetch</span>
                       {editorSettings.gitAutoFetchEnabled && (
                         <span className="shrink-0 rounded-full bg-success-bg px-2 py-0.5 text-[11px] font-medium text-success">
                           Active
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted mt-0.5">
-                      Periodically sync remote refs in background
-                    </p>
+                    <p className={ROW_HINT}>Fetch remote refs in the background</p>
                   </div>
                 </div>
                 <Switch
@@ -1178,7 +1106,7 @@ export function LaTeXSettingsDialog({
               </div>
 
               {editorSettings.gitAutoFetchEnabled && (
-                <div className="pl-4 border-l-2 border-border ml-1">
+                <div className="ml-1 border-l border-border pl-4">
                   <SelectField
                     label="Interval"
                     value={editorSettings.gitAutoFetchIntervalSeconds}
@@ -1280,7 +1208,6 @@ export function LaTeXSettingsDialog({
                     <h3 className={AGENT_HEADING}>Session defaults</h3>
 
                     <SelectField
-                      inset
                       label="Default provider"
                       value={agentSettings.defaultProvider}
                       onChange={(v) =>
@@ -1295,7 +1222,6 @@ export function LaTeXSettingsDialog({
                     />
 
                     <SelectField
-                      inset
                       label="Default interaction mode"
                       value={agentSettings.defaultInteractionMode}
                       onChange={(v) =>
@@ -1308,7 +1234,6 @@ export function LaTeXSettingsDialog({
                     />
 
                     <SelectField
-                      inset
                       label="Default permission policy"
                       value={agentSettings.defaultRuntimeMode}
                       onChange={(v) =>
