@@ -63,6 +63,14 @@ fn now_ms() -> i64 {
 
 // ---------- pure parsing ----------
 
+fn digits(s: &str, r: std::ops::Range<usize>) -> Option<i64> {
+    let part = s.get(r)?;
+    if part.is_empty() || !part.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    part.parse().ok()
+}
+
 /// Parses RFC 3339 (`2026-11-24T13:44:01.16-07:00`, `...Z`) into epoch milliseconds.
 pub fn parse_rfc3339_ms(s: &str) -> Option<i64> {
     let s = s.trim();
@@ -70,7 +78,10 @@ pub fn parse_rfc3339_ms(s: &str) -> Option<i64> {
     if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || (b[10] != b'T' && b[10] != b't') {
         return None;
     }
-    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    if b[13] != b':' || b[16] != b':' {
+        return None;
+    }
+    let num = |r: std::ops::Range<usize>| digits(s, r);
     let (y, mo, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
     let (h, mi, se) = (num(11..13)?, num(14..16)?, num(17..19)?);
     if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || se > 60 {
@@ -93,9 +104,14 @@ pub fn parse_rfc3339_ms(s: &str) -> Option<i64> {
     }
     let offset_secs = match s.get(i..)? {
         "Z" | "z" => 0,
-        tz if tz.len() == 6 && (tz.starts_with('+') || tz.starts_with('-')) => {
-            let oh: i64 = tz.get(1..3)?.parse().ok()?;
-            let om: i64 = tz.get(4..6)?.parse().ok()?;
+        tz if tz.len() == 6
+            && (tz.starts_with('+') || tz.starts_with('-'))
+            && tz.as_bytes()[3] == b':' =>
+        {
+            let (oh, om) = (digits(tz, 1..3)?, digits(tz, 4..6)?);
+            if oh > 23 || om > 59 {
+                return None;
+            }
             let sign = if tz.starts_with('-') { -1 } else { 1 };
             sign * (oh * 3600 + om * 60)
         }
@@ -139,7 +155,7 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
 
 fn hex_decode(input: &str) -> Option<Vec<u8>> {
     let input = input.trim();
-    if input.len() % 2 != 0 {
+    if input.len() % 2 != 0 || !input.bytes().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
     (0..input.len())
@@ -161,10 +177,22 @@ pub fn decode_go_keyring_secret(raw: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct CliToken {
     pub access_token: String,
     pub expiry_ms: Option<i64>,
+    /// `consumer` for personal Google sign-ins; other tiers are metered on prod.
+    pub auth_method: Option<String>,
+}
+
+impl std::fmt::Debug for CliToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CliToken")
+            .field("access_token", &"<redacted>")
+            .field("expiry_ms", &self.expiry_ms)
+            .field("auth_method", &self.auth_method)
+            .finish()
+    }
 }
 
 /// Decodes the agy 1.5.x CLI token JSON: `{"token":{"access_token","expiry",...}}`.
@@ -181,6 +209,10 @@ pub fn parse_cli_token(text: &str) -> Option<CliToken> {
             .get("expiry")
             .and_then(Value::as_str)
             .and_then(parse_rfc3339_ms),
+        auth_method: v
+            .get("auth_method")
+            .and_then(Value::as_str)
+            .map(str::to_string),
     })
 }
 
@@ -272,7 +304,7 @@ pub fn summary_windows(response: &Value, requested_at: i64) -> Vec<RateLimitWind
                 .and_then(parse_rfc3339_ms);
             // Untouched buckets report a rolling full-window reset; there is nothing to count down.
             let untouched = bucket.get("remainingFraction").and_then(Value::as_f64) == Some(1.0)
-                && bucket.get("description").is_none()
+                && bucket.get("description").is_none_or(Value::is_null)
                 && match (mins, reset) {
                     (Some(m), Some(r)) => (r - requested_at - (m as i64) * 60_000).abs() <= 60_000,
                     _ => false,
@@ -398,7 +430,10 @@ fn merge(responses: Vec<Vec<RateLimitWindow>>) -> Vec<RateLimitWindow> {
 // ---------- IO ----------
 
 enum Credential {
-    Cli(String),
+    Cli {
+        access_token: String,
+        prod_first: bool,
+    },
     Legacy {
         access_token: String,
         project_id: Option<String>,
@@ -432,6 +467,7 @@ async fn read_keyring_secret() -> Option<String> {
         ])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .output()
         .await
         .ok()?;
@@ -440,6 +476,7 @@ async fn read_keyring_secret() -> Option<String> {
         .args(["lookup", "service", "gemini", "username", "antigravity"])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .output()
         .await
         .ok()?;
@@ -452,19 +489,26 @@ Add-Type -Namespace OxCred -Name N -MemberDefinition @'
 [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool CredReadW(string t, int ty, int f, out IntPtr c);
 [DllImport("advapi32.dll")] public static extern void CredFree(IntPtr c);
 '@
+if([IntPtr]::Size -ne 8){exit 1}
 $p=[IntPtr]::Zero
 if(-not [OxCred.N]::CredReadW('gemini:antigravity',1,0,[ref]$p)){exit 1}
-try{$size=[Runtime.InteropServices.Marshal]::ReadInt32($p,32);$blob=[Runtime.InteropServices.Marshal]::ReadIntPtr($p,40);$b=New-Object byte[] $size;[Runtime.InteropServices.Marshal]::Copy($blob,$b,0,$size);[Console]::Out.Write([Text.Encoding]::UTF8.GetString($b))}finally{[OxCred.N]::CredFree($p)}"#;
-        let mut cmd = tokio::process::Command::new("powershell.exe");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+try{
+$size=[Runtime.InteropServices.Marshal]::ReadInt32($p,32)
+$blob=[Runtime.InteropServices.Marshal]::ReadIntPtr($p,40)
+if($size -le 0 -or $blob -eq [IntPtr]::Zero){exit 1}
+$b=New-Object byte[] $size
+[Runtime.InteropServices.Marshal]::Copy($blob,$b,0,$size)
+$o=[Console]::OpenStandardOutput();$o.Write($b,0,$b.Length);$o.Flush()
+}finally{[OxCred.N]::CredFree($p)}"#;
+        // `util::command` hides the console window.
+        crate::commands::util::command("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
             .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        #[allow(unused_imports)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        cmd.output().await.ok()?
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await
+            .ok()?
     };
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     return None;
@@ -527,6 +571,8 @@ async fn load_credential(client: &reqwest::Client) -> Result<Option<Credential>,
             let access_token = resp
                 .get("access_token")
                 .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
                 .ok_or("sign-in refresh failed")?
                 .to_string();
             return Ok(Some(Credential::Legacy {
@@ -553,7 +599,15 @@ async fn load_credential(client: &reqwest::Client) -> Result<Option<Credential>,
     if !cli_token_is_fresh(&token, now_ms()) {
         return Err("sign-in expired — start an Antigravity turn to renew it".into());
     }
-    Ok(Some(Credential::Cli(token.access_token)))
+    // Consumer tiers are metered on the daily host, GCP-terms/enterprise tiers on prod.
+    let prod_first = token
+        .auth_method
+        .as_deref()
+        .is_some_and(|m| !m.is_empty() && m != "consumer");
+    Ok(Some(Credential::Cli {
+        access_token: token.access_token,
+        prod_first,
+    }))
 }
 
 fn form_encode(pairs: &[(&str, &str)]) -> String {
@@ -593,6 +647,7 @@ async fn fetch_windows(
     access_token: &str,
     body: &Value,
     operation: &str,
+    prod_first: bool,
     parse: fn(&Value, i64) -> Vec<RateLimitWindow>,
 ) -> (Vec<RateLimitWindow>, Option<String>) {
     let call = |endpoint: &'static str| {
@@ -611,10 +666,14 @@ async fn fetch_windows(
         (Err(e), Err(_)) => Some(e.clone()),
         _ => None,
     };
-    (
-        merge(vec![daily.unwrap_or_default(), prod.unwrap_or_default()]),
-        err,
-    )
+    let (daily, prod) = (daily.unwrap_or_default(), prod.unwrap_or_default());
+    // The metered host's reading of a bucket wins.
+    let ordered = if prod_first {
+        vec![prod, daily]
+    } else {
+        vec![daily, prod]
+    };
+    (merge(ordered), err)
 }
 
 async fn probe_uncached() -> ProbeOutcome {
@@ -625,10 +684,13 @@ async fn probe_uncached() -> ProbeOutcome {
     else {
         return ProbeOutcome::Unknown("HTTP client unavailable".into());
     };
-    let (token, body) = match load_credential(&client).await {
+    let (token, body, prod_first) = match load_credential(&client).await {
         Ok(None) => return ProbeOutcome::NoSignIn,
         Err(reason) => return ProbeOutcome::Unknown(reason),
-        Ok(Some(Credential::Cli(t))) => (t, json!({})),
+        Ok(Some(Credential::Cli {
+            access_token,
+            prod_first,
+        })) => (access_token, json!({}), prod_first),
         Ok(Some(Credential::Legacy {
             access_token,
             project_id,
@@ -637,6 +699,7 @@ async fn probe_uncached() -> ProbeOutcome {
             project_id
                 .map(|p| json!({ "project": p }))
                 .unwrap_or_else(|| json!({})),
+            false,
         ),
     };
     let (summary, err) = fetch_windows(
@@ -644,15 +707,21 @@ async fn probe_uncached() -> ProbeOutcome {
         &token,
         &body,
         "retrieveUserQuotaSummary",
+        prod_first,
         summary_windows,
     )
     .await;
     if !summary.is_empty() {
         return ProbeOutcome::Windows(order_windows(summary));
     }
-    let (models, err2) = fetch_windows(&client, &token, &body, "fetchAvailableModels", |v, _| {
-        model_windows(v)
-    })
+    let (models, err2) = fetch_windows(
+        &client,
+        &token,
+        &body,
+        "fetchAvailableModels",
+        prod_first,
+        |v, _| model_windows(v),
+    )
     .await;
     if !models.is_empty() {
         return ProbeOutcome::Windows(order_windows(models));
@@ -673,12 +742,23 @@ fn cache() -> &'static Mutex<Option<Cache>> {
     CACHE.get_or_init(|| Mutex::new(None))
 }
 
-/// Probes Antigravity quota, reusing a result younger than a minute. Concurrent callers
+/// Unknown/no-sign-in results are kept only briefly, so a renewed sign-in shows up quickly.
+const ERROR_CACHE_TTL_MS: i64 = 5_000;
+
+fn cache_fresh(c: &Cache, now: i64) -> bool {
+    let ttl = match c.outcome {
+        ProbeOutcome::Windows(_) => CACHE_TTL_MS,
+        _ => ERROR_CACHE_TTL_MS,
+    };
+    now - c.at < ttl
+}
+
+/// Probes Antigravity quota, reusing a recent result unless `force`. Concurrent callers
 /// share one in-flight probe through the cache lock. Bounded by `PROBE_TIMEOUT`.
-pub async fn probe() -> ProbeOutcome {
+pub async fn probe(force: bool) -> ProbeOutcome {
     let mut guard = cache().lock().await;
     if let Some(c) = guard.as_ref() {
-        if now_ms() - c.at < CACHE_TTL_MS {
+        if !force && cache_fresh(c, now_ms()) {
             return c.outcome.clone();
         }
     }
@@ -694,8 +774,8 @@ pub async fn probe() -> ProbeOutcome {
 
 /// Snapshot for the provider-status call. Never waits longer than `STATUS_WAIT`; a probe
 /// that runs over keeps going in the background and fills the cache for the next refresh.
-pub async fn status_snapshot() -> RateLimitsSnapshot {
-    let task = tokio::spawn(probe());
+pub async fn status_snapshot(force: bool) -> RateLimitsSnapshot {
+    let task = tokio::spawn(probe(force));
     let outcome = match timeout(STATUS_WAIT, task).await {
         Ok(Ok(o)) => o,
         Ok(Err(_)) => ProbeOutcome::Unknown("quota probe failed".into()),
@@ -742,6 +822,16 @@ mod tests {
         );
         assert_eq!(parse_rfc3339_ms(&iso(REQ)), Some(REQ));
         assert_eq!(parse_rfc3339_ms("not a date"), None);
+        for bad in [
+            "2026-11-24T13x44y01Z",
+            "2026-11-24T13:44:01+01x00",
+            "2026-11-24T-5:-1:-1Z",
+            "+999-01-01T00:00:00Z",
+            "2026-11-24T13:44:01+99:00",
+            "2026-11-24T13:44:01+-1:00",
+        ] {
+            assert_eq!(parse_rfc3339_ms(bad), None, "{bad}");
+        }
         assert_eq!(parse_rfc3339_ms("2026-13-01T00:00:00Z"), None);
     }
 
@@ -784,13 +874,32 @@ mod tests {
     }
 
     #[test]
+    fn merge_prefers_earlier_endpoint() {
+        let w = |id: &str, pct: f64| RateLimitWindow {
+            id: id.into(),
+            label: id.into(),
+            used_percent: Some(pct),
+            status: None,
+            window_duration_mins: Some(300),
+            resets_at: None,
+        };
+        let merged = merge(vec![vec![w("a", 10.0)], vec![w("a", 90.0), w("b", 5.0)]]);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].used_percent, Some(10.0));
+    }
+
+    #[test]
     fn untouched_bucket_has_no_reset() {
         let resp = json!({
             "buckets": [
                 {"bucketId": "gemini-5h", "window": "5h", "remainingFraction": 1.0,
                  "resetTime": iso(REQ + 300 * 60_000 + 20_000)},
                 {"bucketId": "gemini-weekly", "window": "weekly", "remainingFraction": 1.0,
-                 "resetTime": iso(REQ + 2 * 86_400_000)}
+                 "resetTime": iso(REQ + 2 * 86_400_000)},
+                {"bucketId": "3p-5h", "window": "5h", "remainingFraction": 1.0, "description": null,
+                 "resetTime": iso(REQ + 300 * 60_000)},
+                {"bucketId": "3p-weekly", "window": "weekly", "remainingFraction": 1.0, "description": "",
+                 "resetTime": iso(REQ + 10080 * 60_000)}
             ]
         });
         let ws = summary_windows(&resp, REQ);
@@ -801,6 +910,14 @@ mod tests {
         );
         // A full bucket with a real (non-rolling) reset keeps it.
         assert_eq!(ws[1].resets_at, Some(REQ + 2 * 86_400_000));
+        assert_eq!(
+            ws[2].resets_at, None,
+            "null description counts as untouched"
+        );
+        assert!(
+            ws[3].resets_at.is_some(),
+            "a present description keeps the reset"
+        );
     }
 
     #[test]
@@ -891,7 +1008,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn antigravity_live() {
-        match probe_uncached().await {
+        match probe(true).await {
             ProbeOutcome::Windows(ws) => {
                 for w in ws {
                     println!(

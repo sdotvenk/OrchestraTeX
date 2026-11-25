@@ -96,7 +96,8 @@ describe("HarnessQuotaCard", () => {
     );
     expect(html).toContain("40%");
     expect(html).toContain("of Gemini · 5-hour window");
-    expect(html).toContain("Gemini · Weekly limit 62%");
+    expect(html).toContain("Gemini · Weekly limit</span>");
+    expect(html).toContain("62%");
     expect(html).toMatch(/\d+h/);
     expect(html).not.toMatch(/daily quota/i);
   });
@@ -114,6 +115,6 @@ describe("HarnessQuotaCard", () => {
     );
     expect(html).toContain("quota not reported");
     expect(html).toContain("Quota unknown: HTTP 500");
-    expect(html).not.toContain("0%");
+    expect(html).not.toMatch(/>\s*0%/);
   });
 });

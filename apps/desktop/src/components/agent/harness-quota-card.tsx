@@ -77,7 +77,7 @@ export function HarnessQuotaCard({
       </div>
 
       <div className="mt-2 flex items-center text-[11.5px] text-muted gap-2">
-        <span className="truncate">
+        <span className="truncate shrink-0 max-w-[50%]">
           {hasQuota
             ? (resetText ?? primaryWindow?.status ?? "Active")
             : isInstalled
@@ -85,8 +85,14 @@ export function HarnessQuotaCard({
               : "Configure in Settings → Agents"}
         </span>
         {secondaryWindow?.usedPercent !== null && secondaryWindow?.usedPercent !== undefined && (
-          <span className="ml-auto font-mono tabular-nums shrink-0">
-            {secondaryWindow.label} {Math.round(secondaryWindow.usedPercent)}%
+          <span
+            className="ml-auto flex min-w-0 items-baseline gap-1"
+            title={`${secondaryWindow.label} ${Math.round(secondaryWindow.usedPercent)}%`}
+          >
+            <span className="truncate">{secondaryWindow.label}</span>
+            <span className="font-mono tabular-nums shrink-0">
+              {Math.round(secondaryWindow.usedPercent)}%
+            </span>
           </span>
         )}
       </div>

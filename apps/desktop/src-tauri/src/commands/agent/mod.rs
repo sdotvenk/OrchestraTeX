@@ -191,6 +191,17 @@ pub async fn agent_refresh_rate_limits(
             );
             Ok(Some(snap))
         }
+        AgentProviderId::Antigravity => {
+            let snap = antigravity_usage::status_snapshot(true).await;
+            let _ = app.emit(
+                "agent-event",
+                AgentStreamEvent::RateLimitsUpdated {
+                    provider_id: AgentProviderId::Antigravity,
+                    rate_limits: snap.clone(),
+                },
+            );
+            Ok(Some(snap))
+        }
         _ => Ok(state
             .rate_limit_cache
             .lock()

@@ -904,7 +904,7 @@ pub async fn probe_acp(
 
     let rate_limits = if provider_id == AgentProviderId::Antigravity {
         Some(if authenticated {
-            super::antigravity_usage::status_snapshot().await
+            super::antigravity_usage::status_snapshot(false).await
         } else {
             super::antigravity_usage::ProbeOutcome::NoSignIn.into_snapshot(now_millis())
         })
