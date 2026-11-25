@@ -61,7 +61,7 @@ Every agent turn is a checkpoint you can diff, restore or revert hunk by hunk. S
 Limit windows, tokens by harness and model, cache share and the heaviest threads. Quotas a provider doesn't report are shown as unknown, not zero.
 
 <div align="center">
-<img src="docs/imgs/usage.png" alt="Usage and limits across Claude Code, Codex, Antigravity and Custom ACP" width="900">
+<img src="docs/imgs/usage-limits.png" alt="Usage and limits across Claude Code, Codex, Antigravity and Custom ACP" width="900">
 </div>
 
 ## Set up in one place
