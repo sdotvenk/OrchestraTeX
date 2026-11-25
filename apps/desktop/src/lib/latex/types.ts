@@ -82,8 +82,8 @@ Guidelines:
 4. If compilation fails, inspect errors and .log output and fix the root cause in the .tex sources`;
 
 export const COMPILER_DISPLAY_NAMES: Record<LaTeXCompiler, string> = {
-  auto: "Auto (Recommended)",
-  latexmk: "Latexmk",
+  auto: "Auto (recommended)",
+  latexmk: "latexmk",
   pdflatex: "pdfLaTeX",
   xelatex: "XeLaTeX",
   lualatex: "LuaLaTeX",

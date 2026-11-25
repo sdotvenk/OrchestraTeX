@@ -1202,7 +1202,7 @@ export function LaTeXSettingsDialog({
               {agentSettings && onUpdateAgentSettings && (
                 <>
                   <section
-                    className="space-y-2 border-t border-border py-3"
+                    className="space-y-0.5 border-t border-border py-3"
                     aria-label="Session defaults"
                   >
                     <h3 className={AGENT_HEADING}>Session defaults</h3>
