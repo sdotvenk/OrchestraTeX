@@ -125,6 +125,7 @@ pub fn run() {
             commands::latex::latex_get_distributions,
             commands::latex::latex_install,
             commands::latex::latex_open_download_page,
+            commands::update::check_for_update,
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

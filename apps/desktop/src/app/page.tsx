@@ -91,6 +91,7 @@ import { pathSync, pathsEqual } from "@/lib/path";
 import { useRecentProjects } from "@/lib/recent-projects";
 import { useTauriDaemon } from "@/lib/tauri";
 import type { RenameReferenceUpdate } from "@/lib/tauri/use-tauri-daemon";
+import { checkForUpdate } from "@/lib/update";
 
 const PdfViewer = dynamic(
   () => import("@/components/editor/pdf-viewer").then((mod) => mod.PdfViewer),
@@ -421,9 +422,9 @@ export default function EditorPage() {
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showLatexSettings, setShowLatexSettings] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<"build" | "editor" | "agents">(
-    "build",
-  );
+  const [settingsInitialTab, setSettingsInitialTab] = useState<
+    "build" | "editor" | "agents" | "about"
+  >("build");
 
   const [showLivePreview, setShowLivePreview] = useState(false);
   const [visualMode, setVisualMode] = useState(false);
@@ -3254,6 +3255,34 @@ export default function EditorPage() {
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
   }, [showUsageDashboard]);
+
+  // Automatic update checks (off by default): at launch and once a day, toast each new version once.
+  const autoCheckUpdates = editorSettings.settings.autoCheckUpdates;
+  const notifiedUpdateVersionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoCheckUpdates || !isTauri()) return;
+    let cancelled = false;
+    const run = () => {
+      checkForUpdate()
+        .then((result) => {
+          if (cancelled || !result.updateAvailable || !result.latestVersion) return;
+          if (notifiedUpdateVersionRef.current === result.latestVersion) return;
+          notifiedUpdateVersionRef.current = result.latestVersion;
+          toast(`OrchestraTeX ${result.latestVersion} is available`, "info", {
+            action: { label: "View release", onClick: () => window.open(result.releaseUrl) },
+          });
+        })
+        .catch(() => {
+          // Automatic checks fail quietly; "Check now" in Settings reports errors.
+        });
+    };
+    run();
+    const interval = window.setInterval(run, 24 * 60 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [autoCheckUpdates, toast]);
 
   // On macOS the traffic lights sit in the top bar; reserve room for them unless full screen hides them.
   const [macTrafficLightInset, setMacTrafficLightInset] = useState(false);

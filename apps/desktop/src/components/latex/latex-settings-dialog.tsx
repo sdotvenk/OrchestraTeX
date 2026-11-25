@@ -9,6 +9,7 @@ import {
 } from "@phosphor-icons/react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Tabs from "@radix-ui/react-tabs";
+import { getVersion } from "@tauri-apps/api/app";
 import { useCallback, useEffect, useId, useState } from "react";
 import { ProviderIcon } from "@/components/agent/icons";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -43,6 +44,7 @@ import {
   type LaTeXSettings,
   type LatexmkEngine,
 } from "@/lib/latex/types";
+import { checkForUpdate, RELEASES_URL, type UpdateCheckResult } from "@/lib/update";
 
 interface LaTeXSettingsDialogProps {
   open: boolean;
@@ -62,13 +64,14 @@ interface LaTeXSettingsDialogProps {
   ) => void;
   agentProviders?: ProviderStatus[];
   onRefreshAgentProviders?: () => Promise<unknown> | undefined;
-  initialTab?: "build" | "editor" | "agents";
+  initialTab?: "build" | "editor" | "agents" | "about";
 }
 
 const SETTINGS_TABS = [
   { id: "build", label: "Build" },
   { id: "editor", label: "Editor" },
   { id: "agents", label: "Agents" },
+  { id: "about", label: "About" },
 ] as const;
 
 const CLI_PATH_FIELDS = [
@@ -110,6 +113,104 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
     <div className="mt-3 border-t border-border pt-4 pb-1 first:mt-0 first:border-t-0 first:pt-1">
       <h3 className={AGENT_HEADING}>{children}</h3>
     </div>
+  );
+}
+
+function AboutTab({
+  autoCheck,
+  onAutoCheckChange,
+}: {
+  autoCheck: boolean;
+  onAutoCheckChange: (value: boolean) => void;
+}) {
+  const [version, setVersion] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<UpdateCheckResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getVersion()
+      .then(setVersion)
+      .catch(() => setVersion(null));
+  }, []);
+
+  const handleCheck = async () => {
+    setChecking(true);
+    setError(null);
+    try {
+      setResult(await checkForUpdate());
+    } catch (err) {
+      setResult(null);
+      setError(String(err));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  let status = "Not checked yet";
+  if (checking) status = "Checking…";
+  else if (error) status = error;
+  else if (result?.updateAvailable) status = `Version ${result.latestVersion} is available`;
+  else if (result?.latestVersion) status = "You're on the latest version";
+  else if (result) status = "No releases published yet";
+
+  return (
+    <>
+      <SectionHeader>OrchestraTeX</SectionHeader>
+      <div className="flex items-center justify-between gap-4 py-2">
+        <span className={ROW_LABEL}>Version</span>
+        <span className="font-mono text-xs text-muted">{version ?? "—"}</span>
+      </div>
+
+      <SectionHeader>Updates</SectionHeader>
+      <div className="flex items-center justify-between gap-4 py-2">
+        <div className="min-w-0">
+          <span className={ROW_LABEL}>Check for updates</span>
+          <p
+            className={`${ROW_HINT} ${error ? "text-error" : result?.updateAvailable ? "text-accent" : ""}`}
+            aria-live="polite"
+          >
+            {status}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {result?.updateAvailable && (
+            <a href={result.releaseUrl} className="btn btn-secondary btn-sm">
+              View release
+            </a>
+          )}
+          <button
+            type="button"
+            onClick={() => void handleCheck()}
+            disabled={checking}
+            className="btn btn-secondary btn-sm"
+          >
+            <ArrowsClockwiseIcon
+              className={`size-3.5 ${checking ? "animate-spin" : ""}`}
+              aria-hidden="true"
+            />
+            Check now
+          </button>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-4 py-2">
+        <div>
+          <span className={ROW_LABEL}>Check automatically</span>
+          <p className={ROW_HINT}>Checks GitHub at launch and once a day</p>
+        </div>
+        <Switch
+          checked={autoCheck}
+          onCheckedChange={onAutoCheckChange}
+          aria-label="Check for updates automatically"
+        />
+      </div>
+      <div className="flex items-center justify-between gap-4 py-2">
+        <span className={ROW_LABEL}>Releases</span>
+        <a href={RELEASES_URL} className="text-xs font-medium text-accent hover:underline">
+          Open on GitHub
+        </a>
+      </div>
+    </>
   );
 }
 
@@ -1293,6 +1394,17 @@ export function LaTeXSettingsDialog({
                   )}
                 </>
               )}
+            </Tabs.Content>
+
+            {/* ===== ABOUT TAB ===== */}
+            <Tabs.Content
+              value="about"
+              className="flex-1 overflow-y-auto border-y border-border bg-panel px-5 py-3"
+            >
+              <AboutTab
+                autoCheck={editorSettings.autoCheckUpdates}
+                onAutoCheckChange={(v) => onUpdateEditorSettings({ autoCheckUpdates: v })}
+              />
             </Tabs.Content>
           </Tabs.Root>
 

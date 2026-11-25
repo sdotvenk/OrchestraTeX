@@ -45,6 +45,9 @@ export interface EditorSettings {
   gitAutoFetchEnabled: boolean;
   gitAutoFetchIntervalSeconds: number;
 
+  // Updates
+  autoCheckUpdates: boolean;
+
   // Terminal
   terminalShellMode: TerminalShellMode;
   terminalShellPath: string;
@@ -93,6 +96,9 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   // Git
   gitAutoFetchEnabled: true,
   gitAutoFetchIntervalSeconds: 120,
+
+  // Updates (off by default; checking contacts GitHub)
+  autoCheckUpdates: false,
 
   // Terminal
   terminalShellMode: "auto",

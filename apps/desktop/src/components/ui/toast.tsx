@@ -7,14 +7,20 @@ import { createContext, useCallback, useContext, useState } from "react";
 
 type ToastType = "success" | "error" | "info";
 
+type ToastAction = {
+  label: string;
+  onClick: () => void;
+};
+
 type Toast = {
   id: string;
   message: string;
   type: ToastType;
+  action?: ToastAction;
 };
 
 type ToastContextType = {
-  toast: (message: string, type?: ToastType) => void;
+  toast: (message: string, type?: ToastType, options?: { action?: ToastAction }) => void;
   dismiss: (id: string) => void;
 };
 
@@ -23,16 +29,19 @@ const ToastContext = createContext<ToastContextType | undefined>(undefined);
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const toast = useCallback((message: string, type: ToastType = "info") => {
-    const id = Math.random().toString(36).substring(2, 9);
-    const newToast: Toast = { id, message, type };
+  const toast = useCallback(
+    (message: string, type: ToastType = "info", options?: { action?: ToastAction }) => {
+      const id = Math.random().toString(36).substring(2, 9);
+      const newToast: Toast = { id, message, type, action: options?.action };
 
-    setToasts((prev) => [...prev.slice(-2), newToast]);
+      setToasts((prev) => [...prev.slice(-2), newToast]);
 
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 3600);
-  }, []);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 3600);
+    },
+    [],
+  );
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -69,6 +78,18 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string)
       >
         <div className="flex-shrink-0">{Icon}</div>
         <p className="text-[12.5px] leading-snug flex-1">{toast.message}</p>
+        {toast.action && (
+          <button
+            type="button"
+            onClick={() => {
+              toast.action?.onClick();
+              onDismiss(toast.id);
+            }}
+            className="flex-shrink-0 rounded-full px-2.5 py-1 text-[12px] font-medium text-toast-fg hover:bg-white/10 transition-colors"
+          >
+            {toast.action.label}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => onDismiss(toast.id)}
