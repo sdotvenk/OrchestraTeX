@@ -50,7 +50,13 @@
     },
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "sidebarImage": "installer/nsis-sidebar.bmp",
+        "headerImage": "installer/nsis-header.bmp"
+      },
+      "wix": {
+        "bannerPath": "installer/wix-banner.bmp",
+        "dialogImagePath": "installer/wix-dialog.bmp"
       },
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
