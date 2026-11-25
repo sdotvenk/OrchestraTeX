@@ -1,7 +1,8 @@
 "use client";
 
 import type { FileNode, GitLogEntry, GitStatus } from "@orchestratex/shared";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AnimatePresence, motion, type PanInfo, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import Image from "next/image";
@@ -3232,6 +3233,30 @@ export default function EditorPage() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [showUsageDashboard]);
 
+  // On macOS the traffic lights sit in the top bar; reserve room for them unless full screen hides them.
+  const [macTrafficLightInset, setMacTrafficLightInset] = useState(false);
+  useEffect(() => {
+    if (!isTauri() || !/Mac/i.test(navigator.platform || navigator.userAgent)) return;
+    const appWindow = getCurrentWindow();
+    let disposed = false;
+    const sync = () => {
+      void appWindow
+        .isFullscreen()
+        .then((fullscreen) => {
+          if (!disposed) setMacTrafficLightInset(!fullscreen);
+        })
+        .catch(() => {
+          if (!disposed) setMacTrafficLightInset(true);
+        });
+    };
+    sync();
+    const unlisten = appWindow.onResized(sync);
+    return () => {
+      disposed = true;
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
   const handleCompileShortcut = useCallback(() => {
     void handleCompileWithDetection();
   }, [handleCompileWithDetection]);
@@ -3733,9 +3758,12 @@ export default function EditorPage() {
 
   return (
     <div className="h-dvh flex flex-col bg-bg text-foreground">
-      <header className="h-10 shrink-0 px-3.5 flex items-center justify-between gap-3 border-b border-border bg-bg select-none">
+      <header
+        data-tauri-drag-region
+        className={`h-10 shrink-0 ${macTrafficLightInset ? "pl-[78px]" : "pl-3.5"} pr-3.5 flex items-center justify-between gap-3 border-b border-border bg-bg select-none`}
+      >
         {/* Left: Brand + Project Switcher + Branch */}
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+        <div data-tauri-drag-region className="flex items-center gap-2.5 min-w-0 flex-1">
           {!isHomeVisible && (
             <button
               type="button"
@@ -3876,11 +3904,11 @@ export default function EditorPage() {
             </button>
           </div>
         ) : (
-          <div className="flex-1" />
+          <div data-tauri-drag-region className="flex-1" />
         )}
 
         {/* Right: Live Voice/Status + Panel Toggles */}
-        <div className="flex items-center justify-end gap-2 flex-1 shrink-0">
+        <div data-tauri-drag-region className="flex items-center justify-end gap-2 flex-1 shrink-0">
           {isHomeVisible && !showUsageDashboard && (
             <button
               type="button"

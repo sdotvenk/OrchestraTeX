@@ -142,6 +142,15 @@ pub fn run() {
                 .resizable(true)
                 .center();
 
+            // Draw the traffic lights inside the top bar (h-10, so y = 20 centres them).
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .traffic_light_position(tauri::LogicalPosition::new(14.0, 20.0));
+            }
+
             let opener_handle = app_handle.clone();
             builder = builder.on_navigation(move |url| {
                 if is_external_url(url, 3000) {
